@@ -41,7 +41,7 @@ func (cb *ChatBot) Chat(userInput string) (string, error) {
 	// 生成回复
 	result, err := cb.model.Generate(cb.ctx, messages)
 	if err != nil {
-		return "", fmt.Errorf("生成回复失败: %w", err)
+		return "", err
 	}
 
 	// 添加助手回复到上下文
@@ -61,23 +61,37 @@ func (cb *ChatBot) StreamChat(userInput string) error {
 	// 生成流式回复
 	streamReader, err := cb.model.Stream(cb.ctx, messages)
 	if err != nil {
-		return fmt.Errorf("生成流式回复失败: %w", err)
+		return err
 	}
 	defer streamReader.Close()
 
 	var response strings.Builder
+	reasoning, firstword := false, false
 	for {
 		message, err := streamReader.Recv()
 		if err != nil {
 			if err.Error() == "EOF" {
 				break
 			}
-			return fmt.Errorf("接收流式消息失败: %w", err)
+			return err
 		}
-		fmt.Print(message.Content)
+		if message.ReasoningContent != "" && !reasoning {
+			fmt.Print("Thinking:\n")
+			reasoning = true
+		}
+		if message.Content != "" && reasoning && !firstword {
+			fmt.Print("\n---\n")
+			firstword = true
+		}
+		if message.ReasoningContent != "" {
+			fmt.Print(message.ReasoningContent)
+		}
+		if message.Content != "" {
+			fmt.Print(message.Content)
+		}
 		response.WriteString(message.Content)
 	}
-	fmt.Println()
+	fmt.Print("\n\n")
 
 	// 添加完整的助手回复到上下文
 	cb.manager.AddMessage(schema.AssistantMessage(response.String(), nil))

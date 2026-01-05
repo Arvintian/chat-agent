@@ -62,7 +62,7 @@ var chatCmd = &cobra.Command{
 			}
 
 			switch input {
-			case "quit", "exit":
+			case "quit", "exit", "bye":
 				os.Stdout.WriteString("\nbye!\n")
 				return nil
 			default:
