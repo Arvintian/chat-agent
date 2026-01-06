@@ -4,6 +4,7 @@ import (
 	"chat-agent/pkg/chatbot"
 	"chat-agent/pkg/config"
 	"chat-agent/pkg/manager"
+	"chat-agent/pkg/mcp"
 	"chat-agent/pkg/providers"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/cloudwego/eino/adk"
+	"github.com/cloudwego/eino/compose"
 
 	"github.com/chzyer/readline"
 	"github.com/spf13/cobra"
@@ -37,16 +39,29 @@ var RootCmd = &cobra.Command{
 		if !ok {
 			return fmt.Errorf("chat preset does not exist: %s", chatName)
 		}
+		// chatmodel
 		providerFactory := providers.NewFactory(cfg)
 		model, err := providerFactory.CreateChatModel(cmd.Context(), preset.Model)
 		if err != nil {
 			return err
 		}
+		// mcp client
+		mcpclient := mcp.NewClient(cfg)
+		if err := mcpclient.Initialize(cmd.Context()); err != nil {
+			return err
+		}
+		// init agent
+		tools := mcpclient.GetToolListForServers(preset.MCPServers)
 		agent, err := adk.NewChatModelAgent(cmd.Context(), &adk.ChatModelAgentConfig{
 			Name:        chatName,
 			Description: preset.Desc,
 			Instruction: preset.System,
 			Model:       model,
+			ToolsConfig: adk.ToolsConfig{
+				ToolsNodeConfig: compose.ToolsNodeConfig{
+					Tools: tools,
+				},
+			},
 		})
 		if err != nil {
 			return err
@@ -55,7 +70,7 @@ var RootCmd = &cobra.Command{
 		chatbot := chatbot.NewChatBot(cmd.Context(), agent, manager)
 		// init readline
 		rl, err := readline.NewEx(&readline.Config{
-			Prompt:          "> ",
+			Prompt:          ">>> ",
 			HistoryFile:     "/tmp/chat-agent.tmp",
 			AutoComplete:    nil,
 			InterruptPrompt: "^C",
@@ -84,7 +99,9 @@ var RootCmd = &cobra.Command{
 			}
 
 			switch input {
-			case "/summary":
+			case "/clear":
+				manager.Clear()
+			case "/summary", "/history":
 				os.Stdout.WriteString(manager.GetSummary())
 				fmt.Println()
 			case "/quit", "/exit", "/bye":
