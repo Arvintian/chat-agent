@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -40,6 +41,7 @@ var RootCmd = &cobra.Command{
 			return err
 		}
 		chatName, _ := cmd.Flags().GetString("chat")
+		debug, _ := cmd.Flags().GetBool("debug")
 		preset, ok := cfg.Chats[chatName]
 		if !ok {
 			return fmt.Errorf("chat preset does not exist: %s", chatName)
@@ -76,8 +78,9 @@ var RootCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		// init chatbot
 		manager := manager.NewManager(preset.MaxMessages)
-		chatbot := chatbot.NewChatBot(cmd.Context(), agent, manager)
+		chatbot := chatbot.NewChatBot(context.WithValue(cmd.Context(), "debug", debug), agent, manager)
 		// init readline
 		rl, err := readline.NewEx(&readline.Config{
 			Prompt:          ">>> ",
@@ -147,5 +150,6 @@ func init() {
 
 	// Add global parameters
 	RootCmd.PersistentFlags().StringVar(&configPath, "config", defaultConfigPath, "Configuration file path")
+	RootCmd.PersistentFlags().BoolP("debug", "", false, "Enable debug mode")
 	RootCmd.Flags().StringP("chat", "c", "", "Specify chat preset name (from config file chats)")
 }

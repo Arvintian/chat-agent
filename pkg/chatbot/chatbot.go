@@ -49,7 +49,10 @@ func (cb *ChatBot) StreamChat(userInput string) error {
 	// 生成流式回复
 	streamReader := cb.runner.Run(cb.ctx, messages)
 
-	response, willToolCall := strings.Builder{}, false
+	response, willToolCall, debug := strings.Builder{}, false, false
+	if v, ok := cb.ctx.Value("debug").(bool); ok {
+		debug = v
+	}
 	for {
 		event, ok := streamReader.Next()
 		if !ok {
@@ -63,8 +66,12 @@ func (cb *ChatBot) StreamChat(userInput string) error {
 		}
 		if event.Output.MessageOutput.Role == schema.Tool {
 			fmt.Printf("ToolCall: (%s) Completed", event.Output.MessageOutput.ToolName)
-			fmt.Print("\n---\n")
-			continue
+			if !debug {
+				fmt.Print("\n---\n")
+				continue
+			} else {
+				fmt.Println()
+			}
 		}
 
 		response.Reset()
@@ -140,8 +147,12 @@ func (cb *ChatBot) StreamChat(userInput string) error {
 			fmt.Print(event.Output.MessageOutput.Message.Content)
 			response.WriteString(event.Output.MessageOutput.Message.Content)
 		}
-		if !willToolCall {
-			fmt.Print("\n\n")
+		if event.Output.MessageOutput.Role == schema.Tool {
+			fmt.Print("\n---\n")
+		} else {
+			if !willToolCall {
+				fmt.Print("\n\n")
+			}
 		}
 	}
 
