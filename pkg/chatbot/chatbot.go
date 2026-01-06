@@ -87,10 +87,11 @@ func (cb *ChatBot) StreamChat(userInput string) error {
 					return fmt.Errorf("error receiving message stream: %w", err)
 				}
 				if len(message.ToolCalls) > 0 {
-					for _, tc := range message.ToolCalls {
+					for i, tc := range message.ToolCalls {
 						index := tc.Index
 						if index == nil {
-							return fmt.Errorf("tool calls index is nil")
+							//Assuming the order of tool calls is sequential
+							index = &i
 						}
 						toolMap[*index] = append(toolMap[*index], &schema.Message{
 							Role: message.Role,

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/Arvintian/chat-agent/pkg/config"
+	"github.com/eino-contrib/ollama/api"
 
 	"github.com/cloudwego/eino-ext/components/model/ark"
 	"github.com/cloudwego/eino-ext/components/model/claude"
@@ -85,9 +86,10 @@ func (f *Factory) createGeminiModel(ctx context.Context, modelCfg *config.Model,
 // createQwenModel creates Qwen model
 func (f *Factory) createQwenModel(ctx context.Context, modelCfg *config.Model, providerCfg *config.Provider) (model.ToolCallingChatModel, error) {
 	cfg := &qwen.ChatModelConfig{
-		Model:   modelCfg.Model,
-		BaseURL: providerCfg.BaseURL,
-		APIKey:  providerCfg.APIKey,
+		Model:          modelCfg.Model,
+		BaseURL:        providerCfg.BaseURL,
+		APIKey:         providerCfg.APIKey,
+		EnableThinking: &modelCfg.Thinking,
 	}
 
 	if modelCfg.MaxTokens > 0 {
@@ -168,10 +170,24 @@ func (f *Factory) createOllamaModel(ctx context.Context, modelCfg *config.Model,
 	cfg := &ollama.ChatModelConfig{
 		Model:   modelCfg.Model,
 		BaseURL: providerCfg.BaseURL,
+		Thinking: &api.ThinkValue{
+			Value: modelCfg.Thinking,
+		},
 	}
-
-	// Ollama configuration is set through Options field
-	// Simplified handling here, may need to configure Options based on specific requirements
-
+	options := api.Options{}
+	if modelCfg.Temperature > 0 {
+		temp := float32(modelCfg.Temperature)
+		options.Temperature = temp
+	}
+	if modelCfg.TopP > 0 {
+		topP := float32(modelCfg.TopP)
+		options.TopP = topP
+	}
+	if modelCfg.TopK > 0 {
+		options.TopK = modelCfg.TopK
+	}
+	if modelCfg.Temperature > 0 || modelCfg.TopP > 0 || modelCfg.TopK > 0 {
+		cfg.Options = &options
+	}
 	return ollama.NewChatModel(ctx, cfg)
 }

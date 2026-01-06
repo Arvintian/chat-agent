@@ -38,6 +38,7 @@ type Provider struct {
 type Model struct {
 	Provider    string  `yaml:"provider"`
 	Model       string  `yaml:"model"`
+	Thinking    bool    `yaml:"thinking"`
 	MaxTokens   int     `yaml:"max_tokens,omitempty"`
 	Temperature float64 `yaml:"temperature,omitempty"`
 	TopP        float64 `yaml:"top_p,omitempty"`
