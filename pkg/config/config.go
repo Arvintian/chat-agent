@@ -19,11 +19,12 @@ type Config struct {
 }
 
 type Chat struct {
-	Desc        string   `yaml:"desc"`
-	System      string   `yaml:"system"`
-	Model       string   `yaml:"model"`
-	MaxMessages int      `yaml:"maxMessages"`
-	MCPServers  []string `yaml:"mcp_servers,omitempty"`
+	Desc          string   `yaml:"desc"`
+	System        string   `yaml:"system"`
+	Model         string   `yaml:"model"`
+	MaxMessages   int      `yaml:"maxMessages"`
+	MaxIterations int      `yaml:"maxIterations"`
+	MCPServers    []string `yaml:"mcp_servers,omitempty"`
 }
 
 // Provider represents AI provider configuration

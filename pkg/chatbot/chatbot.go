@@ -48,7 +48,7 @@ func (cb *ChatBot) StreamChat(userInput string) error {
 	// 生成流式回复
 	streamReader := cb.runner.Run(cb.ctx, messages)
 
-	var response strings.Builder
+	response, willToolCall := strings.Builder{}, false
 	for {
 		event, ok := streamReader.Next()
 		if !ok {
@@ -57,9 +57,19 @@ func (cb *ChatBot) StreamChat(userInput string) error {
 		if event.Err != nil {
 			return event.Err
 		}
+		if event.Output == nil {
+			continue
+		}
+		if event.Output.MessageOutput.Role == schema.Tool {
+			fmt.Printf("ToolCall: (%s) Completed", event.Output.MessageOutput.ToolName)
+			fmt.Print("\n---\n")
+			continue
+		}
+
 		response.Reset()
-		if event.Output.MessageOutput.IsStreaming {
+		if event.Output.MessageOutput.MessageStream != nil {
 			reasoning, firstword := false, false
+			toolMap := map[int][]*schema.Message{}
 			for {
 				message, err := event.Output.MessageOutput.MessageStream.Recv()
 				if err == io.EOF {
@@ -67,6 +77,28 @@ func (cb *ChatBot) StreamChat(userInput string) error {
 				}
 				if err != nil {
 					return fmt.Errorf("error receiving message stream: %w", err)
+				}
+				if len(message.ToolCalls) > 0 {
+					for _, tc := range message.ToolCalls {
+						index := tc.Index
+						if index == nil {
+							return fmt.Errorf("tool calls index is nil")
+						}
+						toolMap[*index] = append(toolMap[*index], &schema.Message{
+							Role: message.Role,
+							ToolCalls: []schema.ToolCall{
+								{
+									ID:    tc.ID,
+									Type:  tc.Type,
+									Index: tc.Index,
+									Function: schema.FunctionCall{
+										Name:      tc.Function.Name,
+										Arguments: tc.Function.Arguments,
+									},
+								},
+							},
+						})
+					}
 				}
 				if message.ReasoningContent != "" && !reasoning {
 					fmt.Print("Thinking:\n")
@@ -84,11 +116,32 @@ func (cb *ChatBot) StreamChat(userInput string) error {
 				}
 				response.WriteString(message.Content)
 			}
-		} else {
+			if len(toolMap) > 0 {
+				fmt.Println()
+				willToolCall = true
+			}
+			for _, msgs := range toolMap {
+				m, err := schema.ConcatMessages(msgs)
+				if err != nil {
+					return fmt.Errorf("ConcatMessage failed: %v", err)
+				}
+				fmt.Printf("ToolCall: (%s) %s", m.ToolCalls[0].Function.Name, m.ToolCalls[0].Function.Arguments)
+				fmt.Print("\n---\n")
+			}
+		} else if event.Output.MessageOutput.Message != nil {
+			if len(event.Output.MessageOutput.Message.ToolCalls) > 0 {
+				for _, tc := range event.Output.MessageOutput.Message.ToolCalls {
+					fmt.Printf("ToolCall: (%s) %s", tc.Function.Name, tc.Function.Arguments)
+					fmt.Print("\n---\n")
+				}
+				willToolCall = true
+			}
 			fmt.Print(event.Output.MessageOutput.Message.Content)
 			response.WriteString(event.Output.MessageOutput.Message.Content)
 		}
-		fmt.Print("\n\n")
+		if !willToolCall {
+			fmt.Print("\n\n")
+		}
 	}
 
 	cb.manager.AddMessage(schema.AssistantMessage(response.String(), nil))

@@ -23,6 +23,10 @@ var (
 	configPath string
 )
 
+const (
+	DefaultMaxIterations int = 20
+)
+
 // RootCmd represents the base command when called without any subcommands
 var RootCmd = &cobra.Command{
 	Use:   "chat-agent",
@@ -52,6 +56,10 @@ var RootCmd = &cobra.Command{
 		}
 		// init agent
 		tools := mcpclient.GetToolListForServers(preset.MCPServers)
+		maxIterations := DefaultMaxIterations
+		if preset.MaxIterations > 0 {
+			maxIterations = preset.MaxIterations
+		}
 		agent, err := adk.NewChatModelAgent(cmd.Context(), &adk.ChatModelAgentConfig{
 			Name:        chatName,
 			Description: preset.Desc,
@@ -62,6 +70,7 @@ var RootCmd = &cobra.Command{
 					Tools: tools,
 				},
 			},
+			MaxIterations: maxIterations,
 		})
 		if err != nil {
 			return err
@@ -71,7 +80,8 @@ var RootCmd = &cobra.Command{
 		// init readline
 		rl, err := readline.NewEx(&readline.Config{
 			Prompt:          ">>> ",
-			HistoryFile:     "/tmp/chat-agent.tmp",
+			HistoryFile:     filepath.Join(os.TempDir(), "chat-agent.history"),
+			HistoryLimit:    200,
 			AutoComplete:    nil,
 			InterruptPrompt: "^C",
 			EOFPrompt:       "exit",
