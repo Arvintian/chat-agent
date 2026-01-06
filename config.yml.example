@@ -1,0 +1,46 @@
+# Model provider configuration
+providers:
+  deepseek:
+    type: deepseek
+    base_url: https://api.deepseek.com
+    api_key: sk-secret-token
+
+# Model configuration
+models:
+  deepseek-chat:
+    provider: deepseek
+    model: deepseek-chat
+    temperature: 0.8
+  deepseek-reasoner:
+    provider: deepseek
+    model: deepseek-reasoner
+    temperature: 0.8
+
+#Chat preset configuration
+chats:
+  default:
+    model: deepseek-chat
+    desc: "A friendly assistant"
+    system: "You are a helpful search assistant."
+  default-mcp:
+    model: deepseek-chat
+    desc: "A friendly assistant"
+    system: "You are a helpful search assistant."
+    mcp_servers:
+      - web_search
+  reasoner:
+    model: deepseek-reasoner
+    desc: "A friendly assistant"
+    system: "You are a helpful search assistant."
+  reasoner-mcp:
+    model: deepseek-reasoner
+    desc: "A friendly assistant"
+    system: "You are a helpful search assistant."
+    mcp_servers:
+      - web_search
+
+# MCP server configuration
+mcp_servers:
+  web_search:
+    type: sse
+    url: "https://your-mcp-host"
