@@ -6,6 +6,10 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
+const (
+	DefaultMaxMessages int = 20
+)
+
 // Manager 管理对话上下文，提供智能的上下文管理功能
 type Manager struct {
 	// messages 存储对话历史消息
@@ -13,17 +17,16 @@ type Manager struct {
 
 	// maxMessages 限制上下文中的最大消息数
 	maxMessages int
-
-	// systemPrompt 系统提示信息
-	systemPrompt string
 }
 
 // NewManager 创建一个新的Manager实例
-func NewManager(systemPrompt string, maxMessages int) *Manager {
+func NewManager(maxMessages int) *Manager {
+	if maxMessages <= 0 {
+		maxMessages = DefaultMaxMessages
+	}
 	return &Manager{
-		messages:     make([]*schema.Message, 0),
-		maxMessages:  maxMessages,
-		systemPrompt: systemPrompt,
+		messages:    make([]*schema.Message, 0),
+		maxMessages: maxMessages,
 	}
 }
 
@@ -77,9 +80,6 @@ func (m *Manager) Clear() {
 // Init 初始化上下文，添加系统提示
 func (m *Manager) Init() {
 	m.Clear()
-	if m.systemPrompt != "" {
-		m.messages = append(m.messages, schema.SystemMessage(m.systemPrompt))
-	}
 }
 
 // GetSummary 获取对话摘要

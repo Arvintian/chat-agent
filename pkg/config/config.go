@@ -19,6 +19,7 @@ type Config struct {
 }
 
 type Chat struct {
+	Desc        string   `yaml:"desc"`
 	System      string   `yaml:"system"`
 	Model       string   `yaml:"model"`
 	MaxMessages int      `yaml:"maxMessages"`

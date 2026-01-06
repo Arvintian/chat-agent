@@ -8,18 +8,30 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
+
+	"github.com/cloudwego/eino/adk"
 
 	"github.com/chzyer/readline"
 	"github.com/spf13/cobra"
 )
 
-var chatCmd = &cobra.Command{
-	Use:   "chat",
-	Short: "Start interactive chat session",
-	Long:  `Start an interactive agent session with the llm.`,
+var (
+	configPath string
+)
+
+// RootCmd represents the base command when called without any subcommands
+var RootCmd = &cobra.Command{
+	Use:   "chat-agent",
+	Short: "Chat Agent CLI tool",
+	Long:  `A command line interface for llm agent`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg := config.GetConfig()
+		// Load configuration file
+		cfg, err := config.LoadConfig(configPath)
+		if err != nil {
+			return err
+		}
 		chatName, _ := cmd.Flags().GetString("chat")
 		preset, ok := cfg.Chats[chatName]
 		if !ok {
@@ -30,7 +42,17 @@ var chatCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		chatbot := chatbot.NewChatBot(cmd.Context(), model, manager.NewManager(preset.System, preset.MaxMessages))
+		agent, err := adk.NewChatModelAgent(cmd.Context(), &adk.ChatModelAgentConfig{
+			Name:        chatName,
+			Description: preset.Desc,
+			Instruction: preset.System,
+			Model:       model,
+		})
+		if err != nil {
+			return err
+		}
+		manager := manager.NewManager(preset.MaxMessages)
+		chatbot := chatbot.NewChatBot(cmd.Context(), agent, manager)
 		// init readline
 		rl, err := readline.NewEx(&readline.Config{
 			Prompt:          "> ",
@@ -62,7 +84,10 @@ var chatCmd = &cobra.Command{
 			}
 
 			switch input {
-			case "quit", "exit", "bye":
+			case "/summary":
+				os.Stdout.WriteString(manager.GetSummary())
+				fmt.Println()
+			case "/quit", "/exit", "/bye":
 				os.Stdout.WriteString("\nbye!\n")
 				return nil
 			default:
@@ -72,12 +97,27 @@ var chatCmd = &cobra.Command{
 				}
 			}
 		}
-		return nil
+
+		return err
 	},
 }
 
+func Execute() {
+	if err := RootCmd.Execute(); err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+}
+
 func init() {
-	// Add agent subcommand to root command
-	RootCmd.AddCommand(chatCmd)
-	chatCmd.Flags().StringP("chat", "c", "", "Specify chat preset name (from config file chats)")
+	// Get user home directory
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		homeDir = "."
+	}
+	defaultConfigPath := filepath.Join(homeDir, ".chat-agent", "config.yml")
+
+	// Add global parameters
+	RootCmd.PersistentFlags().StringVar(&configPath, "config", defaultConfigPath, "Configuration file path")
+	RootCmd.Flags().StringP("chat", "c", "", "Specify chat preset name (from config file chats)")
 }

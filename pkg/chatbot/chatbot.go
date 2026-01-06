@@ -4,16 +4,19 @@ import (
 	"chat-agent/pkg/manager"
 	"context"
 	"fmt"
+	"io"
 	"strings"
 
-	"github.com/cloudwego/eino/components/model"
+	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 )
 
 // ChatBot 聊天机器人结构体
 type ChatBot struct {
-	// model 用于与大语言模型进行交互
-	model model.ToolCallingChatModel
+	runner *adk.Runner
+
+	// agent 用于与大语言模型进行交互
+	agent *adk.ChatModelAgent
 
 	// ctx 是应用的上下文，用于控制请求生命周期
 	ctx context.Context
@@ -22,32 +25,16 @@ type ChatBot struct {
 	manager *manager.Manager
 }
 
-func NewChatBot(ctx context.Context, model model.ToolCallingChatModel, manager *manager.Manager) ChatBot {
+func NewChatBot(ctx context.Context, agent *adk.ChatModelAgent, manager *manager.Manager) ChatBot {
 	return ChatBot{
-		ctx:     ctx,
-		model:   model,
+		ctx: ctx,
+		runner: adk.NewRunner(ctx, adk.RunnerConfig{
+			Agent:           agent,
+			EnableStreaming: true,
+		}),
+		agent:   agent,
 		manager: manager,
 	}
-}
-
-// Chat 进行普通聊天对话
-func (cb *ChatBot) Chat(userInput string) (string, error) {
-	// 添加用户消息到上下文
-	cb.manager.AddMessage(schema.UserMessage(userInput))
-
-	// 获取上下文消息
-	messages := cb.manager.GetMessages()
-
-	// 生成回复
-	result, err := cb.model.Generate(cb.ctx, messages)
-	if err != nil {
-		return "", err
-	}
-
-	// 添加助手回复到上下文
-	cb.manager.AddMessage(schema.AssistantMessage(result.Content, nil))
-
-	return result.Content, nil
 }
 
 // StreamChat 进行流式聊天对话
@@ -59,41 +46,51 @@ func (cb *ChatBot) StreamChat(userInput string) error {
 	messages := cb.manager.GetMessages()
 
 	// 生成流式回复
-	streamReader, err := cb.model.Stream(cb.ctx, messages)
-	if err != nil {
-		return err
-	}
-	defer streamReader.Close()
+	streamReader := cb.runner.Run(cb.ctx, messages)
 
 	var response strings.Builder
-	reasoning, firstword := false, false
 	for {
-		message, err := streamReader.Recv()
-		if err != nil {
-			if err.Error() == "EOF" {
-				break
+		event, ok := streamReader.Next()
+		if !ok {
+			break
+		}
+		if event.Err != nil {
+			return event.Err
+		}
+		response.Reset()
+		if event.Output.MessageOutput.IsStreaming {
+			reasoning, firstword := false, false
+			for {
+				message, err := event.Output.MessageOutput.MessageStream.Recv()
+				if err == io.EOF {
+					break
+				}
+				if err != nil {
+					return fmt.Errorf("error receiving message stream: %w", err)
+				}
+				if message.ReasoningContent != "" && !reasoning {
+					fmt.Print("Thinking:\n")
+					reasoning = true
+				}
+				if message.Content != "" && reasoning && !firstword {
+					fmt.Print("\n---\n")
+					firstword = true
+				}
+				if message.ReasoningContent != "" {
+					fmt.Print(message.ReasoningContent)
+				}
+				if message.Content != "" {
+					fmt.Print(message.Content)
+				}
+				response.WriteString(message.Content)
 			}
-			return err
+		} else {
+			fmt.Print(event.Output.MessageOutput.Message.Content)
+			response.WriteString(event.Output.MessageOutput.Message.Content)
 		}
-		if message.ReasoningContent != "" && !reasoning {
-			fmt.Print("Thinking:\n")
-			reasoning = true
-		}
-		if message.Content != "" && reasoning && !firstword {
-			fmt.Print("\n---\n")
-			firstword = true
-		}
-		if message.ReasoningContent != "" {
-			fmt.Print(message.ReasoningContent)
-		}
-		if message.Content != "" {
-			fmt.Print(message.Content)
-		}
-		response.WriteString(message.Content)
+		fmt.Print("\n\n")
 	}
-	fmt.Print("\n\n")
 
-	// 添加完整的助手回复到上下文
 	cb.manager.AddMessage(schema.AssistantMessage(response.String(), nil))
 
 	return nil
