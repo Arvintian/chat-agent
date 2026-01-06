@@ -1,11 +1,12 @@
 package main
 
 import (
-	"chat-agent/cmd"
-	"chat-agent/pkg/logger"
 	"os"
 	"os/signal"
 	"syscall"
+
+	"github.com/Arvintian/chat-agent/cmd"
+	"github.com/Arvintian/chat-agent/pkg/logger"
 )
 
 func main() {

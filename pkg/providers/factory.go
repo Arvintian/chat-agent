@@ -1,9 +1,10 @@
 package providers
 
 import (
-	"chat-agent/pkg/config"
 	"context"
 	"fmt"
+
+	"github.com/Arvintian/chat-agent/pkg/config"
 
 	"github.com/cloudwego/eino/components/model"
 )

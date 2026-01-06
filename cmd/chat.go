@@ -1,16 +1,17 @@
 package cmd
 
 import (
-	"chat-agent/pkg/chatbot"
-	"chat-agent/pkg/config"
-	"chat-agent/pkg/manager"
-	"chat-agent/pkg/mcp"
-	"chat-agent/pkg/providers"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/Arvintian/chat-agent/pkg/chatbot"
+	"github.com/Arvintian/chat-agent/pkg/config"
+	"github.com/Arvintian/chat-agent/pkg/manager"
+	"github.com/Arvintian/chat-agent/pkg/mcp"
+	"github.com/Arvintian/chat-agent/pkg/providers"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/compose"

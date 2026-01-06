@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	"chat-agent/pkg/config"
+	"github.com/Arvintian/chat-agent/pkg/config"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/mark3labs/mcp-go/client"

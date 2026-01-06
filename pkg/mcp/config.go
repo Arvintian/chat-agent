@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"chat-agent/pkg/config"
+	"github.com/Arvintian/chat-agent/pkg/config"
 )
 
 // ValidateConfig validates MCP configuration

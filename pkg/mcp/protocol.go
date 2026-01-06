@@ -6,7 +6,7 @@ import (
 	"net/url"
 	"time"
 
-	"chat-agent/pkg/config"
+	"github.com/Arvintian/chat-agent/pkg/config"
 
 	"github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/client/transport"

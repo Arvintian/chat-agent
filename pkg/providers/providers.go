@@ -1,8 +1,9 @@
 package providers
 
 import (
-	"chat-agent/pkg/config"
 	"context"
+
+	"github.com/Arvintian/chat-agent/pkg/config"
 
 	"github.com/cloudwego/eino-ext/components/model/ark"
 	"github.com/cloudwego/eino-ext/components/model/claude"

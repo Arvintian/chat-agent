@@ -1,11 +1,12 @@
 package chatbot
 
 import (
-	"chat-agent/pkg/manager"
 	"context"
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/Arvintian/chat-agent/pkg/manager"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"

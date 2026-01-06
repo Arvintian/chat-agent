@@ -1,4 +1,4 @@
-module chat-agent
+module github.com/Arvintian/chat-agent
 
 go 1.25.5
 
