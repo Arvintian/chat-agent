@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/Arvintian/chat-agent/pkg/chatbot"
 	"github.com/Arvintian/chat-agent/pkg/config"
@@ -95,12 +97,24 @@ var RootCmd = &cobra.Command{
 		}
 		defer rl.Close()
 		// chat loop
+		var chatCancel context.CancelFunc = func() {}
+		sigChan := make(chan os.Signal, 1)
+		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+		go func() {
+			for {
+				<-sigChan
+				chatCancel() // ignore ctrl+c and break llm generate
+			}
+		}()
 		for {
 			line, err := rl.Readline()
 			if err != nil {
-				if err == io.EOF || err.Error() == "Interrupt" {
+				if err == io.EOF {
 					os.Stdout.WriteString("\nbye!\n")
 					break
+				}
+				if err.Error() == "Interrupt" {
+					continue
 				}
 				os.Stderr.WriteString("readline error: " + err.Error() + "\n")
 				return err
@@ -111,20 +125,22 @@ var RootCmd = &cobra.Command{
 			if input == "" {
 				continue
 			}
+			chatctx, cancel := context.WithCancel(cmd.Context())
+			chatCancel = cancel
 
 			switch input {
-			case "/clear":
+			case "/clear", "/k":
 				manager.Clear()
-			case "/summary", "/history":
+			case "/summary", "/history", "/i":
 				os.Stdout.WriteString(manager.GetSummary())
 				fmt.Println()
-			case "/quit", "/exit", "/bye":
+			case "/quit", "/exit", "/bye", "/q":
 				os.Stdout.WriteString("\nbye!\n")
 				return nil
 			default:
-				err = chatbot.StreamChat(input)
+				err = chatbot.StreamChat(chatctx, input)
 				if err != nil {
-					os.Stderr.WriteString("error: " + err.Error() + "\n")
+					os.Stderr.WriteString("\nerror: " + err.Error() + "\n")
 				}
 			}
 		}

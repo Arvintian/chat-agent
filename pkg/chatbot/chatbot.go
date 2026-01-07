@@ -39,7 +39,7 @@ func NewChatBot(ctx context.Context, agent *adk.ChatModelAgent, manager *manager
 }
 
 // StreamChat 进行流式聊天对话
-func (cb *ChatBot) StreamChat(userInput string) error {
+func (cb *ChatBot) StreamChat(ctx context.Context, userInput string) error {
 	// 添加用户消息到上下文
 	cb.manager.AddMessage(schema.UserMessage(userInput))
 
@@ -47,7 +47,7 @@ func (cb *ChatBot) StreamChat(userInput string) error {
 	messages := cb.manager.GetMessages()
 
 	// 生成流式回复
-	streamReader := cb.runner.Run(cb.ctx, messages)
+	streamReader := cb.runner.Run(ctx, messages)
 
 	response, willToolCall, debug := strings.Builder{}, false, false
 	if v, ok := cb.ctx.Value("debug").(bool); ok {
