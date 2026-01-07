@@ -15,6 +15,7 @@ import (
 	"github.com/Arvintian/chat-agent/pkg/manager"
 	"github.com/Arvintian/chat-agent/pkg/mcp"
 	"github.com/Arvintian/chat-agent/pkg/providers"
+	"github.com/Arvintian/chat-agent/pkg/utils"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/compose"
@@ -125,6 +126,16 @@ var RootCmd = &cobra.Command{
 			if input == "" {
 				continue
 			}
+
+			// exec terminal local start with /t, eg: `/t ls`
+			if strings.HasPrefix(input, "/t ") {
+				localcmd := strings.TrimSpace(strings.TrimPrefix(input, "/t"))
+				if err := utils.PopenStream(localcmd); err != nil {
+					os.Stderr.WriteString("exec local cmd error: " + err.Error() + "\n")
+				}
+				continue
+			}
+
 			chatctx, cancel := context.WithCancel(cmd.Context())
 			chatCancel = cancel
 
