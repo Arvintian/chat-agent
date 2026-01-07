@@ -10,16 +10,16 @@ const (
 	DefaultMaxMessages int = 20
 )
 
-// Manager 管理对话上下文，提供智能的上下文管理功能
+// Manager manages conversation context with intelligent context management capabilities
 type Manager struct {
-	// messages 存储对话历史消息
+	// messages stores the conversation history
 	messages []*schema.Message
 
-	// maxMessages 限制上下文中的最大消息数
+	// maxMessages limits the maximum number of messages in the context
 	maxMessages int
 }
 
-// NewManager 创建一个新的Manager实例
+// NewManager creates a new Manager instance
 func NewManager(maxMessages int) *Manager {
 	if maxMessages <= 0 {
 		maxMessages = DefaultMaxMessages
@@ -30,23 +30,23 @@ func NewManager(maxMessages int) *Manager {
 	}
 }
 
-// AddMessage 添加消息到上下文
+// AddMessage adds a message to the context
 func (m *Manager) AddMessage(message *schema.Message) {
 	m.messages = append(m.messages, message)
 
-	// 如果消息数量超过限制，移除最早的消息（保留系统消息）
+	// If the number of messages exceeds the limit, remove the oldest ones (preserve system messages)
 	if len(m.messages) > m.maxMessages {
 		m.trimMessages()
 	}
 }
 
-// trimMessages 修剪消息历史，保留系统消息和最近的消息
+// trimMessages trims the message history, preserving system messages and recent messages
 func (m *Manager) trimMessages() {
 	if len(m.messages) <= m.maxMessages {
 		return
 	}
 
-	// 保留系统消息
+	// Preserve system messages
 	var newMessages []*schema.Message
 	for _, msg := range m.messages {
 		if msg.Role == schema.System {
@@ -54,19 +54,19 @@ func (m *Manager) trimMessages() {
 		}
 	}
 
-	// 保留最近的消息（不包括系统消息）
+	// Keep recent messages (excluding system messages)
 	recentMessages := m.messages[len(m.messages)-m.maxMessages+len(newMessages):]
 	newMessages = append(newMessages, recentMessages...)
 
 	m.messages = newMessages
 }
 
-// GetMessages 获取当前上下文中的所有消息
+// GetMessages retrieves all messages in the current context
 func (m *Manager) GetMessages() []*schema.Message {
 	return m.messages
 }
 
-// Clear 清空上下文（保留系统消息）
+// Clear clears the context (preserves system messages)
 func (m *Manager) Clear() {
 	var systemMessages []*schema.Message
 	for _, msg := range m.messages {
@@ -77,15 +77,15 @@ func (m *Manager) Clear() {
 	m.messages = systemMessages
 }
 
-// Init 初始化上下文，添加系统提示
+// Init initializes the context by adding system prompts
 func (m *Manager) Init() {
 	m.Clear()
 }
 
-// GetSummary 获取对话摘要
+// GetSummary generates a summary of the conversation
 func (m *Manager) GetSummary() string {
 	if len(m.messages) == 0 {
-		return "空对话"
+		return "Empty conversation"
 	}
 
 	var userMessages, assistantMessages int
@@ -98,10 +98,10 @@ func (m *Manager) GetSummary() string {
 		}
 	}
 
-	return fmt.Sprintf("对话包含 %d 条用户消息和 %d 条助手回复", userMessages, assistantMessages)
+	return fmt.Sprintf("Conversation contains %d user messages and %d assistant replies", userMessages, assistantMessages)
 }
 
-// GetLastUserMessage 获取最后一条用户消息
+// GetLastUserMessage retrieves the last user message
 func (m *Manager) GetLastUserMessage() *schema.Message {
 	for i := len(m.messages) - 1; i >= 0; i-- {
 		if m.messages[i].Role == schema.User {
@@ -111,7 +111,7 @@ func (m *Manager) GetLastUserMessage() *schema.Message {
 	return nil
 }
 
-// GetLastAssistantMessage 获取最后一条助手消息
+// GetLastAssistantMessage retrieves the last assistant message
 func (m *Manager) GetLastAssistantMessage() *schema.Message {
 	for i := len(m.messages) - 1; i >= 0; i-- {
 		if m.messages[i].Role == schema.Assistant {
@@ -121,13 +121,13 @@ func (m *Manager) GetLastAssistantMessage() *schema.Message {
 	return nil
 }
 
-// SetMaxMessages 设置最大消息数量
+// SetMaxMessages sets the maximum number of messages
 func (m *Manager) SetMaxMessages(max int) {
 	m.maxMessages = max
 	m.trimMessages()
 }
 
-// GetContextSize 获取当前上下文大小（消息数量）
+// GetContextSize returns the current context size (number of messages)
 func (m *Manager) GetContextSize() int {
 	return len(m.messages)
 }
