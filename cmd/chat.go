@@ -46,6 +46,20 @@ var RootCmd = &cobra.Command{
 		chatName, _ := cmd.Flags().GetString("chat")
 		welcome, _ := cmd.Flags().GetString("welcome")
 		debug, _ := cmd.Flags().GetBool("debug")
+
+		//load default chat
+		if chatName == "" {
+			for name, item := range cfg.Chats {
+				if item.Default {
+					chatName = name
+					break
+				}
+			}
+		}
+		if chatName == "" {
+			return fmt.Errorf("Please specify the chat")
+		}
+
 		preset, ok := cfg.Chats[chatName]
 		if !ok {
 			return fmt.Errorf("chat preset does not exist: %s", chatName)

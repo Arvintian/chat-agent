@@ -25,6 +25,7 @@ type Chat struct {
 	MaxMessages   int      `yaml:"maxMessages"`
 	MaxIterations int      `yaml:"maxIterations"`
 	MCPServers    []string `yaml:"mcp_servers,omitempty"`
+	Default       bool     `yaml:"default"`
 }
 
 // Provider represents AI provider configuration
