@@ -44,11 +44,14 @@ var RootCmd = &cobra.Command{
 			return err
 		}
 		chatName, _ := cmd.Flags().GetString("chat")
+		welcome, _ := cmd.Flags().GetString("welcome")
 		debug, _ := cmd.Flags().GetBool("debug")
 		preset, ok := cfg.Chats[chatName]
 		if !ok {
 			return fmt.Errorf("chat preset does not exist: %s", chatName)
 		}
+		fmt.Printf("%s\n", welcome)
+		fmt.Printf("Enter /help to get help information\n")
 		// chatmodel
 		providerFactory := providers.NewFactory(cfg)
 		model, err := providerFactory.CreateChatModel(cmd.Context(), preset.Model)
@@ -140,6 +143,8 @@ var RootCmd = &cobra.Command{
 			chatCancel = cancel
 
 			switch input {
+			case "/help", "/h":
+				printHelp()
 			case "/clear", "/k":
 				manager.Clear()
 			case "/summary", "/history", "/i":
@@ -158,6 +163,15 @@ var RootCmd = &cobra.Command{
 
 		return err
 	},
+}
+
+func printHelp() {
+	fmt.Println("Available commands:")
+	fmt.Println("  /help    or /h   - Show this help message")
+	fmt.Println("  /history or /i   - Get conversation history")
+	fmt.Println("  /clear   or /k   - Clear conversation context")
+	fmt.Println("  /t cmd           - Execute local command")
+	fmt.Println("  /exit    or /q   - Exit program")
 }
 
 func Execute() {
@@ -179,4 +193,5 @@ func init() {
 	RootCmd.PersistentFlags().StringVar(&configPath, "config", defaultConfigPath, "Configuration file path")
 	RootCmd.PersistentFlags().BoolP("debug", "", false, "Enable debug mode")
 	RootCmd.Flags().StringP("chat", "c", "", "Specify chat preset name (from config file chats)")
+	RootCmd.Flags().StringP("welcome", "w", "Welcome to Chat-Agent Cli", "Specify chat welcome message")
 }
