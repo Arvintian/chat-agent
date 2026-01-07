@@ -57,7 +57,7 @@ var RootCmd = &cobra.Command{
 		}
 		// mcp client
 		mcpclient := mcp.NewClient(cfg)
-		if err := mcpclient.Initialize(cmd.Context()); err != nil {
+		if err := mcpclient.InitializeForChat(cmd.Context(), preset); err != nil {
 			return err
 		}
 		// init agent

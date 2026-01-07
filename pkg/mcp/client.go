@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sync"
 
 	"github.com/Arvintian/chat-agent/pkg/config"
@@ -40,6 +41,35 @@ func (c *Client) Initialize(ctx context.Context) error {
 
 	// Create clients for each configured MCP server
 	for serverName, serverConfig := range c.config.MCPServers {
+		client, err := c.createMCPClient(ctx, serverName, serverConfig)
+		if err != nil {
+			return NewMCPError("initialize", serverName, "", fmt.Errorf("failed to create MCP client: %w", err))
+		}
+		c.clients[serverName] = client
+	}
+
+	// Discover and register all tools
+	if err := c.discoverTools(ctx); err != nil {
+		return NewMCPError("initialize", "", "", fmt.Errorf("failed to discover MCP tools: %w", err))
+	}
+
+	return nil
+}
+
+func (c *Client) InitializeForChat(ctx context.Context, chat config.Chat) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Validate configuration
+	if err := ValidateConfig(c.config); err != nil {
+		return NewMCPError("initialize", "", "", fmt.Errorf("configuration validation failed: %w", err))
+	}
+
+	// Create clients for each configured MCP server
+	for serverName, serverConfig := range c.config.MCPServers {
+		if !slices.Contains(chat.MCPServers, serverName) {
+			continue
+		}
 		client, err := c.createMCPClient(ctx, serverName, serverConfig)
 		if err != nil {
 			return NewMCPError("initialize", serverName, "", fmt.Errorf("failed to create MCP client: %w", err))
