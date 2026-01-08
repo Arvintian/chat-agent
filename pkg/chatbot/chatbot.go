@@ -49,7 +49,7 @@ func (cb *ChatBot) StreamChat(ctx context.Context, userInput string) error {
 	// Generate streaming response
 	streamReader := cb.runner.Run(ctx, messages)
 
-	response, willToolCall, debug := strings.Builder{}, false, false
+	response, debug := strings.Builder{}, false
 	if v, ok := cb.ctx.Value("debug").(bool); ok {
 		debug = v
 	}
@@ -125,9 +125,8 @@ func (cb *ChatBot) StreamChat(ctx context.Context, userInput string) error {
 				}
 				response.WriteString(message.Content)
 			}
-			if len(toolMap) > 0 {
-				fmt.Println()
-				willToolCall = true
+			if len(toolMap) > 0 && !strings.HasSuffix(response.String(), "\n") {
+				fmt.Print("\n")
 			}
 			for _, msgs := range toolMap {
 				m, err := schema.ConcatMessages(msgs)
@@ -143,21 +142,20 @@ func (cb *ChatBot) StreamChat(ctx context.Context, userInput string) error {
 					fmt.Printf("ToolCall: (%s) %s", tc.Function.Name, tc.Function.Arguments)
 					fmt.Print("\n---\n")
 				}
-				willToolCall = true
 			}
 			fmt.Print(event.Output.MessageOutput.Message.Content)
 			response.WriteString(event.Output.MessageOutput.Message.Content)
 		}
 		if event.Output.MessageOutput.Role == schema.Tool {
 			fmt.Print("\n---\n")
-		} else {
-			if !willToolCall {
-				fmt.Print("\n\n")
-			}
 		}
 	}
 
-	cb.manager.AddMessage(schema.AssistantMessage(response.String(), nil))
+	message := response.String()
+	if !strings.HasSuffix(message, "\n") {
+		fmt.Print("\n")
+	}
+	cb.manager.AddMessage(schema.AssistantMessage(message, nil))
 
 	return nil
 }
