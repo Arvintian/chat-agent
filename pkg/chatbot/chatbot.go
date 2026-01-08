@@ -77,7 +77,7 @@ func (cb *ChatBot) StreamChat(ctx context.Context, userInput string) error {
 		response.Reset()
 		if event.Output.MessageOutput.MessageStream != nil {
 			reasoning, firstword := false, false
-			toolMap := map[int][]*schema.Message{}
+			toolMap, filter := map[int][]*schema.Message{}, NewStreamFilter()
 			for {
 				message, err := event.Output.MessageOutput.MessageStream.Recv()
 				if err == io.EOF {
@@ -118,14 +118,21 @@ func (cb *ChatBot) StreamChat(ctx context.Context, userInput string) error {
 					firstword = true
 				}
 				if message.ReasoningContent != "" {
-					fmt.Print(message.ReasoningContent)
+					if out := filter.Process(message.ReasoningContent); out != nil {
+						fmt.Print(*out)
+					}
 				}
 				if message.Content != "" {
-					fmt.Print(message.Content)
+					if out := filter.Process(message.Content); out != nil {
+						fmt.Print(*out)
+					}
 				}
 				response.WriteString(message.Content)
 			}
-			if len(toolMap) > 0 && !strings.HasSuffix(response.String(), "\n") {
+			if out := filter.Finish(); out != nil {
+				fmt.Print(*out)
+			}
+			if len(toolMap) > 0 {
 				fmt.Print("\n")
 			}
 			for _, msgs := range toolMap {
@@ -151,11 +158,8 @@ func (cb *ChatBot) StreamChat(ctx context.Context, userInput string) error {
 		}
 	}
 
-	message := response.String()
-	if !strings.HasSuffix(message, "\n") {
-		fmt.Print("\n")
-	}
-	cb.manager.AddMessage(schema.AssistantMessage(message, nil))
+	fmt.Print("\n")
+	cb.manager.AddMessage(schema.AssistantMessage(response.String(), nil))
 
 	return nil
 }
