@@ -18,6 +18,7 @@ import (
 	"github.com/Arvintian/chat-agent/pkg/utils"
 
 	"github.com/cloudwego/eino/adk"
+	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
 
 	"github.com/chzyer/readline"
@@ -159,13 +160,16 @@ var RootCmd = &cobra.Command{
 			switch input {
 			case "/help", "/h":
 				printHelp()
-			case "/clear", "/k":
+			case "/clear", "/c":
 				manager.Clear()
+				fmt.Println("The conversation context is cleared")
 			case "/summary", "/history", "/i":
 				os.Stdout.WriteString(manager.GetSummary())
 				fmt.Println()
+			case "/tools", "/l":
+				printTools(tools)
 			case "/quit", "/exit", "/bye", "/q":
-				os.Stdout.WriteString("\nbye!\n")
+				os.Stdout.WriteString("bye!\n")
 				return nil
 			default:
 				err = chatbot.StreamChat(chatctx, input)
@@ -183,9 +187,23 @@ func printHelp() {
 	fmt.Println("Available commands:")
 	fmt.Println("  /help    or /h   - Show this help message")
 	fmt.Println("  /history or /i   - Get conversation history")
-	fmt.Println("  /clear   or /k   - Clear conversation context")
+	fmt.Println("  /clear   or /c   - Clear conversation context")
+	fmt.Println("  /tools   or /l   - List the loaded tools")
 	fmt.Println("  /t cmd           - Execute local command")
 	fmt.Println("  /exit    or /q   - Exit program")
+}
+
+func printTools(tools []tool.BaseTool) {
+	for _, item := range tools {
+		info, err := item.Info(context.TODO())
+		if err != nil || info == nil {
+			if err != nil {
+				fmt.Printf("Get tool info error %v\n", err)
+			}
+			continue
+		}
+		fmt.Printf("(%s) %s\n", info.Name, info.Desc)
+	}
 }
 
 func Execute() {
