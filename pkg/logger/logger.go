@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -108,6 +109,25 @@ func (l *Logger) debug(level LogLevel, category, message string) {
 	l.file.Sync() // Ensure immediate write to disk
 }
 
+func (l *Logger) Infof(format string, v ...any) {
+	timestamp := time.Now().Format("2006-01-02 15:04:05.000")
+	logLine := fmt.Sprintf("[%s] ", timestamp) + fmt.Sprintf(format, v...)
+	l.file.WriteString(logLine)
+	if !strings.HasSuffix(logLine, "\n") {
+		l.file.WriteString("\n")
+	}
+	l.file.Sync()
+}
+func (l *Logger) Errorf(format string, v ...any) {
+	timestamp := time.Now().Format("2006-01-02 15:04:05.000")
+	logLine := fmt.Sprintf("[%s] ", timestamp) + fmt.Sprintf(format, v...)
+	l.file.WriteString(logLine)
+	if !strings.HasSuffix(logLine, "\n") {
+		l.file.WriteString("\n")
+	}
+	l.file.Sync()
+}
+
 // levelString converts LogLevel to string
 func levelString(level LogLevel) string {
 	switch level {
@@ -124,8 +144,12 @@ func levelString(level LogLevel) string {
 	}
 }
 
+func GetDefaultLogger() *Logger {
+	return logger
+}
+
 // GetLogPath returns the current log file path
-func GetLogPath() string {
+func GetDefaultLogPath() string {
 	if logger == nil {
 		return ""
 	}

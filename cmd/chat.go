@@ -12,6 +12,7 @@ import (
 
 	"github.com/Arvintian/chat-agent/pkg/chatbot"
 	"github.com/Arvintian/chat-agent/pkg/config"
+	"github.com/Arvintian/chat-agent/pkg/logger"
 	"github.com/Arvintian/chat-agent/pkg/manager"
 	"github.com/Arvintian/chat-agent/pkg/mcp"
 	"github.com/Arvintian/chat-agent/pkg/providers"
@@ -39,6 +40,9 @@ var RootCmd = &cobra.Command{
 	Short: "Chat Agent CLI tool",
 	Long:  `A command line interface for llm agent`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := logger.Init(); err != nil {
+			return err
+		}
 		// Load configuration file
 		cfg, err := config.LoadConfig(configPath)
 		if err != nil {

@@ -17,6 +17,9 @@ func (f *StreamFilter) Process(chunk string) *string {
 		f.pendingOutput = append(f.pendingOutput, chunk)
 		return nil
 	} else {
+		if len(f.pendingOutput) == 0 {
+			return &chunk
+		}
 		result := strings.Join(f.pendingOutput, "") + chunk
 		f.pendingOutput = make([]string, 0)
 		return &result

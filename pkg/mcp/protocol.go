@@ -1,12 +1,14 @@
 package mcp
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"net/url"
 	"time"
 
 	"github.com/Arvintian/chat-agent/pkg/config"
+	"github.com/Arvintian/chat-agent/pkg/logger"
 
 	"github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/client/transport"
@@ -40,11 +42,34 @@ func (c *Client) createStdioClient(ctx context.Context, serverConfig config.MCPS
 		}
 	}
 
+	// Prepare client options
+	var options []transport.StdioOption
+	mcpLogger := logger.GetDefaultLogger()
+	options = append(options, transport.WithCommandLogger(mcpLogger))
+
 	// Create STDIO client
-	mcpClient, err := client.NewStdioMCPClient(serverConfig.Cmd, env, serverConfig.Args...)
+	mcpClient, err := client.NewStdioMCPClientWithOptions(serverConfig.Cmd, env, serverConfig.Args, options...)
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to create STDIO MCP client: %w", err)
 	}
+
+	go func() {
+		stderr, ok := client.GetStderr(mcpClient)
+		if !ok {
+			return
+		}
+		scanner := bufio.NewScanner(stderr)
+		for scanner.Scan() {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				line := scanner.Text()
+				mcpLogger.Infof("MCP [%s] %s", serverConfig.Cmd, line)
+			}
+		}
+	}()
 
 	return mcpClient, nil
 }
