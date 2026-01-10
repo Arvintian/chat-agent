@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -17,12 +18,13 @@ import (
 	"github.com/Arvintian/chat-agent/pkg/mcp"
 	"github.com/Arvintian/chat-agent/pkg/providers"
 	"github.com/Arvintian/chat-agent/pkg/utils"
+	"github.com/eino-contrib/ollama/envconfig"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
 
-	"github.com/chzyer/readline"
+	"github.com/ollama/ollama/readline"
 	"github.com/spf13/cobra"
 )
 
@@ -30,8 +32,15 @@ var (
 	configPath string
 )
 
+type MultilineState int
+
 const (
 	DefaultMaxIterations int = 20
+)
+
+const (
+	MultilineNone MultilineState = iota
+	MultilinePrompt
 )
 
 // RootCmd represents the base command when called without any subcommands
@@ -70,7 +79,6 @@ var RootCmd = &cobra.Command{
 			return fmt.Errorf("chat preset does not exist: %s", chatName)
 		}
 		fmt.Printf("%s\n", welcome)
-		fmt.Printf("Enter /help to get help information\n")
 		// chatmodel
 		providerFactory := providers.NewFactory(cfg)
 		model, err := providerFactory.CreateChatModel(cmd.Context(), preset.Model)
@@ -106,19 +114,25 @@ var RootCmd = &cobra.Command{
 		// init chatbot
 		manager := manager.NewManager(preset.MaxMessages)
 		chatbot := chatbot.NewChatBot(context.WithValue(cmd.Context(), "debug", debug), agent, manager)
+
 		// init readline
-		rl, err := readline.NewEx(&readline.Config{
-			Prompt:          ">>> ",
-			HistoryFile:     filepath.Join(os.TempDir(), "chat-agent.history"),
-			HistoryLimit:    200,
-			AutoComplete:    nil,
-			InterruptPrompt: "^C",
-			EOFPrompt:       "exit",
+		scanner, err := readline.New(readline.Prompt{
+			Prompt:         ">>> ",
+			AltPrompt:      "... ",
+			Placeholder:    "Send a message (/h for help)",
+			AltPlaceholder: `Use """ to end multi-line input`,
 		})
 		if err != nil {
 			return err
 		}
-		defer rl.Close()
+
+		if envconfig.NoHistory() {
+			scanner.HistoryDisable()
+		}
+
+		fmt.Print(readline.StartBracketedPaste)
+		defer fmt.Printf(readline.EndBracketedPaste)
+
 		// chat loop
 		var chatCancel context.CancelFunc = func() {}
 		sigChan := make(chan os.Signal, 1)
@@ -129,61 +143,93 @@ var RootCmd = &cobra.Command{
 				chatCancel() // ignore ctrl+c and break llm generate
 			}
 		}()
+		var sb strings.Builder
+		var multiline MultilineState
 		for {
-			line, err := rl.Readline()
-			if err != nil {
-				if err == io.EOF {
-					os.Stdout.WriteString("\nbye!\n")
-					break
+			line, err := scanner.Readline()
+			switch {
+			case errors.Is(err, io.EOF):
+				fmt.Println()
+				return nil
+			case errors.Is(err, readline.ErrInterrupt):
+				if line == "" {
+					fmt.Println("\nUse Ctrl + d or /q to exit.")
 				}
-				if err.Error() == "Interrupt" {
-					continue
-				}
-				os.Stderr.WriteString("readline error: " + err.Error() + "\n")
+
+				scanner.Prompt.UseAlt = false
+				sb.Reset()
+
+				continue
+			case err != nil:
 				return err
 			}
 
-			input := strings.TrimSpace(line)
-
-			if input == "" {
-				continue
-			}
-
-			// exec terminal local start with /t, eg: `/t ls`
-			if strings.HasPrefix(input, "/t ") {
-				localcmd := strings.TrimSpace(strings.TrimPrefix(input, "/t"))
-				if err := utils.PopenStream(localcmd); err != nil {
-					os.Stderr.WriteString("exec local cmd error: " + err.Error() + "\n")
+			switch {
+			case multiline != MultilineNone:
+				// check if there's a multiline terminating string
+				before, ok := strings.CutSuffix(line, `"""`)
+				sb.WriteString(before)
+				if !ok {
+					fmt.Fprintln(&sb)
+					continue
 				}
+				multiline = MultilineNone
+				scanner.Prompt.UseAlt = false
+			case strings.HasPrefix(line, `"""`):
+				line := strings.TrimPrefix(line, `"""`)
+				line, ok := strings.CutSuffix(line, `"""`)
+				sb.WriteString(line)
+				if !ok {
+					// no multiline terminating string; need more input
+					fmt.Fprintln(&sb)
+					multiline = MultilinePrompt
+					scanner.Prompt.UseAlt = true
+				}
+			case scanner.Pasting:
+				fmt.Fprintln(&sb, line)
 				continue
-			}
-
-			chatctx, cancel := context.WithCancel(cmd.Context())
-			chatCancel = cancel
-
-			switch input {
-			case "/help", "/h":
-				printHelp()
-			case "/clear", "/c":
-				manager.Clear()
-				fmt.Println("The conversation context is cleared")
-			case "/summary", "/history", "/i":
-				os.Stdout.WriteString(manager.GetSummary())
-				fmt.Println()
-			case "/tools", "/l":
-				printTools(tools)
-			case "/quit", "/exit", "/bye", "/q":
-				os.Stdout.WriteString("bye!\n")
-				return nil
 			default:
-				err = chatbot.StreamChat(chatctx, input)
-				if err != nil {
-					os.Stderr.WriteString("\nerror: " + err.Error() + "\n")
+				sb.WriteString(line)
+			}
+
+			if sb.Len() > 0 && multiline == MultilineNone {
+				input := strings.TrimSpace(sb.String())
+				// exec terminal local start with /t, eg: `/t ls`
+				if strings.HasPrefix(input, "/t ") {
+					localcmd := strings.TrimSpace(strings.TrimPrefix(input, "/t"))
+					if err := utils.PopenStream(localcmd); err != nil {
+						os.Stderr.WriteString("exec local cmd error: " + err.Error() + "\n")
+					}
+					sb.Reset()
+					continue
 				}
+
+				switch input {
+				case "/help", "/h":
+					printHelp()
+				case "/clear", "/c":
+					manager.Clear()
+					fmt.Println("The conversation context is cleared")
+				case "/summary", "/history", "/i":
+					os.Stdout.WriteString(manager.GetSummary())
+					fmt.Println()
+				case "/tools", "/l":
+					printTools(tools)
+				case "/quit", "/exit", "/bye", "/q":
+					os.Stdout.WriteString("bye!\n")
+					return nil
+				default:
+					chatctx, cancel := context.WithCancel(cmd.Context())
+					chatCancel = cancel
+					err = chatbot.StreamChat(chatctx, input)
+					if err != nil {
+						os.Stderr.WriteString("\nerror: " + err.Error() + "\n")
+					}
+
+				}
+				sb.Reset()
 			}
 		}
-
-		return err
 	},
 }
 
@@ -206,7 +252,10 @@ func printTools(tools []tool.BaseTool) {
 			}
 			continue
 		}
-		fmt.Printf("(%s) %s\n", info.Name, info.Desc)
+		fmt.Printf("(%s) %s", info.Name, info.Desc)
+		if !strings.HasSuffix(info.Desc, "\n") {
+			fmt.Print("\n")
+		}
 	}
 }
 
