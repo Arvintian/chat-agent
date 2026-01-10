@@ -19,7 +19,6 @@ import (
 	"github.com/Arvintian/chat-agent/pkg/mcp"
 	"github.com/Arvintian/chat-agent/pkg/providers"
 	"github.com/Arvintian/chat-agent/pkg/utils"
-	"github.com/eino-contrib/ollama/envconfig"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/tool"
@@ -59,7 +58,6 @@ var RootCmd = &cobra.Command{
 			return err
 		}
 		chatName, _ := cmd.Flags().GetString("chat")
-		welcome, _ := cmd.Flags().GetString("welcome")
 		debug, _ := cmd.Flags().GetBool("debug")
 
 		//load default chat
@@ -74,18 +72,18 @@ var RootCmd = &cobra.Command{
 		if chatName == "" {
 			return fmt.Errorf("Please specify the chat")
 		}
-
 		preset, ok := cfg.Chats[chatName]
 		if !ok {
 			return fmt.Errorf("chat preset does not exist: %s", chatName)
 		}
-		fmt.Printf("%s\n", welcome)
+
 		// chatmodel
 		providerFactory := providers.NewFactory(cfg)
 		model, err := providerFactory.CreateChatModel(cmd.Context(), preset.Model)
 		if err != nil {
 			return err
 		}
+
 		// mcp client
 		var tools []tool.BaseTool
 		toolLoadTimeout, _ := cmd.Flags().GetInt("tools-load-timeout")
@@ -109,6 +107,7 @@ var RootCmd = &cobra.Command{
 			}
 			tools = <-toolsChan
 		}
+
 		// init agent
 		maxIterations := DefaultMaxIterations
 		if preset.MaxIterations > 0 {
@@ -129,9 +128,23 @@ var RootCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+
 		// init chatbot
 		manager := manager.NewManager(preset.MaxMessages)
 		chatbot := chatbot.NewChatBot(context.WithValue(cmd.Context(), "debug", debug), agent, manager)
+
+		// one-time task or chat
+		welcome, _ := cmd.Flags().GetString("welcome")
+		once, _ := cmd.Flags().GetString("once")
+		if once != "" {
+			err = chatbot.StreamChat(cmd.Context(), once)
+			if err != nil {
+				os.Stderr.WriteString("\nerror: " + err.Error() + "\n")
+			}
+			return nil
+		} else {
+			fmt.Printf("%s\n", welcome)
+		}
 
 		// init readline
 		scanner, err := readline.New(readline.Prompt{
@@ -143,11 +156,6 @@ var RootCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-
-		if envconfig.NoHistory() {
-			scanner.HistoryDisable()
-		}
-
 		fmt.Print(readline.StartBracketedPaste)
 		defer fmt.Printf(readline.EndBracketedPaste)
 
@@ -293,9 +301,10 @@ func init() {
 	defaultConfigPath := filepath.Join(homeDir, ".chat-agent", "config.yml")
 
 	// Add global parameters
-	RootCmd.PersistentFlags().StringVar(&configPath, "config", defaultConfigPath, "Configuration file path")
+	RootCmd.PersistentFlags().StringVarP(&configPath, "config", "f", defaultConfigPath, "Configuration file path")
 	RootCmd.PersistentFlags().BoolP("debug", "", false, "Enable debug mode")
 	RootCmd.Flags().StringP("chat", "c", "", "Specify chat preset name (from config file chats)")
 	RootCmd.Flags().StringP("welcome", "w", "Welcome to Chat-Agent Cli", "Specify chat welcome message")
 	RootCmd.Flags().IntP("tools-load-timeout", "t", 10, "Tool loading timeout, in seconds")
+	RootCmd.Flags().String("once", "", "Prompt for one-time task")
 }
