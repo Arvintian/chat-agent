@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/Arvintian/chat-agent/pkg/chatbot"
 	"github.com/Arvintian/chat-agent/pkg/config"
@@ -86,12 +87,29 @@ var RootCmd = &cobra.Command{
 			return err
 		}
 		// mcp client
-		mcpclient := mcp.NewClient(cfg)
-		if err := mcpclient.InitializeForChat(cmd.Context(), preset); err != nil {
-			return err
+		var tools []tool.BaseTool
+		toolLoadTimeout, _ := cmd.Flags().GetInt("tools-load-timeout")
+		toolsChan, errChan := make(chan []tool.BaseTool, 1), make(chan error, 1)
+		go func() {
+			mcpclient := mcp.NewClient(cfg)
+			if err := mcpclient.InitializeForChat(cmd.Context(), preset); err != nil {
+				toolsChan <- nil
+				errChan <- err
+			}
+			tools := mcpclient.GetToolListForServers(preset.MCPServers)
+			toolsChan <- tools
+			errChan <- nil
+		}()
+		select {
+		case <-time.After(time.Duration(toolLoadTimeout) * time.Second):
+			return fmt.Errorf("load mcp tools timeout")
+		case err := <-errChan:
+			if err != nil {
+				return err
+			}
+			tools = <-toolsChan
 		}
 		// init agent
-		tools := mcpclient.GetToolListForServers(preset.MCPServers)
 		maxIterations := DefaultMaxIterations
 		if preset.MaxIterations > 0 {
 			maxIterations = preset.MaxIterations
@@ -279,4 +297,5 @@ func init() {
 	RootCmd.PersistentFlags().BoolP("debug", "", false, "Enable debug mode")
 	RootCmd.Flags().StringP("chat", "c", "", "Specify chat preset name (from config file chats)")
 	RootCmd.Flags().StringP("welcome", "w", "Welcome to Chat-Agent Cli", "Specify chat welcome message")
+	RootCmd.Flags().IntP("tools-load-timeout", "t", 10, "Tool loading timeout, in seconds")
 }
