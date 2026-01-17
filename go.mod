@@ -3,13 +3,13 @@ module github.com/Arvintian/chat-agent
 go 1.25.5
 
 require (
-	github.com/cloudwego/eino v0.7.18
-	github.com/cloudwego/eino-ext/components/model/ark v0.1.61
+	github.com/cloudwego/eino v0.7.21
+	github.com/cloudwego/eino-ext/components/model/ark v0.1.63
 	github.com/cloudwego/eino-ext/components/model/claude v0.1.13
 	github.com/cloudwego/eino-ext/components/model/deepseek v0.1.2
-	github.com/cloudwego/eino-ext/components/model/gemini v0.1.23
+	github.com/cloudwego/eino-ext/components/model/gemini v0.1.26
 	github.com/cloudwego/eino-ext/components/model/ollama v0.1.8
-	github.com/cloudwego/eino-ext/components/model/openai v0.1.7
+	github.com/cloudwego/eino-ext/components/model/openai v0.1.8
 	github.com/cloudwego/eino-ext/components/model/qianfan v0.1.4
 	github.com/cloudwego/eino-ext/components/model/qwen v0.1.4
 	github.com/cloudwego/eino-ext/components/tool/mcp v0.0.8
@@ -48,7 +48,7 @@ require (
 	github.com/bytedance/sonic v1.14.1 // indirect
 	github.com/bytedance/sonic/loader v0.3.0 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
-	github.com/cloudwego/eino-ext/libs/acl/openai v0.1.11 // indirect
+	github.com/cloudwego/eino-ext/libs/acl/openai v0.1.13 // indirect
 	github.com/cohesion-org/deepseek-go v1.3.2 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/eino-contrib/jsonschema v1.0.3 // indirect
