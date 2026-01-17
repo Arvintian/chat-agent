@@ -54,8 +54,10 @@ type MCPServer struct {
 	Args []string          `yaml:"args,omitempty"`
 	Env  map[string]string `yaml:"env,omitempty"`
 	// for sse & streamable-http
-	URL     string            `yaml:"url,omitempty"`
-	Headers map[string]string `yaml:"headers,omitempty"`
+	URL               string            `yaml:"url,omitempty"`
+	Headers           map[string]string `yaml:"headers,omitempty"`
+	AutoApproval      bool              `yaml:"autoApproval"`
+	AutoApprovalTools []string          `yaml:"autoApprovalTools"`
 }
 
 // LoadConfig loads configuration from file and saves to global variable

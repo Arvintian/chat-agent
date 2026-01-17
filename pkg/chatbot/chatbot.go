@@ -2,11 +2,15 @@ package chatbot
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
 
 	"github.com/Arvintian/chat-agent/pkg/manager"
+	"github.com/Arvintian/chat-agent/pkg/mcp"
+	"github.com/Arvintian/chat-agent/pkg/store"
+	"github.com/ollama/ollama/readline"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
@@ -24,17 +28,21 @@ type ChatBot struct {
 
 	// manager handles conversation context management
 	manager *manager.Manager
+
+	scanner *readline.Instance
 }
 
-func NewChatBot(ctx context.Context, agent *adk.ChatModelAgent, manager *manager.Manager) ChatBot {
+func NewChatBot(ctx context.Context, agent *adk.ChatModelAgent, manager *manager.Manager, scanner *readline.Instance) ChatBot {
 	return ChatBot{
 		ctx: ctx,
 		runner: adk.NewRunner(ctx, adk.RunnerConfig{
 			Agent:           agent,
 			EnableStreaming: true,
+			CheckPointStore: store.NewInMemoryStore(),
 		}),
 		agent:   agent,
 		manager: manager,
+		scanner: scanner,
 	}
 }
 
@@ -47,7 +55,7 @@ func (cb *ChatBot) StreamChat(ctx context.Context, userInput string) error {
 	messages := cb.manager.GetMessages()
 
 	// Generate streaming response
-	streamReader := cb.runner.Run(ctx, messages)
+	streamReader := cb.runner.Run(ctx, messages, adk.WithCheckPointID("local"))
 
 	response, debug := strings.Builder{}, false
 	if v, ok := cb.ctx.Value("debug").(bool); ok {
@@ -61,9 +69,56 @@ func (cb *ChatBot) StreamChat(ctx context.Context, userInput string) error {
 		if event.Err != nil {
 			return event.Err
 		}
+
+		if event.Action != nil && event.Action.Interrupted != nil {
+			var err error
+			targets := map[string]any{}
+			for _, intCtx := range event.Action.Interrupted.InterruptContexts {
+				approvalInfo, ok := intCtx.Info.(*mcp.ApprovalInfo)
+				if !ok {
+					continue
+				}
+				var apResult *mcp.ApprovalResult
+				cb.scanner.Prompt.Placeholder = "Y/N"
+				for {
+					fmt.Printf("%s\n", approvalInfo.String())
+					line, err := cb.scanner.Readline()
+					switch {
+					case errors.Is(err, io.EOF):
+						return fmt.Errorf("wait approval error")
+					case errors.Is(err, readline.ErrInterrupt):
+						return fmt.Errorf("wait approval error")
+					case err != nil:
+						return err
+					}
+					input := strings.TrimSpace(line)
+					if strings.ToUpper(input) == "Y" {
+						apResult = &mcp.ApprovalResult{Approved: true}
+						break
+					} else if strings.ToUpper(input) == "N" {
+						apResult = &mcp.ApprovalResult{Approved: false}
+						break
+					}
+					fmt.Println("Invalid input, please input Y or N")
+				}
+				targets[intCtx.ID] = apResult
+			}
+			if len(targets) < 1 {
+				return fmt.Errorf("wait approval error")
+			}
+			streamReader, err = cb.runner.ResumeWithParams(ctx, "local", &adk.ResumeParams{
+				Targets: targets,
+			})
+			if err != nil {
+				return err
+			}
+			continue
+		}
+
 		if event.Output == nil {
 			continue
 		}
+
 		if event.Output.MessageOutput.Role == schema.Tool {
 			fmt.Printf("ToolCall: (%s) Completed", event.Output.MessageOutput.ToolName)
 			if !debug {

@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/cloudwego/eino-ext/components/tool/mcp"
 	"github.com/cloudwego/eino/components/tool"
@@ -12,6 +13,7 @@ import (
 // discoverTools discovers tools from MCP servers
 func (c *Client) discoverTools(ctx context.Context) error {
 	for serverName, mcpClient := range c.clients {
+		serverConfig := c.config.MCPServers[serverName]
 		// Check if client is nil
 		if mcpClient == nil {
 			return fmt.Errorf("MCP client for server %s is not initialized", serverName)
@@ -42,7 +44,7 @@ func (c *Client) discoverTools(ctx context.Context) error {
 		// Add tools to the tool mapping
 		for _, mcpTool := range mcpTools {
 			// Try to convert BaseTool to InvokableTool
-			if invokableTool, ok := mcpTool.(tool.BaseTool); ok {
+			if invokableTool, ok := mcpTool.(tool.InvokableTool); ok {
 				// Get tool info to obtain tool name
 				info, err := mcpTool.Info(ctx)
 				if err != nil {
@@ -50,7 +52,11 @@ func (c *Client) discoverTools(ctx context.Context) error {
 				}
 				// Use serverName_toolName as tool name to avoid conflicts
 				toolName := fmt.Sprintf("%s_%s", serverName, info.Name)
-				c.tools[toolName] = invokableTool
+				if serverConfig.AutoApproval || slices.Contains(serverConfig.AutoApprovalTools, info.Name) {
+					c.tools[toolName] = invokableTool
+				} else {
+					c.tools[toolName] = InvokableApprovableTool{InvokableTool: invokableTool}
+				}
 			}
 		}
 	}

@@ -129,9 +129,23 @@ var RootCmd = &cobra.Command{
 			return err
 		}
 
+		// init readline
+		placeholder := "Send a message (/h for help)"
+		scanner, err := readline.New(readline.Prompt{
+			Prompt:         ">>> ",
+			AltPrompt:      "... ",
+			Placeholder:    placeholder,
+			AltPlaceholder: `Use """ to end multi-line input`,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Print(readline.StartBracketedPaste)
+		defer fmt.Printf(readline.EndBracketedPaste)
+
 		// init chatbot
 		manager := manager.NewManager(preset.MaxMessages)
-		chatbot := chatbot.NewChatBot(context.WithValue(cmd.Context(), "debug", debug), agent, manager)
+		chatbot := chatbot.NewChatBot(context.WithValue(cmd.Context(), "debug", debug), agent, manager, scanner)
 
 		// one-time task or chat
 		welcome, _ := cmd.Flags().GetString("welcome")
@@ -146,19 +160,6 @@ var RootCmd = &cobra.Command{
 			fmt.Printf("%s\n", welcome)
 		}
 
-		// init readline
-		scanner, err := readline.New(readline.Prompt{
-			Prompt:         ">>> ",
-			AltPrompt:      "... ",
-			Placeholder:    "Send a message (/h for help)",
-			AltPlaceholder: `Use """ to end multi-line input`,
-		})
-		if err != nil {
-			return err
-		}
-		fmt.Print(readline.StartBracketedPaste)
-		defer fmt.Printf(readline.EndBracketedPaste)
-
 		// chat loop
 		var chatCancel context.CancelFunc = func() {}
 		sigChan := make(chan os.Signal, 1)
@@ -172,6 +173,9 @@ var RootCmd = &cobra.Command{
 		var sb strings.Builder
 		var multiline MultilineState
 		for {
+			if scanner.Prompt.Placeholder != placeholder {
+				scanner.Prompt.Placeholder = placeholder
+			}
 			line, err := scanner.Readline()
 			switch {
 			case errors.Is(err, io.EOF):
