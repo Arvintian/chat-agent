@@ -25,7 +25,15 @@ type Chat struct {
 	MaxMessages   int      `yaml:"maxMessages"`
 	MaxIterations int      `yaml:"maxIterations"`
 	MCPServers    []string `yaml:"mcp_servers,omitempty"`
+	Skill         *Skill   `yaml:"skill,omitempty"`
 	Default       bool     `yaml:"default"`
+}
+
+type Skill struct {
+	Dir          string `yaml:"dir"`
+	AutoApproval bool   `yaml:"autoApproval"`
+	WorkDir      string `yaml:"workDir"`
+	Timeout      int    `yaml:"timeout"`
 }
 
 // Provider represents AI provider configuration

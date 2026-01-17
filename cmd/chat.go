@@ -18,6 +18,9 @@ import (
 	"github.com/Arvintian/chat-agent/pkg/manager"
 	"github.com/Arvintian/chat-agent/pkg/mcp"
 	"github.com/Arvintian/chat-agent/pkg/providers"
+	skillloader "github.com/Arvintian/chat-agent/pkg/skill/loader"
+	skillmw "github.com/Arvintian/chat-agent/pkg/skill/middleware"
+	skilltools "github.com/Arvintian/chat-agent/pkg/skill/tools"
 	"github.com/Arvintian/chat-agent/pkg/utils"
 
 	"github.com/cloudwego/eino/adk"
@@ -84,8 +87,39 @@ var RootCmd = &cobra.Command{
 			return err
 		}
 
-		// mcp client
 		var tools []tool.BaseTool
+		systemPrompt := preset.System
+
+		// skills
+		if preset.Skill != nil {
+			skillDir, err := utils.ExpandPath(preset.Skill.Dir)
+			if err != nil {
+				return err
+			}
+			registry := skillloader.NewRegistry(skillloader.NewLoader(
+				skillloader.WithProjectSkillsDir(skillDir),
+			))
+			if err := registry.Initialize(cmd.Context()); err != nil {
+				return err
+			}
+			systemPrompt = skillmw.NewSkillsMiddleware(registry).InjectPrompt(systemPrompt)
+			skillstools := skilltools.NewSkillTools(registry)
+			if preset.Skill.Timeout <= 0 {
+				preset.Skill.Timeout = 30
+			}
+			cmdTool := skilltools.RunTerminalCommandTool{
+				WorkingDir: preset.Skill.WorkDir,
+				Timeout:    time.Duration(preset.Skill.Timeout) * time.Second,
+			}
+			if preset.Skill.AutoApproval {
+				skillstools = append(skillstools, &cmdTool)
+			} else {
+				skillstools = append(skillstools, mcp.InvokableApprovableTool{InvokableTool: &cmdTool})
+			}
+			tools = append(tools, skillstools...)
+		}
+
+		// mcp client
 		toolLoadTimeout, _ := cmd.Flags().GetInt("tools-load-timeout")
 		toolsChan, errChan := make(chan []tool.BaseTool, 1), make(chan error, 1)
 		go func() {
@@ -105,7 +139,8 @@ var RootCmd = &cobra.Command{
 			if err != nil {
 				return err
 			}
-			tools = <-toolsChan
+			mcptools := <-toolsChan
+			tools = append(tools, mcptools...)
 		}
 
 		// init agent
@@ -116,7 +151,7 @@ var RootCmd = &cobra.Command{
 		agent, err := adk.NewChatModelAgent(cmd.Context(), &adk.ChatModelAgentConfig{
 			Name:        chatName,
 			Description: preset.Desc,
-			Instruction: preset.System,
+			Instruction: systemPrompt,
 			Model:       model,
 			ToolsConfig: adk.ToolsConfig{
 				ToolsNodeConfig: compose.ToolsNodeConfig{
