@@ -5,7 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/Arvintian/chat-agent/pkg/manager"
 	"github.com/Arvintian/chat-agent/pkg/mcp"
@@ -14,6 +17,7 @@ import (
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
+	"github.com/hekmon/liveterm/v2"
 )
 
 // ChatBot struct for the chatbot
@@ -133,6 +137,7 @@ func (cb *ChatBot) StreamChat(ctx context.Context, userInput string) error {
 		if event.Output.MessageOutput.MessageStream != nil {
 			reasoning, firstword := false, false
 			toolMap, filter := map[int][]*schema.Message{}, NewStreamFilter()
+			finalToolMap, toolStart, toolOutput, toolMu := map[int][]*schema.Message{}, false, strings.Builder{}, sync.Mutex{}
 			for {
 				message, err := event.Output.MessageOutput.MessageStream.Recv()
 				if err == io.EOF {
@@ -142,6 +147,25 @@ func (cb *ChatBot) StreamChat(ctx context.Context, userInput string) error {
 					return fmt.Errorf("error receiving message stream: %w", err)
 				}
 				if len(message.ToolCalls) > 0 {
+					if !toolStart {
+						fmt.Print("\n")
+						liveterm.RefreshInterval = 200 * time.Millisecond
+						liveterm.Output = os.Stdout
+						liveterm.SetSingleLineUpdateFx(func() string {
+							toolMu.Lock()
+							defer toolMu.Unlock()
+							return strings.TrimRight(toolOutput.String(), "\n")
+						})
+						if err := liveterm.Start(); err != nil {
+							return err
+						}
+						defer func() {
+							if toolStart {
+								liveterm.Stop(false)
+							}
+						}()
+						toolStart = true
+					}
 					for i, tc := range message.ToolCalls {
 						index := tc.Index
 						if index == nil {
@@ -163,6 +187,22 @@ func (cb *ChatBot) StreamChat(ctx context.Context, userInput string) error {
 							},
 						})
 					}
+					toolMu.Lock()
+					toolOutput.Reset()
+					for k, msgs := range toolMap {
+						m, err := schema.ConcatMessages(msgs)
+						if err != nil {
+							toolMu.Unlock()
+							return fmt.Errorf("ConcatMessage failed: %v", err)
+						}
+						line, truncate := TruncateToTermWidth(fmt.Sprintf("ToolCall: (%s) %s", m.ToolCalls[0].Function.Name, m.ToolCalls[0].Function.Arguments))
+						if truncate {
+							finalToolMap[k] = msgs
+						}
+						toolOutput.WriteString(line)
+						toolOutput.WriteString("\n---\n")
+					}
+					toolMu.Unlock()
 				}
 				if message.ReasoningContent != "" && !reasoning {
 					fmt.Print("Thinking:\n")
@@ -187,16 +227,19 @@ func (cb *ChatBot) StreamChat(ctx context.Context, userInput string) error {
 			if out := filter.Finish(); out != nil {
 				fmt.Print(*out)
 			}
-			if len(toolMap) > 0 {
-				fmt.Print("\n")
+			if toolStart {
+				toolStart = false
+				liveterm.Stop(false)
 			}
-			for _, msgs := range toolMap {
-				m, err := schema.ConcatMessages(msgs)
-				if err != nil {
-					return fmt.Errorf("ConcatMessage failed: %v", err)
+			if debug {
+				for _, msgs := range finalToolMap {
+					m, err := schema.ConcatMessages(msgs)
+					if err != nil {
+						return fmt.Errorf("ConcatMessage failed: %v", err)
+					}
+					fmt.Printf("ToolCall: (%s) %s", m.ToolCalls[0].Function.Name, m.ToolCalls[0].Function.Arguments)
+					fmt.Print("\n---\n")
 				}
-				fmt.Printf("ToolCall: (%s) %s", m.ToolCalls[0].Function.Name, m.ToolCalls[0].Function.Arguments)
-				fmt.Print("\n---\n")
 			}
 		} else if event.Output.MessageOutput.Message != nil {
 			if len(event.Output.MessageOutput.Message.ToolCalls) > 0 {
