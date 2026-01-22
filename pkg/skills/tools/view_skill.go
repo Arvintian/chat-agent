@@ -9,7 +9,7 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 
-	"github.com/Arvintian/chat-agent/pkg/skill/loader"
+	"github.com/Arvintian/chat-agent/pkg/skills/loader"
 )
 
 // ViewSkillTool allows agents to load full skill content on demand.

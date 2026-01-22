@@ -16,6 +16,7 @@ type Config struct {
 	Providers  map[string]Provider  `yaml:"providers,omitempty"`
 	Models     map[string]Model     `yaml:"models,omitempty"`
 	MCPServers map[string]MCPServer `yaml:"mcp_servers,omitempty"`
+	Tools      map[string]Tool      `yaml:"tools,omitempty"`
 }
 
 type Chat struct {
@@ -26,14 +27,16 @@ type Chat struct {
 	MaxIterations int      `yaml:"maxIterations"`
 	MCPServers    []string `yaml:"mcp_servers,omitempty"`
 	Skill         *Skill   `yaml:"skill,omitempty"`
+	Tools         []string `yaml:"tools,omitempty"`
 	Default       bool     `yaml:"default"`
 }
 
 type Skill struct {
-	Dir          string `yaml:"dir"`
-	AutoApproval bool   `yaml:"autoApproval"`
-	WorkDir      string `yaml:"workDir"`
-	Timeout      int    `yaml:"timeout"`
+	Dir               string   `yaml:"dir"`
+	WorkDir           string   `yaml:"workDir"`
+	Timeout           int      `yaml:"timeout"`
+	AutoApproval      bool     `yaml:"autoApproval"`
+	AutoApprovalTools []string `yaml:"autoApprovalTools"`
 }
 
 // Provider represents AI provider configuration
@@ -66,6 +69,13 @@ type MCPServer struct {
 	Headers           map[string]string `yaml:"headers,omitempty"`
 	AutoApproval      bool              `yaml:"autoApproval"`
 	AutoApprovalTools []string          `yaml:"autoApprovalTools"`
+}
+
+type Tool struct {
+	Category          string   `yaml:"category"`
+	Params            string   `yaml:"params"`
+	AutoApproval      bool     `yaml:"autoApproval"`
+	AutoApprovalTools []string `yaml:"autoApprovalTools"`
 }
 
 // LoadConfig loads configuration from file and saves to global variable

@@ -9,7 +9,7 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 
-	"github.com/Arvintian/chat-agent/pkg/skill/loader"
+	"github.com/Arvintian/chat-agent/pkg/skills/loader"
 )
 
 // ListSkillsTool allows agents to discover available skills.

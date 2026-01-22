@@ -6,8 +6,8 @@ import (
 
 	"github.com/cloudwego/eino/components/tool"
 
-	"github.com/Arvintian/chat-agent/pkg/skill/loader"
-	"github.com/Arvintian/chat-agent/pkg/skill/tools"
+	"github.com/Arvintian/chat-agent/pkg/skills/loader"
+	"github.com/Arvintian/chat-agent/pkg/skills/tools"
 )
 
 // SkillsMiddleware injects skills metadata into agent prompts

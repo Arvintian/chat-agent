@@ -20,7 +20,7 @@ package tools
 import (
 	"github.com/cloudwego/eino/components/tool"
 
-	"github.com/Arvintian/chat-agent/pkg/skill/loader"
+	"github.com/Arvintian/chat-agent/pkg/skills/loader"
 )
 
 // NewSkillTools creates all skill-related tools for an agent.

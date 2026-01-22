@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -18,9 +19,10 @@ import (
 	"github.com/Arvintian/chat-agent/pkg/manager"
 	"github.com/Arvintian/chat-agent/pkg/mcp"
 	"github.com/Arvintian/chat-agent/pkg/providers"
-	skillloader "github.com/Arvintian/chat-agent/pkg/skill/loader"
-	skillmw "github.com/Arvintian/chat-agent/pkg/skill/middleware"
-	skilltools "github.com/Arvintian/chat-agent/pkg/skill/tools"
+	skillloader "github.com/Arvintian/chat-agent/pkg/skills/loader"
+	skillmw "github.com/Arvintian/chat-agent/pkg/skills/middleware"
+	skilltools "github.com/Arvintian/chat-agent/pkg/skills/tools"
+	builtintools "github.com/Arvintian/chat-agent/pkg/tools"
 	"github.com/Arvintian/chat-agent/pkg/utils"
 
 	"github.com/cloudwego/eino/adk"
@@ -90,6 +92,33 @@ var RootCmd = &cobra.Command{
 		var tools []tool.BaseTool
 		systemPrompt := preset.System
 
+		// builtin tools
+		for _, builtinTool := range preset.Tools {
+			toolCfg, ok := cfg.Tools[builtinTool]
+			if !ok {
+				return fmt.Errorf("tool config %s not found", builtinTool)
+			}
+			builtinToolList, err := builtintools.GetBuiltinTools(toolCfg.Category, toolCfg.Params)
+			if err != nil {
+				return err
+			}
+			if toolCfg.AutoApproval {
+				tools = append(tools, builtinToolList...)
+			} else {
+				for _, item := range builtinToolList {
+					info, err := item.Info(cmd.Context())
+					if err != nil {
+						return err
+					}
+					if slices.Contains(toolCfg.AutoApprovalTools, info.Name) {
+						tools = append(tools, item)
+					} else {
+						tools = append(tools, mcp.InvokableApprovableTool{InvokableTool: item.(tool.InvokableTool)})
+					}
+				}
+			}
+		}
+
 		// skills
 		if preset.Skill != nil {
 			skillDir, err := utils.ExpandPath(preset.Skill.Dir)
@@ -111,12 +140,22 @@ var RootCmd = &cobra.Command{
 				WorkingDir: preset.Skill.WorkDir,
 				Timeout:    time.Duration(preset.Skill.Timeout) * time.Second,
 			}
+			skillstools = append(skillstools, &cmdTool)
 			if preset.Skill.AutoApproval {
-				skillstools = append(skillstools, &cmdTool)
+				tools = append(tools, skillstools...)
 			} else {
-				skillstools = append(skillstools, mcp.InvokableApprovableTool{InvokableTool: &cmdTool})
+				for _, item := range skillstools {
+					info, err := item.Info(cmd.Context())
+					if err != nil {
+						return err
+					}
+					if slices.Contains(preset.Skill.AutoApprovalTools, info.Name) {
+						tools = append(tools, item)
+					} else {
+						tools = append(tools, mcp.InvokableApprovableTool{InvokableTool: item.(tool.InvokableTool)})
+					}
+				}
 			}
-			tools = append(tools, skillstools...)
 		}
 
 		// mcp client
