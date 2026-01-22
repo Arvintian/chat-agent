@@ -44,18 +44,9 @@ func (t *RunTerminalCommandTool) Info(ctx context.Context) (*schema.ToolInfo, er
 	}
 	return &schema.ToolInfo{
 		Name: name,
-		Desc: fmt.Sprintf(`Execute a terminal command and return the output.
-Use this tool to:
-- Run git commands (git status, git diff, git commit, etc.)
-- Execute build commands
-- Run scripts
-- Check file contents with cat, ls, etc.
-
-Windows systems will use PowerShell for execution, while other platforms will use shell.
-
-Current system is %s.
-
-Returns stdout and stderr from the command execution.`, runtime.GOOS),
+		Desc: fmt.Sprintf(`Execute a terminal command, wait exit and return the output.
+Long-running tasks cannot be executed; they will timeout after %v and be killed. To start a long-running task, you must actively run it in the background, but you may not be able to retrieve the output.
+Windows systems will use PowerShell for execution, while other platforms will use shell, current system is %s.`, t.Timeout, runtime.GOOS),
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"command": {
 				Type:     schema.String,

@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -46,7 +47,12 @@ func (bm *BashManager) ExecuteCommand(command string, workdir string, timeout ti
 		}
 	}
 
-	return bm.session.execute(command, workdir, timeout)
+	output, err := bm.session.execute(command, workdir, timeout)
+	if !bm.session.running {
+		// If an error occurs, close and restart the session
+		bm.session.close()
+	}
+	return output, err
 }
 
 // RestartSession restarts the bash session
@@ -65,12 +71,15 @@ func (bm *BashManager) RestartSession() error {
 
 // createSession creates a new bash session
 func (bm *BashManager) createSession() error {
-	session := &BashSession{
-		running: true,
-	}
+	session := &BashSession{}
 
 	// Create the bash command
 	session.cmd = exec.Command("bash")
+
+	session.cmd.SysProcAttr = &syscall.SysProcAttr{
+		Setpgid: true,
+		Pgid:    0,
+	}
 
 	// Get stdin/stdout/stderr pipes
 	var err error
@@ -94,6 +103,7 @@ func (bm *BashManager) createSession() error {
 		return fmt.Errorf("failed to start bash: %w", err)
 	}
 
+	session.running = true
 	bm.session = session
 	return nil
 }
@@ -111,10 +121,10 @@ func (bs *BashSession) execute(command string, workdir string, timeout time.Dura
 	marker := fmt.Sprintf("__BASH_CMD_DONE_%d__", time.Now().UnixNano())
 
 	// Construct command with marker and error capture
-	fullCommand := fmt.Sprintf("%s\necho '%s'$?\n", command, marker)
+	fullCommand := fmt.Sprintf("(%s); echo '%s'$?; echo '%s' > /dev/stderr\n", command, marker, marker)
 
 	if workdir != "" {
-		fullCommand = fmt.Sprintf("cd %s\n%s", workdir, fullCommand)
+		fullCommand = fmt.Sprintf("cd %s && %s", workdir, fullCommand)
 	}
 
 	// Write command to bash
@@ -149,6 +159,22 @@ func (bs *BashSession) execute(command string, workdir string, timeout time.Dura
 				return
 			}
 
+			// Cmd output not end with newline
+			if strings.Contains(line, marker) {
+				out := strings.Split(line, marker)
+				if len(out) != 2 {
+					errorChan <- fmt.Errorf("read bash output error")
+				}
+				cmdOut, exitCode := out[0], out[1]
+				output.WriteString(cmdOut)
+				output.WriteString("\n")
+				if exitCode != "0" {
+					output.WriteString(fmt.Sprintf("\n[Exit code: %s]", exitCode))
+				}
+				outputChan <- output.String()
+				return
+			}
+
 			output.WriteString(line)
 			output.WriteString("\n")
 		}
@@ -166,10 +192,18 @@ func (bs *BashSession) execute(command string, workdir string, timeout time.Dura
 
 		// Read stderr with a short buffer
 		for scanner.Scan() {
-			stderr.WriteString(scanner.Text())
+			line := scanner.Text()
+			if strings.Contains(line, marker) {
+				if idx := strings.Index(line, marker); idx != -1 {
+					if idx > 0 {
+						stderr.WriteString(line[:idx])
+					}
+				}
+				break
+			}
+			stderr.WriteString(line)
 			stderr.WriteString("\n")
 		}
-
 		stderrChan <- stderr.String()
 	}()
 
@@ -177,24 +211,19 @@ func (bs *BashSession) execute(command string, workdir string, timeout time.Dura
 	select {
 	case <-ctx.Done():
 		bs.running = false
-		bs.close()
 		return fmt.Sprintf("command timed out after %v", timeout), nil
 	case err := <-errorChan:
 		bs.running = false
-		bs.close()
 		return "", fmt.Errorf("error reading output: %w", err)
 	case output := <-outputChan:
 		// Trim trailing newline
 		output = strings.TrimRight(output, "\n")
 
-		// Check if there's stderr output (non-blocking)
-		select {
-		case stderrOutput := <-stderrChan:
-			if stderrOutput != "" {
-				output = output + "\n\nSTDERR:\n" + stderrOutput
-			}
-		case <-time.After(100 * time.Millisecond):
-			// No stderr available yet, that's OK
+		// Check if there's stderr output
+		stderrOutput := <-stderrChan
+		stderrOutput = strings.TrimSpace(stderrOutput)
+		if stderrOutput != "" {
+			output = output + "\n\nSTDERR:\n" + stderrOutput
 		}
 
 		return output, nil
@@ -205,12 +234,6 @@ func (bs *BashSession) execute(command string, workdir string, timeout time.Dura
 func (bs *BashSession) close() {
 	bs.mutex.Lock()
 	defer bs.mutex.Unlock()
-
-	if !bs.running {
-		return
-	}
-
-	bs.running = false
 
 	// Close pipes
 	if bs.stdin != nil {
@@ -225,7 +248,12 @@ func (bs *BashSession) close() {
 
 	// Kill the process
 	if bs.cmd != nil && bs.cmd.Process != nil {
-		bs.cmd.Process.Kill()
+		pgid, err := syscall.Getpgid(bs.cmd.Process.Pid)
+		if err == nil {
+			syscall.Kill(-pgid, syscall.SIGKILL)
+		} else {
+			bs.cmd.Process.Kill()
+		}
 		bs.cmd.Wait()
 	}
 }
