@@ -14,12 +14,12 @@ import (
 
 type GetToolsFunc func(params map[string]interface{}) ([]tool.BaseTool, error)
 
-func GetBuiltinTools(category string, params map[string]interface{}) ([]tool.BaseTool, error) {
+func GetBuiltinTools(ctx context.Context, category string, params map[string]interface{}) ([]tool.BaseTool, error) {
 	switch category {
 	case "filesystem":
-		return getFileSystemTools(params)
+		return getFileSystemTools(ctx, params)
 	case "cmd":
-		return getCommandTools(params)
+		return getCommandTools(ctx, params)
 	}
 	return nil, fmt.Errorf("not found %s tools", category)
 }

@@ -91,6 +91,8 @@ var RootCmd = &cobra.Command{
 
 		var tools []tool.BaseTool
 		systemPrompt := preset.System
+		bash := utils.NewBashManager()
+		defer bash.Close()
 
 		// builtin tools
 		for _, builtinTool := range preset.Tools {
@@ -98,7 +100,7 @@ var RootCmd = &cobra.Command{
 			if !ok {
 				return fmt.Errorf("tool config %s not found", builtinTool)
 			}
-			builtinToolList, err := builtintools.GetBuiltinTools(toolCfg.Category, toolCfg.Params)
+			builtinToolList, err := builtintools.GetBuiltinTools(context.WithValue(cmd.Context(), "bash", bash), toolCfg.Category, toolCfg.Params)
 			if err != nil {
 				return err
 			}
@@ -137,8 +139,9 @@ var RootCmd = &cobra.Command{
 				preset.Skill.Timeout = 30
 			}
 			cmdTool := skilltools.RunTerminalCommandTool{
-				WorkingDir: preset.Skill.WorkDir,
-				Timeout:    time.Duration(preset.Skill.Timeout) * time.Second,
+				WorkingDir:  preset.Skill.WorkDir,
+				Timeout:     time.Duration(preset.Skill.Timeout) * time.Second,
+				BashMannger: bash,
 			}
 			skillstools = append(skillstools, &cmdTool)
 			if preset.Skill.AutoApproval {

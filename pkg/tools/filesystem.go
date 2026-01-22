@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/bytedance/sonic"
@@ -10,7 +11,7 @@ import (
 	"github.com/mark3labs/mcp-filesystem-server/filesystemserver"
 )
 
-func getFileSystemTools(params map[string]interface{}) ([]tool.BaseTool, error) {
+func getFileSystemTools(ctx context.Context, params map[string]interface{}) ([]tool.BaseTool, error) {
 	workDir, ok := params["workDir"]
 	if !ok {
 		return nil, fmt.Errorf("workDir params empty")

@@ -11,13 +11,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Arvintian/chat-agent/pkg/utils"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 )
 
 // RunTerminalCommandTool allows agents to execute terminal commands.
 type RunTerminalCommandTool struct {
-	Name string
+	Name        string
+	BashMannger *utils.BashManager
 	// WorkingDir is the default working directory for commands
 	WorkingDir string
 	// Timeout is the maximum duration for command execution
@@ -108,6 +110,10 @@ func (t *RunTerminalCommandTool) InvokableRun(ctx context.Context, argumentsInJS
 	if runtime.GOOS == "windows" {
 		cmd = exec.CommandContext(timeoutCtx, "powershell", "-Command", args.Command)
 	} else {
+		if t.BashMannger != nil {
+			return t.BashMannger.ExecuteCommand(args.Command, workingDir, t.Timeout)
+		}
+		// fallback with exec
 		cmd = exec.CommandContext(timeoutCtx, "sh", "-c", args.Command)
 	}
 
