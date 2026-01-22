@@ -72,10 +72,10 @@ type MCPServer struct {
 }
 
 type Tool struct {
-	Category          string   `yaml:"category"`
-	Params            string   `yaml:"params"`
-	AutoApproval      bool     `yaml:"autoApproval"`
-	AutoApprovalTools []string `yaml:"autoApprovalTools"`
+	Category          string                 `yaml:"category"`
+	Params            map[string]interface{} `yaml:"params"`
+	AutoApproval      bool                   `yaml:"autoApproval"`
+	AutoApprovalTools []string               `yaml:"autoApprovalTools"`
 }
 
 // LoadConfig loads configuration from file and saves to global variable

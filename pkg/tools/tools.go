@@ -12,12 +12,14 @@ import (
 	mcpserver "github.com/mark3labs/mcp-go/server"
 )
 
-type GetToolsFunc func(params string) ([]tool.BaseTool, error)
+type GetToolsFunc func(params map[string]interface{}) ([]tool.BaseTool, error)
 
-func GetBuiltinTools(category string, params string) ([]tool.BaseTool, error) {
+func GetBuiltinTools(category string, params map[string]interface{}) ([]tool.BaseTool, error) {
 	switch category {
 	case "filesystem":
 		return getFileSystemTools(params)
+	case "cmd":
+		return getCommandTools(params)
 	}
 	return nil, fmt.Errorf("not found %s tools", category)
 }

@@ -10,8 +10,16 @@ import (
 	"github.com/mark3labs/mcp-filesystem-server/filesystemserver"
 )
 
-func getFileSystemTools(workDir string) ([]tool.BaseTool, error) {
-	fss, err := filesystemserver.NewFilesystemServer([]string{workDir})
+func getFileSystemTools(params map[string]interface{}) ([]tool.BaseTool, error) {
+	workDir, ok := params["workDir"]
+	if !ok {
+		return nil, fmt.Errorf("workDir params empty")
+	}
+	dir, ok := workDir.(string)
+	if !ok {
+		return nil, fmt.Errorf("workDir params error")
+	}
+	fss, err := filesystemserver.NewFilesystemServer([]string{dir})
 	if err != nil {
 		return nil, err
 	}

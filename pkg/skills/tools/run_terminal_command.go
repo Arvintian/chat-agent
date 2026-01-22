@@ -17,6 +17,7 @@ import (
 
 // RunTerminalCommandTool allows agents to execute terminal commands.
 type RunTerminalCommandTool struct {
+	Name string
 	// WorkingDir is the default working directory for commands
 	WorkingDir string
 	// Timeout is the maximum duration for command execution
@@ -35,8 +36,12 @@ type RunTerminalCommandArgs struct {
 
 // Info returns the tool's schema information.
 func (t *RunTerminalCommandTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
+	name := "skill_cmd"
+	if t.Name != "" {
+		name = t.Name
+	}
 	return &schema.ToolInfo{
-		Name: "skill_cmd",
+		Name: name,
 		Desc: fmt.Sprintf(`Execute a terminal command and return the output.
 Use this tool to:
 - Run git commands (git status, git diff, git commit, etc.)
