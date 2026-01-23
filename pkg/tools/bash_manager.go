@@ -1,4 +1,4 @@
-package utils
+package tools
 
 import (
 	"bufio"
@@ -36,7 +36,7 @@ func NewBashManager() *BashManager {
 }
 
 // ExecuteCommand executes a bash command in the session
-func (bm *BashManager) ExecuteCommand(command string, workdir string, timeout time.Duration) (string, error) {
+func (bm *BashManager) ExecuteCommand(ctx context.Context, command string, workdir string, timeout time.Duration) (string, error) {
 	bm.sessionMutex.Lock()
 	defer bm.sessionMutex.Unlock()
 
@@ -47,26 +47,13 @@ func (bm *BashManager) ExecuteCommand(command string, workdir string, timeout ti
 		}
 	}
 
-	output, err := bm.session.execute(command, workdir, timeout)
+	output, err := bm.session.execute(ctx, command, workdir, timeout)
 	if !bm.session.running {
 		// If an error occurs, close and restart the session
 		bm.session.close()
+		bm.createSession()
 	}
 	return output, err
-}
-
-// RestartSession restarts the bash session
-func (bm *BashManager) RestartSession() error {
-	bm.sessionMutex.Lock()
-	defer bm.sessionMutex.Unlock()
-
-	// Close existing session
-	if bm.session != nil {
-		bm.session.close()
-	}
-
-	// Create new session
-	return bm.createSession()
 }
 
 // createSession creates a new bash session
@@ -109,7 +96,7 @@ func (bm *BashManager) createSession() error {
 }
 
 // execute runs a command in the bash session
-func (bs *BashSession) execute(command string, workdir string, timeout time.Duration) (string, error) {
+func (bs *BashSession) execute(ctx context.Context, command string, workdir string, timeout time.Duration) (string, error) {
 	bs.mutex.Lock()
 	defer bs.mutex.Unlock()
 
@@ -134,7 +121,7 @@ func (bs *BashSession) execute(command string, workdir string, timeout time.Dura
 	}
 
 	// Create context with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	// Read output
@@ -211,7 +198,7 @@ func (bs *BashSession) execute(command string, workdir string, timeout time.Dura
 	select {
 	case <-ctx.Done():
 		bs.running = false
-		return fmt.Sprintf("command timed out after %v", timeout), nil
+		return fmt.Sprintf("command timed out after %v or context canceled, process killed", timeout), nil
 	case err := <-errorChan:
 		bs.running = false
 		return "", fmt.Errorf("error reading output: %w", err)

@@ -57,6 +57,9 @@ var RootCmd = &cobra.Command{
 		if err := logger.Init(); err != nil {
 			return err
 		}
+		cleanupRegistry := utils.NewCleanupRegistry()
+		defer cleanupRegistry.Execute()
+
 		// Load configuration file
 		cfg, err := config.LoadConfig(configPath)
 		if err != nil {
@@ -91,8 +94,6 @@ var RootCmd = &cobra.Command{
 
 		var tools []tool.BaseTool
 		systemPrompt := preset.System
-		bash := utils.NewBashManager()
-		defer bash.Close()
 
 		// builtin tools
 		for _, builtinTool := range preset.Tools {
@@ -100,7 +101,7 @@ var RootCmd = &cobra.Command{
 			if !ok {
 				return fmt.Errorf("tool config %s not found", builtinTool)
 			}
-			builtinToolList, err := builtintools.GetBuiltinTools(context.WithValue(cmd.Context(), "bash", bash), toolCfg.Category, toolCfg.Params)
+			builtinToolList, err := builtintools.GetBuiltinTools(context.WithValue(cmd.Context(), "cleanup", cleanupRegistry), toolCfg.Category, toolCfg.Params)
 			if err != nil {
 				return err
 			}
@@ -138,12 +139,6 @@ var RootCmd = &cobra.Command{
 			if preset.Skill.Timeout <= 0 {
 				preset.Skill.Timeout = 30
 			}
-			cmdTool := skilltools.RunTerminalCommandTool{
-				WorkingDir:  preset.Skill.WorkDir,
-				Timeout:     time.Duration(preset.Skill.Timeout) * time.Second,
-				BashMannger: bash,
-			}
-			skillstools = append(skillstools, &cmdTool)
 			if preset.Skill.AutoApproval {
 				tools = append(tools, skillstools...)
 			} else {
@@ -252,6 +247,7 @@ var RootCmd = &cobra.Command{
 		for {
 			if scanner.Prompt.Placeholder != placeholder {
 				scanner.Prompt.Placeholder = placeholder
+				scanner.HistoryEnable()
 			}
 			line, err := scanner.Readline()
 			switch {

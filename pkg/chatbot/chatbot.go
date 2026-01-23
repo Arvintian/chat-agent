@@ -84,6 +84,7 @@ func (cb *ChatBot) StreamChat(ctx context.Context, userInput string) error {
 				}
 				var apResult *mcp.ApprovalResult
 				cb.scanner.Prompt.Placeholder = "Y/N"
+				cb.scanner.HistoryDisable()
 				for {
 					fmt.Printf("%s\n", approvalInfo.String())
 					line, err := cb.scanner.Readline()
@@ -95,6 +96,8 @@ func (cb *ChatBot) StreamChat(ctx context.Context, userInput string) error {
 					case err != nil:
 						return err
 					}
+					cb.scanner.History.Buf.Remove(cb.scanner.History.Size() - 1)
+					cb.scanner.History.Pos = cb.scanner.History.Size()
 					input := strings.TrimSpace(line)
 					if strings.ToUpper(input) == "Y" {
 						apResult = &mcp.ApprovalResult{Approved: true}
