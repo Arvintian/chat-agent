@@ -60,7 +60,7 @@ func (t *RunTerminalCommandTool) Info(ctx context.Context) (*schema.ToolInfo, er
 		Name: "cmd",
 		Desc: fmt.Sprintf(`Execute a terminal command, wait exit and return the output.
 Long-running tasks cannot be executed; they will timeout after %v and be killed.
-Windows systems will use PowerShell for execution, while other platforms will use shell, current system is %s.`, t.Timeout, runtime.GOOS),
+Uses persistent shell sessions (bash on Unix, PowerShell on Windows) for better performance, current system is %s.`, t.Timeout, runtime.GOOS),
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"command": {
 				Type:     schema.String,
@@ -111,14 +111,16 @@ func (t *RunTerminalCommandTool) InvokableRun(ctx context.Context, argumentsInJS
 	timeoutCtx, cancel := context.WithTimeout(ctx, t.Timeout)
 	defer cancel()
 
+	// Use bash manager for persistent sessions on all platforms
+	if t.BashMannger != nil {
+		return t.BashMannger.ExecuteCommand(timeoutCtx, args.Command, workingDir, t.Timeout)
+	}
+
+	// Fallback with exec for platforms without bash manager support
 	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" {
 		cmd = exec.CommandContext(timeoutCtx, "powershell", "-Command", args.Command)
 	} else {
-		if t.BashMannger != nil {
-			return t.BashMannger.ExecuteCommand(timeoutCtx, args.Command, workingDir, t.Timeout)
-		}
-		// fallback with exec
 		cmd = exec.CommandContext(timeoutCtx, "sh", "-c", args.Command)
 	}
 
