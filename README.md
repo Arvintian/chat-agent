@@ -60,9 +60,78 @@ chat-agent --debug
 # Specify custom config file
 chat-agent --config /path/to/config.yml
 
-# Show help
+ # Show help
 chat-agent --help
+
+# Show version
+chat-agent --version
 ```
+
+## Building from Source
+
+### Prerequisites
+- Go 1.25 or higher
+- Git
+
+### Build Commands
+
+```bash
+# Build for current platform
+make build
+
+# Build for all platforms (Linux, macOS, Windows)
+make build-all
+
+# Build for Linux only (x86_64 and ARM64)
+make build-linux
+
+# Build for macOS only (x86_64 and ARM64)
+make build-darwin
+
+# Create release archives
+make release
+
+# Run tests
+make test
+
+# Run linter
+make lint
+
+# Clean build artifacts
+make clean
+
+# Install to /usr/local/bin
+make install
+```
+
+### Cross-Compilation
+The Makefile supports cross-compilation for:
+- **Linux**: x86_64 (amd64), ARM64
+- **macOS**: x86_64 (amd64), ARM64 (Apple Silicon)
+- **Windows**: x86_64 (amd64)
+
+## Release Process
+
+### Creating a Release
+1. Update version using the release script:
+   ```bash
+   ./scripts/release.sh
+   ```
+
+2. Or manually create a git tag:
+   ```bash
+   git tag -a v1.0.0 -m "Release v1.0.0"
+   git push origin v1.0.0
+   ```
+
+3. GitHub Actions will automatically:
+   - Build binaries for all platforms
+   - Create release archives (.tar.gz for Unix, .zip for Windows)
+   - Publish to GitHub Releases
+
+### Version Management
+- Check current version: `./scripts/version.sh`
+- View available binaries: `ls -la dist/`
 
 ## Configuration
 

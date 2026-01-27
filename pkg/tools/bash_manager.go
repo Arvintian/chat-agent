@@ -1,3 +1,6 @@
+//go:build !windows
+// +build !windows
+
 package tools
 
 import (
@@ -30,7 +33,7 @@ type BashManager struct {
 	sessionMutex sync.Mutex
 }
 
-// NewBashManager creates a new bash manager
+// NewBashManager creates a new BashManager
 func NewBashManager() *BashManager {
 	return &BashManager{}
 }

@@ -31,7 +31,9 @@ func getCommandTools(ctx context.Context, params map[string]interface{}) ([]tool
 	}
 	bash := NewBashManager()
 	if v, ok := ctx.Value("cleanup").(*utils.CleanupRegistry); ok {
-		v.Register(bash.Close)
+		v.Register(func() {
+			bash.Close()
+		})
 	}
 	cmdTool := RunTerminalCommandTool{
 		WorkingDir:  cfg.WorkingDir,
