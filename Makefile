@@ -49,11 +49,6 @@ clean:
 test:
 	go test ./...
 
-.PHONY: lint
-lint:
-	go vet ./...
-	golangci-lint run
-
 .PHONY: install
 install: build
 	cp dist/chat-agent /usr/local/bin/chat-agent
