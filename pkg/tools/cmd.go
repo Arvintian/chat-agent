@@ -29,11 +29,7 @@ func getCommandTools(ctx context.Context, params map[string]interface{}) ([]tool
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = DEFAULT_CMD_TIMEOUT
 	}
-	bash := NewBashManager()
 	if v, ok := ctx.Value("cleanup").(*utils.CleanupRegistry); ok {
-		v.Register(func() {
-			bash.Close()
-		})
 		v.Register(func() {
 			tm := GetTaskManager()
 			for _, task := range tm.ListTasks() {
@@ -44,15 +40,13 @@ func getCommandTools(ctx context.Context, params map[string]interface{}) ([]tool
 		})
 	}
 	cmdTool := RunTerminalCommandTool{
-		WorkingDir:  cfg.WorkingDir,
-		Timeout:     time.Duration(cfg.Timeout) * time.Second,
-		BashMannger: bash,
+		WorkingDir: cfg.WorkingDir,
+		Timeout:    time.Duration(cfg.Timeout) * time.Second,
 	}
 	return []tool.BaseTool{&cmdTool}, nil
 }
 
 type RunTerminalCommandTool struct {
-	BashMannger     *BashManager
 	WorkingDir      string        `json:"workDir"`
 	Timeout         time.Duration `json:"timeout"`
 	AllowedCommands []string
@@ -67,12 +61,11 @@ type RunTerminalCommandArgs struct {
 func (t *RunTerminalCommandTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
 	return &schema.ToolInfo{
 		Name: "cmd",
-		Desc: fmt.Sprintf(`Execute a terminal command, wait exit and return the output.
+		Desc: fmt.Sprintf(`Execute a terminal command, wait exit and return the output, bash on Unix, PowerShell on Windows, current system is %s.
 Long-running tasks cannot be executed; they will timeout after %v and be killed.
-Uses persistent shell sessions (bash on Unix, PowerShell on Windows), current system is %s.
 Use background=true to run commands in the background (for long-running tasks).
 Use the "cmd_bg" tool to manage background tasks (list, show, output, remove).
-`, t.Timeout, runtime.GOOS),
+`, runtime.GOOS, t.Timeout),
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"command": {
 				Type:     schema.String,
@@ -132,28 +125,36 @@ func (t *RunTerminalCommandTool) InvokableRun(ctx context.Context, argumentsInJS
 	timeoutCtx, cancel := context.WithTimeout(ctx, t.Timeout)
 	defer cancel()
 
-	// Use bash manager for persistent sessions on all platforms
-	if t.BashMannger != nil {
-		return t.BashMannger.ExecuteCommand(timeoutCtx, args.Command, workingDir, t.Timeout)
-	}
-
 	// Fallback with exec for platforms without bash manager support
 	var cmd *exec.Cmd
-	if runtime.GOOS == "windows" {
-		cmd = exec.CommandContext(timeoutCtx, "powershell", "-Command", args.Command)
-	} else {
-		cmd = exec.CommandContext(timeoutCtx, "sh", "-c", args.Command)
-	}
-
+	platform := getTaskPlatform()
+	cmd = platform.createCommand(ctx, args.Command)
+	platform.setSysProcAttr(cmd)
 	if workingDir != "" {
 		cmd.Dir = workingDir
 	}
-
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	err := cmd.Run()
+	// cmd run and wait
+	err := cmd.Start()
+	if err != nil {
+		return "", err
+	}
+	if err := platform.setExitGroup(cmd); err != nil {
+		return "", err
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Wait()
+	}()
+	select {
+	case err = <-done:
+	case <-timeoutCtx.Done():
+		platform.killProcess(cmd.Process)
+		err = <-done
+	}
 
 	// Build result
 	var result strings.Builder

@@ -35,6 +35,7 @@ type BackgroundTask struct {
 	Process    *exec.Cmd
 	CancelFunc context.CancelFunc
 	mu         sync.Mutex
+	platform   taskPlatform
 }
 
 type BackgroundTaskManager struct {
@@ -82,6 +83,7 @@ func (tm *BackgroundTaskManager) StartTask(command, workdir string) (*Background
 	p := getTaskPlatform()
 	cmd := p.createCommand(ctx, command)
 	p.setSysProcAttr(cmd)
+	task.platform = p
 
 	if workdir != "" {
 		cmd.Dir = workdir
@@ -105,6 +107,13 @@ func (tm *BackgroundTaskManager) StartTask(command, workdir string) (*Background
 		stderr.Close()
 		cancel()
 		return nil, fmt.Errorf("failed to start command: %w", err)
+	}
+
+	if err := task.platform.setExitGroup(cmd); err != nil {
+		stdout.Close()
+		stderr.Close()
+		cancel()
+		return nil, fmt.Errorf("failed to start command with exit group: %w", err)
 	}
 
 	task.Process = cmd
@@ -202,7 +211,7 @@ func (tm *BackgroundTaskManager) killTaskInternal(id string) error {
 	task.CancelFunc()
 
 	if task.Process != nil && task.Process.Process != nil {
-		killTaskProcess(task.Process.Process)
+		task.platform.killProcess(task.Process.Process)
 	}
 
 	return nil
@@ -341,5 +350,6 @@ func (t *BackgroundTask) GetOutputString() string {
 type taskPlatform interface {
 	createCommand(ctx context.Context, command string) *exec.Cmd
 	setSysProcAttr(cmd *exec.Cmd)
+	setExitGroup(cmd *exec.Cmd) error
 	killProcess(process *os.Process) error
 }

@@ -11,15 +11,15 @@ import (
 
 type unixTask struct{}
 
-func (unixTask) createCommand(ctx context.Context, command string) *exec.Cmd {
+func (t *unixTask) createCommand(ctx context.Context, command string) *exec.Cmd {
 	return exec.CommandContext(ctx, "sh", "-c", command)
 }
 
-func (unixTask) setSysProcAttr(cmd *exec.Cmd) {
+func (t *unixTask) setSysProcAttr(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 }
 
-func (unixTask) killProcess(process *os.Process) error {
+func (t *unixTask) killProcess(process *os.Process) error {
 	pgid, err := syscall.Getpgid(process.Pid)
 	if err == nil {
 		return syscall.Kill(-pgid, syscall.SIGKILL)
@@ -27,10 +27,10 @@ func (unixTask) killProcess(process *os.Process) error {
 	return process.Kill()
 }
 
-func getTaskPlatform() taskPlatform {
-	return unixTask{}
+func (t *unixTask) setExitGroup(cmd *exec.Cmd) error {
+	return nil
 }
 
-func killTaskProcess(process *os.Process) error {
-	return getTaskPlatform().killProcess(process)
+func getTaskPlatform() taskPlatform {
+	return &unixTask{}
 }
