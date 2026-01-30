@@ -20,6 +20,8 @@ func GetBuiltinTools(ctx context.Context, category string, params map[string]int
 		return getFileSystemTools(ctx, params)
 	case "cmd":
 		return getCommandTools(ctx, params)
+	case "cmd_bg":
+		return getBackgroundCommandTools(ctx, params)
 	}
 	return nil, fmt.Errorf("not found %s tools", category)
 }

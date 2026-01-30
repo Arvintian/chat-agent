@@ -120,6 +120,15 @@ var RootCmd = &cobra.Command{
 					}
 				}
 			}
+
+			// Auto-add cmd_bg tool when cmd tool is enabled (without approval control)
+			if toolCfg.Category == "cmd" {
+				bgToolList, err := builtintools.GetBuiltinTools(context.WithValue(cmd.Context(), "cleanup", cleanupRegistry), "cmd_bg", nil)
+				if err != nil {
+					return err
+				}
+				tools = append(tools, bgToolList...)
+			}
 		}
 
 		// skills

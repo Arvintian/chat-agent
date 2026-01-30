@@ -65,25 +65,18 @@ type RunTerminalCommandArgs struct {
 }
 
 func (t *RunTerminalCommandTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
-	bgHelp := `Background Commands:
-  bg start <command>       Start a command in background
-  bg list                  List all background tasks
-  bg show <id>             Show details of a background task
-  bg output <id>           Get output of a background task
-  bg remove <id>           Remove/kill a background task`
-
 	return &schema.ToolInfo{
 		Name: "cmd",
 		Desc: fmt.Sprintf(`Execute a terminal command, wait exit and return the output.
 Long-running tasks cannot be executed; they will timeout after %v and be killed.
 Uses persistent shell sessions (bash on Unix, PowerShell on Windows), current system is %s.
-Background task management is available. Use "bg" commands:
-%s
-`, t.Timeout, runtime.GOOS, bgHelp),
+Use background=true to run commands in the background (for long-running tasks).
+Use the "cmd_bg" tool to manage background tasks (list, show, output, remove).
+`, t.Timeout, runtime.GOOS),
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"command": {
 				Type:     schema.String,
-				Desc:     "The command to execute (e.g., 'git status', 'ls -la'). Use 'bg list' for background task management.",
+				Desc:     "The command to execute (e.g., 'git status', 'ls -la').",
 				Required: true,
 			},
 			"working_dir": {
@@ -109,10 +102,6 @@ func (t *RunTerminalCommandTool) InvokableRun(ctx context.Context, argumentsInJS
 
 	if args.Command == "" {
 		return "", fmt.Errorf("command is required")
-	}
-
-	if strings.HasPrefix(args.Command, "bg ") {
-		return t.handleBackgroundCommand(strings.TrimSpace(strings.TrimPrefix(args.Command, "bg ")))
 	}
 
 	// Check allowed commands if configured
@@ -194,141 +183,13 @@ func (t *RunTerminalCommandTool) InvokableRun(ctx context.Context, argumentsInJS
 	return result.String(), nil
 }
 
-// Ensure RunTerminalCommandTool implements tool.InvokableTool
-var _ tool.InvokableTool = (*RunTerminalCommandTool)(nil)
-
-func (t *RunTerminalCommandTool) handleBackgroundCommand(bgCommand string) (string, error) {
-	parts := strings.Fields(bgCommand)
-	if len(parts) == 0 {
-		return t.formatTaskList()
-	}
-
-	command := parts[0]
-	args := strings.Join(parts[1:], " ")
-
-	switch command {
-	case "start":
-		if args == "" {
-			return "", fmt.Errorf("usage: bg start <command>")
-		}
-		task, err := GetTaskManager().StartTask(args, t.WorkingDir)
-		if err != nil {
-			return "", fmt.Errorf("failed to start background task: %w", err)
-		}
-		return fmt.Sprintf("Background task started with ID: %s\nUse 'bg output %s' to check output, 'bg show %s' for details", task.ID, task.ID, task.ID), nil
-
-	case "list", "ls":
-		return t.formatTaskList()
-
-	case "show":
-		if args == "" {
-			return "", fmt.Errorf("usage: bg show <task_id>")
-		}
-		return t.formatTaskDetails(args)
-
-	case "output", "logs":
-		if args == "" {
-			return "", fmt.Errorf("usage: bg output <task_id>")
-		}
-		return t.formatTaskOutput(args)
-
-	case "remove", "rm", "kill", "stop":
-		if args == "" {
-			return "", fmt.Errorf("usage: bg remove <task_id>")
-		}
-		task, ok := GetTaskManager().GetTask(args)
-		if !ok {
-			return "", fmt.Errorf("task not found: %s", args)
-		}
-		if err := GetTaskManager().RemoveTask(args); err != nil {
-			return "", fmt.Errorf("failed to remove task: %w", err)
-		}
-		if task.Status == TaskStatusRunning {
-			return fmt.Sprintf("Task %s killed and removed", args), nil
-		}
-		return fmt.Sprintf("Task %s removed", args), nil
-
-	default:
-		return "", fmt.Errorf("unknown bg command: %s\nAvailable commands: start, list, show, output, remove", command)
-	}
-}
-
 func (t *RunTerminalCommandTool) runInBackground(command, workdir string) (string, error) {
 	task, err := GetTaskManager().StartTask(command, workdir)
 	if err != nil {
 		return "", fmt.Errorf("failed to start background task: %w", err)
 	}
-	return fmt.Sprintf("Background task started with ID: %s\nCommand: %s\nUse 'bg output %s' to check output", task.ID, command, task.ID), nil
+	return fmt.Sprintf("Background task started with ID: %s\nCommand: %s\nUse 'cmd_bg' with action='output' and task_id='%s' to check output", task.ID, command, task.ID), nil
 }
 
-func (t *RunTerminalCommandTool) formatTaskList() (string, error) {
-	tasks := GetTaskManager().ListTasks()
-	if len(tasks) == 0 {
-		return "No background tasks", nil
-	}
-
-	var sb strings.Builder
-	sb.WriteString("Background Tasks:\n")
-	sb.WriteString(strings.Repeat("-", 100))
-	sb.WriteString("\n")
-	sb.WriteString(fmt.Sprintf("%-6s %-10s %-20s %-15s %-30s\n", "ID", "Status", "Duration", "Exit Code", "Command"))
-	sb.WriteString(strings.Repeat("-", 100))
-	sb.WriteString("\n")
-
-	for _, task := range tasks {
-		status := string(task.Status)
-		duration := task.GetDuration()
-		command := task.Command
-		if len(command) > 30 {
-			command = command[:27] + "..."
-		}
-
-		exitCode := "N/A"
-		if task.ExitCode != nil {
-			exitCode = fmt.Sprintf("%d", *task.ExitCode)
-		}
-
-		sb.WriteString(fmt.Sprintf("%-6s %-10s %-20s %-15s %-30s\n", task.ID, status, duration, exitCode, command))
-	}
-
-	return sb.String(), nil
-}
-
-func (t *RunTerminalCommandTool) formatTaskDetails(taskID string) (string, error) {
-	task, ok := GetTaskManager().GetTask(taskID)
-	if !ok {
-		return "", fmt.Errorf("task not found: %s", taskID)
-	}
-
-	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Task ID: %s\n", task.ID))
-	sb.WriteString(fmt.Sprintf("Status: %s\n", task.Status))
-	sb.WriteString(fmt.Sprintf("Command: %s\n", task.Command))
-	sb.WriteString(fmt.Sprintf("Working Directory: %s\n", task.WorkingDir))
-	sb.WriteString(fmt.Sprintf("Start Time: %s\n", task.StartTime.Format("2006-01-02 15:04:05")))
-	if task.EndTime != nil {
-		sb.WriteString(fmt.Sprintf("End Time: %s\n", task.EndTime.Format("2006-01-02 15:04:05")))
-		sb.WriteString(fmt.Sprintf("Duration: %s\n", task.GetDuration()))
-	} else {
-		sb.WriteString(fmt.Sprintf("Running for: %s\n", task.GetDuration()))
-	}
-	if task.ExitCode != nil {
-		sb.WriteString(fmt.Sprintf("Exit Code: %d\n", *task.ExitCode))
-	}
-
-	return sb.String(), nil
-}
-
-func (t *RunTerminalCommandTool) formatTaskOutput(taskID string) (string, error) {
-	task, ok := GetTaskManager().GetTask(taskID)
-	if !ok {
-		return "", fmt.Errorf("task not found: %s", taskID)
-	}
-
-	output := task.GetOutputString()
-	if output == "" {
-		output = "(no output yet)"
-	}
-
-	return fmt.Sprintf("Task %s Output:\n%s\n", taskID, output), nil
-}
+// Ensure RunTerminalCommandTool implements tool.InvokableTool
+var _ tool.InvokableTool = (*RunTerminalCommandTool)(nil)
