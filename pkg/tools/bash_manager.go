@@ -1,6 +1,3 @@
-//go:build !windows
-// +build !windows
-
 package tools
 
 import (
@@ -9,138 +6,125 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 )
 
-// BashSession represents a persistent bash session
-type BashSession struct {
-	cmd          *exec.Cmd
-	stdin        io.WriteCloser
-	stdout       io.ReadCloser
-	stderr       io.ReadCloser
-	mutex        sync.Mutex
-	sessionMutex sync.RWMutex
-	running      bool
-	workingDir   string
+type sessionType string
+
+const (
+	sessionTypeBash       sessionType = "bash"
+	sessionTypePowerShell sessionType = "powershell"
+)
+
+type session struct {
+	cmd     *exec.Cmd
+	stdin   io.WriteCloser
+	stdout  io.ReadCloser
+	stderr  io.ReadCloser
+	mutex   sync.Mutex
+	running bool
+	platform
 }
 
-// BashManager manages bash sessions
 type BashManager struct {
-	session      *BashSession
+	session      *session
 	sessionMutex sync.Mutex
 }
 
-// NewBashManager creates a new BashManager
+type platform interface {
+	createCommand() *exec.Cmd
+	buildCommandString(command, workdir, marker string) string
+	getMarker() string
+	killProcess(cmd *exec.Cmd)
+	sessionType() string
+}
+
 func NewBashManager() *BashManager {
 	return &BashManager{}
 }
 
-// ExecuteCommand executes a bash command in the session
 func (bm *BashManager) ExecuteCommand(ctx context.Context, command string, workdir string, timeout time.Duration) (string, error) {
 	bm.sessionMutex.Lock()
 	defer bm.sessionMutex.Unlock()
 
-	// Create session if it doesn't exist
 	if bm.session == nil || !bm.session.running {
 		if err := bm.createSession(); err != nil {
-			return "", fmt.Errorf("failed to create bash session: %w", err)
+			return "", fmt.Errorf("failed to create %s session: %w", bm.session.sessionType(), err)
 		}
 	}
 
 	output, err := bm.session.execute(ctx, command, workdir, timeout)
 	if !bm.session.running {
-		// If an error occurs, close and restart the session
 		bm.session.close()
 		bm.createSession()
 	}
 	return output, err
 }
 
-// createSession creates a new bash session
 func (bm *BashManager) createSession() error {
-	session := &BashSession{}
+	s := &session{}
+	s.platform = getPlatform()
+	s.cmd = s.platform.createCommand()
 
-	// Create the bash command
-	session.cmd = exec.Command("bash")
-
-	session.cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setpgid: true,
-		Pgid:    0,
-	}
-
-	// Get stdin/stdout/stderr pipes
 	var err error
-	session.stdin, err = session.cmd.StdinPipe()
+	s.stdin, err = s.cmd.StdinPipe()
 	if err != nil {
 		return fmt.Errorf("failed to create stdin pipe: %w", err)
 	}
 
-	session.stdout, err = session.cmd.StdoutPipe()
+	s.stdout, err = s.cmd.StdoutPipe()
 	if err != nil {
 		return fmt.Errorf("failed to create stdout pipe: %w", err)
 	}
 
-	session.stderr, err = session.cmd.StderrPipe()
+	s.stderr, err = s.cmd.StderrPipe()
 	if err != nil {
 		return fmt.Errorf("failed to create stderr pipe: %w", err)
 	}
 
-	// Start the bash process
-	if err := session.cmd.Start(); err != nil {
-		return fmt.Errorf("failed to start bash: %w", err)
+	if err := s.cmd.Start(); err != nil {
+		return fmt.Errorf("failed to start %s: %w", s.sessionType(), err)
 	}
 
-	session.running = true
-	bm.session = session
+	s.running = true
+	bm.session = s
 	return nil
 }
 
-// execute runs a command in the bash session
-func (bs *BashSession) execute(ctx context.Context, command string, workdir string, timeout time.Duration) (string, error) {
-	bs.mutex.Lock()
-	defer bs.mutex.Unlock()
+func (s *session) execute(ctx context.Context, command string, workdir string, timeout time.Duration) (string, error) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
 
-	if !bs.running {
-		return "", fmt.Errorf("bash session is not running")
+	if !s.running {
+		return "", fmt.Errorf("%s session is not running", s.sessionType())
 	}
 
-	// Create a unique marker for command completion
-	marker := fmt.Sprintf("__BASH_CMD_DONE_%d__", time.Now().UnixNano())
+	marker := s.getMarker()
+	fullCommand := s.buildCommandString(command, workdir, marker)
 
-	// Construct command with marker and error capture
-	fullCommand := fmt.Sprintf("(%s); echo '%s'$?; echo '%s' > /dev/stderr\n", command, marker, marker)
-
-	if workdir != "" {
-		fullCommand = fmt.Sprintf("cd %s && %s", workdir, fullCommand)
-	}
-
-	// Write command to bash
-	if _, err := bs.stdin.Write([]byte(fullCommand)); err != nil {
-		bs.running = false
+	if _, err := s.stdin.Write([]byte(fullCommand)); err != nil {
+		s.running = false
 		return "", fmt.Errorf("failed to write command: %w", err)
 	}
 
-	// Create context with timeout
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	// Read output
 	outputChan := make(chan string, 1)
 	errorChan := make(chan error, 1)
 
 	go func() {
 		var output strings.Builder
-		scanner := bufio.NewScanner(bs.stdout)
+		scanner := bufio.NewScanner(s.stdout)
 
 		for scanner.Scan() {
 			line := scanner.Text()
 
-			// Check if this is our completion marker
 			if strings.HasPrefix(line, marker) {
-				// Extract exit code
 				exitCode := strings.TrimPrefix(line, marker)
 				if exitCode != "0" {
 					output.WriteString(fmt.Sprintf("\n[Exit code: %s]", exitCode))
@@ -149,11 +133,10 @@ func (bs *BashSession) execute(ctx context.Context, command string, workdir stri
 				return
 			}
 
-			// Cmd output not end with newline
 			if strings.Contains(line, marker) {
 				out := strings.Split(line, marker)
 				if len(out) != 2 {
-					errorChan <- fmt.Errorf("read bash output error")
+					errorChan <- fmt.Errorf("read %s output error", s.sessionType())
 				}
 				cmdOut, exitCode := out[0], out[1]
 				output.WriteString(cmdOut)
@@ -174,13 +157,11 @@ func (bs *BashSession) execute(ctx context.Context, command string, workdir stri
 		}
 	}()
 
-	// Also capture stderr
 	stderrChan := make(chan string, 1)
 	go func() {
 		var stderr strings.Builder
-		scanner := bufio.NewScanner(bs.stderr)
+		scanner := bufio.NewScanner(s.stderr)
 
-		// Read stderr with a short buffer
 		for scanner.Scan() {
 			line := scanner.Text()
 			if strings.Contains(line, marker) {
@@ -197,58 +178,41 @@ func (bs *BashSession) execute(ctx context.Context, command string, workdir stri
 		stderrChan <- stderr.String()
 	}()
 
-	// Wait for completion or timeout
 	select {
 	case <-ctx.Done():
-		bs.running = false
+		s.running = false
 		return fmt.Sprintf("command timed out after %v or context canceled, process killed", timeout), nil
 	case err := <-errorChan:
-		bs.running = false
+		s.running = false
 		return "", fmt.Errorf("error reading output: %w", err)
 	case output := <-outputChan:
-		// Trim trailing newline
 		output = strings.TrimRight(output, "\n")
-
-		// Check if there's stderr output
 		stderrOutput := <-stderrChan
 		stderrOutput = strings.TrimSpace(stderrOutput)
 		if stderrOutput != "" {
 			output = output + "\n\nSTDERR:\n" + stderrOutput
 		}
-
 		return output, nil
 	}
 }
 
-// close closes the bash session
-func (bs *BashSession) close() {
-	bs.mutex.Lock()
-	defer bs.mutex.Unlock()
+func (s *session) close() {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
 
-	// Close pipes
-	if bs.stdin != nil {
-		bs.stdin.Close()
+	if s.stdin != nil {
+		s.stdin.Close()
 	}
-	if bs.stdout != nil {
-		bs.stdout.Close()
+	if s.stdout != nil {
+		s.stdout.Close()
 	}
-	if bs.stderr != nil {
-		bs.stderr.Close()
+	if s.stderr != nil {
+		s.stderr.Close()
 	}
 
-	// Kill the process
-	if bs.cmd != nil && bs.cmd.Process != nil {
-		pgid, err := syscall.Getpgid(bs.cmd.Process.Pid)
-		if err == nil {
-			syscall.Kill(-pgid, syscall.SIGKILL)
-		} else {
-			bs.cmd.Process.Kill()
-		}
-		bs.cmd.Wait()
-	}
+	s.killProcess(s.cmd)
 }
 
-// Close closes the bash manager and all sessions
 func (bm *BashManager) Close() {
 	bm.sessionMutex.Lock()
 	defer bm.sessionMutex.Unlock()
@@ -257,4 +221,82 @@ func (bm *BashManager) Close() {
 		bm.session.close()
 		bm.session = nil
 	}
+}
+
+func getPlatform() platform {
+	switch runtime.GOOS {
+	case "windows":
+		return windowsPlatform{}
+	default:
+		return unixPlatform{}
+	}
+}
+
+type unixPlatform struct{}
+
+func (unixPlatform) createCommand() *exec.Cmd {
+	cmd := exec.Command("bash")
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Setpgid: true,
+		Pgid:    0,
+	}
+	return cmd
+}
+
+func (unixPlatform) buildCommandString(command string, workdir string, marker string) string {
+	fullCommand := fmt.Sprintf("(%s); echo '%s'$?; echo '%s' > /dev/stderr\n", command, marker, marker)
+	if workdir != "" {
+		fullCommand = fmt.Sprintf("cd %s && %s", workdir, fullCommand)
+	}
+	return fullCommand
+}
+
+func (unixPlatform) getMarker() string {
+	return fmt.Sprintf("__BASH_CMD_DONE_%d__", time.Now().UnixNano())
+}
+
+func (unixPlatform) killProcess(cmd *exec.Cmd) {
+	if cmd == nil || cmd.Process == nil {
+		return
+	}
+	pgid, err := syscall.Getpgid(cmd.Process.Pid)
+	if err == nil {
+		syscall.Kill(-pgid, syscall.SIGKILL)
+	} else {
+		cmd.Process.Kill()
+	}
+	cmd.Wait()
+}
+
+func (unixPlatform) sessionType() string {
+	return string(sessionTypeBash)
+}
+
+type windowsPlatform struct{}
+
+func (windowsPlatform) createCommand() *exec.Cmd {
+	return exec.Command("powershell", "-NoLogo", "-NoProfile", "-Command", "-")
+}
+
+func (windowsPlatform) buildCommandString(command string, workdir string, marker string) string {
+	if workdir != "" {
+		return fmt.Sprintf("cd '%s'; %s; Write-Output '%s'$LASTEXITCODE; Write-Error '%s'", workdir, command, marker, marker)
+	}
+	return fmt.Sprintf("%s; Write-Output '%s'$LASTEXITCODE; Write-Error '%s'", command, marker, marker)
+}
+
+func (windowsPlatform) getMarker() string {
+	return fmt.Sprintf("__POWERSHELL_CMD_DONE_%d__", time.Now().UnixNano())
+}
+
+func (windowsPlatform) killProcess(cmd *exec.Cmd) {
+	if cmd == nil || cmd.Process == nil {
+		return
+	}
+	cmd.Process.Kill()
+	cmd.Wait()
+}
+
+func (windowsPlatform) sessionType() string {
+	return string(sessionTypePowerShell)
 }

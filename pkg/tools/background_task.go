@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -80,13 +81,9 @@ func (tm *BackgroundTaskManager) StartTask(command, workdir string) (*Background
 		CancelFunc: cancel,
 	}
 
-	var cmd *exec.Cmd
-	if runtime.GOOS == "windows" {
-		cmd = exec.CommandContext(ctx, "powershell", "-Command", command)
-	} else {
-		cmd = exec.CommandContext(ctx, "sh", "-c", command)
-	}
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	p := getTaskPlatform()
+	cmd := p.createCommand(ctx, command)
+	p.setSysProcAttr(cmd)
 
 	if workdir != "" {
 		cmd.Dir = workdir
@@ -207,16 +204,7 @@ func (tm *BackgroundTaskManager) killTaskInternal(id string) error {
 	task.CancelFunc()
 
 	if task.Process != nil && task.Process.Process != nil {
-		if runtime.GOOS != "windows" {
-			pgid, err := syscall.Getpgid(task.Process.Process.Pid)
-			if err == nil {
-				syscall.Kill(-pgid, syscall.SIGKILL)
-			} else {
-				task.Process.Process.Kill()
-			}
-		} else {
-			task.Process.Process.Kill()
-		}
+		killTaskProcess(task.Process.Process)
 	}
 
 	return nil
@@ -350,4 +338,54 @@ func (t *BackgroundTask) GetOutputString() string {
 		return output + "\nSTDERR:\n" + stderr
 	}
 	return output
+}
+
+type taskPlatform interface {
+	createCommand(ctx context.Context, command string) *exec.Cmd
+	setSysProcAttr(cmd *exec.Cmd)
+	killProcess(process *os.Process) error
+}
+
+type unixTask struct{}
+
+func (unixTask) createCommand(ctx context.Context, command string) *exec.Cmd {
+	return exec.CommandContext(ctx, "sh", "-c", command)
+}
+
+func (unixTask) setSysProcAttr(cmd *exec.Cmd) {
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+}
+
+func (unixTask) killProcess(process *os.Process) error {
+	pgid, err := syscall.Getpgid(process.Pid)
+	if err == nil {
+		return syscall.Kill(-pgid, syscall.SIGKILL)
+	}
+	return process.Kill()
+}
+
+type windowsTask struct{}
+
+func (windowsTask) createCommand(ctx context.Context, command string) *exec.Cmd {
+	return exec.CommandContext(ctx, "powershell", "-Command", command)
+}
+
+func (windowsTask) setSysProcAttr(cmd *exec.Cmd) {
+}
+
+func (windowsTask) killProcess(process *os.Process) error {
+	return process.Kill()
+}
+
+func getTaskPlatform() taskPlatform {
+	switch runtime.GOOS {
+	case "windows":
+		return windowsTask{}
+	default:
+		return unixTask{}
+	}
+}
+
+func killTaskProcess(process *os.Process) error {
+	return getTaskPlatform().killProcess(process)
 }
