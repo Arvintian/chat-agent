@@ -89,18 +89,6 @@ if [[ ! $REPLY =~ ^[Yy]$ ]]; then
     exit 0
 fi
 
-# Run tests
-echo -e "\n${GREEN}Running tests...${NC}"
-make test
-
-# Build all binaries
-echo -e "\n${GREEN}Building binaries for all platforms...${NC}"
-make build-all
-
-# Create release archives
-echo -e "\n${GREEN}Creating release archives...${NC}"
-make release
-
 # Create git tag
 echo -e "\n${GREEN}Creating git tag ${NEW_VERSION}...${NC}"
 git tag -a "${NEW_VERSION}" -m "Release ${NEW_VERSION}"
