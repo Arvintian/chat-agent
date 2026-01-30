@@ -6,10 +6,8 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
-	"runtime"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -221,82 +219,4 @@ func (bm *BashManager) Close() {
 		bm.session.close()
 		bm.session = nil
 	}
-}
-
-func getPlatform() platform {
-	switch runtime.GOOS {
-	case "windows":
-		return windowsPlatform{}
-	default:
-		return unixPlatform{}
-	}
-}
-
-type unixPlatform struct{}
-
-func (unixPlatform) createCommand() *exec.Cmd {
-	cmd := exec.Command("bash")
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setpgid: true,
-		Pgid:    0,
-	}
-	return cmd
-}
-
-func (unixPlatform) buildCommandString(command string, workdir string, marker string) string {
-	fullCommand := fmt.Sprintf("(%s); echo '%s'$?; echo '%s' > /dev/stderr\n", command, marker, marker)
-	if workdir != "" {
-		fullCommand = fmt.Sprintf("cd %s && %s", workdir, fullCommand)
-	}
-	return fullCommand
-}
-
-func (unixPlatform) getMarker() string {
-	return fmt.Sprintf("__BASH_CMD_DONE_%d__", time.Now().UnixNano())
-}
-
-func (unixPlatform) killProcess(cmd *exec.Cmd) {
-	if cmd == nil || cmd.Process == nil {
-		return
-	}
-	pgid, err := syscall.Getpgid(cmd.Process.Pid)
-	if err == nil {
-		syscall.Kill(-pgid, syscall.SIGKILL)
-	} else {
-		cmd.Process.Kill()
-	}
-	cmd.Wait()
-}
-
-func (unixPlatform) sessionType() string {
-	return string(sessionTypeBash)
-}
-
-type windowsPlatform struct{}
-
-func (windowsPlatform) createCommand() *exec.Cmd {
-	return exec.Command("powershell", "-NoLogo", "-NoProfile", "-Command", "-")
-}
-
-func (windowsPlatform) buildCommandString(command string, workdir string, marker string) string {
-	if workdir != "" {
-		return fmt.Sprintf("cd '%s'; %s; Write-Output '%s'$LASTEXITCODE; Write-Error '%s'", workdir, command, marker, marker)
-	}
-	return fmt.Sprintf("%s; Write-Output '%s'$LASTEXITCODE; Write-Error '%s'", command, marker, marker)
-}
-
-func (windowsPlatform) getMarker() string {
-	return fmt.Sprintf("__POWERSHELL_CMD_DONE_%d__", time.Now().UnixNano())
-}
-
-func (windowsPlatform) killProcess(cmd *exec.Cmd) {
-	if cmd == nil || cmd.Process == nil {
-		return
-	}
-	cmd.Process.Kill()
-	cmd.Wait()
-}
-
-func (windowsPlatform) sessionType() string {
-	return string(sessionTypePowerShell)
 }

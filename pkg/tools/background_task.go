@@ -7,11 +7,9 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 )
 
@@ -344,48 +342,4 @@ type taskPlatform interface {
 	createCommand(ctx context.Context, command string) *exec.Cmd
 	setSysProcAttr(cmd *exec.Cmd)
 	killProcess(process *os.Process) error
-}
-
-type unixTask struct{}
-
-func (unixTask) createCommand(ctx context.Context, command string) *exec.Cmd {
-	return exec.CommandContext(ctx, "sh", "-c", command)
-}
-
-func (unixTask) setSysProcAttr(cmd *exec.Cmd) {
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-}
-
-func (unixTask) killProcess(process *os.Process) error {
-	pgid, err := syscall.Getpgid(process.Pid)
-	if err == nil {
-		return syscall.Kill(-pgid, syscall.SIGKILL)
-	}
-	return process.Kill()
-}
-
-type windowsTask struct{}
-
-func (windowsTask) createCommand(ctx context.Context, command string) *exec.Cmd {
-	return exec.CommandContext(ctx, "powershell", "-Command", command)
-}
-
-func (windowsTask) setSysProcAttr(cmd *exec.Cmd) {
-}
-
-func (windowsTask) killProcess(process *os.Process) error {
-	return process.Kill()
-}
-
-func getTaskPlatform() taskPlatform {
-	switch runtime.GOOS {
-	case "windows":
-		return windowsTask{}
-	default:
-		return unixTask{}
-	}
-}
-
-func killTaskProcess(process *os.Process) error {
-	return getTaskPlatform().killProcess(process)
 }
