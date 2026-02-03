@@ -22,6 +22,8 @@ func GetBuiltinTools(ctx context.Context, category string, params map[string]int
 		return getCommandTools(ctx, params)
 	case "cmd_bg":
 		return getBackgroundCommandTools(ctx, params)
+	case "smart_cmd":
+		return getSmartCommandTools(ctx, params)
 	}
 	return nil, fmt.Errorf("not found %s tools", category)
 }
@@ -54,7 +56,7 @@ func (m *toolHelper) InvokableRun(ctx context.Context, argumentsInJSON string, o
 		return "", fmt.Errorf("failed to marshal mcp tool result: %w", err)
 	}
 	if result.IsError {
-		return "", fmt.Errorf("failed to call mcp tool, mcp server return error: %s", marshaledResult)
+		return marshaledResult, err
 	}
 
 	return marshaledResult, nil

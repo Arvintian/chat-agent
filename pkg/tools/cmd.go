@@ -62,9 +62,7 @@ func (t *RunTerminalCommandTool) Info(ctx context.Context) (*schema.ToolInfo, er
 	return &schema.ToolInfo{
 		Name: "cmd",
 		Desc: fmt.Sprintf(`Execute a terminal command, wait exit and return the output, bash on Unix, PowerShell on Windows, current system is %s.
-Long-running tasks cannot be executed; they will timeout after %v and be killed.
-Use background=true to run commands in the background (for long-running tasks).
-Use the "cmd_bg" tool to manage background tasks (list, show, output, remove).
+Long-running tasks cannot be executed; they will timeout after %v and be killed. Use background=true to run commands in the background, then use the "cmd_bg" tool to manage background tasks (list, show, output, remove).
 `, runtime.GOOS, t.Timeout),
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"command": {
@@ -154,6 +152,7 @@ func (t *RunTerminalCommandTool) InvokableRun(ctx context.Context, argumentsInJS
 	case <-timeoutCtx.Done():
 		platform.killProcess(cmd.Process)
 		err = <-done
+		err = fmt.Errorf("command timed out or context canceled, process killed. %v", err)
 	}
 
 	// Build result

@@ -20,11 +20,7 @@ func (t *unixTask) setSysProcAttr(cmd *exec.Cmd) {
 }
 
 func (t *unixTask) killProcess(process *os.Process) error {
-	pgid, err := syscall.Getpgid(process.Pid)
-	if err == nil {
-		return syscall.Kill(-pgid, syscall.SIGKILL)
-	}
-	return process.Kill()
+	return syscall.Kill(-process.Pid, syscall.SIGKILL)
 }
 
 func (t *unixTask) setExitGroup(cmd *exec.Cmd) error {
