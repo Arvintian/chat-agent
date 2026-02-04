@@ -1,52 +1,57 @@
 package utils
 
 import (
-	"bufio"
+	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	gocmd "github.com/go-cmd/cmd"
 )
 
-func PopenStream(command string) error {
-	var cmd *exec.Cmd
+func PopenStream(ctx context.Context, command string) error {
+	var theCmd *gocmd.Cmd
+	cmdOptions := gocmd.Options{
+		Buffered:  false,
+		Streaming: true,
+	}
 	if runtime.GOOS == "windows" {
-		cmd = exec.Command("powershell", "-Command", command)
+		theCmd = gocmd.NewCmdOptions(cmdOptions, "powershell", "-Command", command)
 	} else {
-		cmd = exec.Command("sh", "-c", command)
+		theCmd = gocmd.NewCmdOptions(cmdOptions, "sh", "-c", command)
 	}
 
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return err
-	}
-
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return err
-	}
-
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-
+	doneChan := make(chan struct{})
 	go func() {
-		scanner := bufio.NewScanner(stdout)
-		for scanner.Scan() {
-			fmt.Println(scanner.Text())
+		defer close(doneChan)
+		for theCmd.Stdout != nil || theCmd.Stderr != nil {
+			select {
+			case line, open := <-theCmd.Stdout:
+				if !open {
+					theCmd.Stdout = nil
+					continue
+				}
+				fmt.Fprintln(os.Stdout, line)
+			case line, open := <-theCmd.Stderr:
+				if !open {
+					theCmd.Stderr = nil
+					continue
+				}
+				fmt.Fprintln(os.Stderr, line)
+			}
 		}
 	}()
 
-	go func() {
-		scanner := bufio.NewScanner(stderr)
-		for scanner.Scan() {
-			fmt.Println(scanner.Text())
-		}
-	}()
-
-	return cmd.Wait()
+	select {
+	case <-ctx.Done():
+		theCmd.Stop()
+	case <-theCmd.Start():
+	}
+	<-doneChan
+	fmt.Println()
+	return nil
 }
 
 func ExpandPath(path string) (string, error) {

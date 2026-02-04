@@ -16,6 +16,7 @@ require (
 	github.com/cloudwego/eino-ext/components/tool/mcp v0.0.8
 	github.com/eino-contrib/jsonschema v1.0.3
 	github.com/eino-contrib/ollama v0.1.0
+	github.com/go-cmd/cmd v1.4.3
 	github.com/hekmon/liveterm/v2 v2.5.0
 	github.com/mark3labs/mcp-filesystem-server v0.11.1
 	github.com/mark3labs/mcp-go v0.43.2

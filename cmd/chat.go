@@ -305,11 +305,13 @@ var RootCmd = &cobra.Command{
 			}
 
 			if sb.Len() > 0 && multiline == MultilineNone {
+				chatctx, cancel := context.WithCancel(cmd.Context())
+				chatCancel = cancel
 				input := strings.TrimSpace(sb.String())
 				// exec terminal local start with /t, eg: `/t ls`
 				if strings.HasPrefix(input, "/t ") {
 					localcmd := strings.TrimSpace(strings.TrimPrefix(input, "/t"))
-					if err := utils.PopenStream(localcmd); err != nil {
+					if err := utils.PopenStream(chatctx, localcmd); err != nil {
 						os.Stderr.WriteString("exec local cmd error: " + err.Error() + "\n")
 					}
 					sb.Reset()
@@ -331,13 +333,10 @@ var RootCmd = &cobra.Command{
 					os.Stdout.WriteString("bye!\n")
 					return nil
 				default:
-					chatctx, cancel := context.WithCancel(cmd.Context())
-					chatCancel = cancel
 					err = chatbot.StreamChat(chatctx, input)
 					if err != nil {
 						os.Stderr.WriteString("\nerror: " + err.Error() + "\n")
 					}
-
 				}
 				sb.Reset()
 			}

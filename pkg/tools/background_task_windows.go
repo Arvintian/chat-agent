@@ -4,16 +4,14 @@ package tools
 
 import (
 	"context"
-	"os"
+	"fmt"
 	"os/exec"
-	"strconv"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
 
 type windowsTask struct {
-	exitGroup *ProcessExitGroup
 }
 
 func (t *windowsTask) createCommand(ctx context.Context, command string) *exec.Cmd {
@@ -23,63 +21,58 @@ func (t *windowsTask) createCommand(ctx context.Context, command string) *exec.C
 func (t *windowsTask) setSysProcAttr(cmd *exec.Cmd) {
 }
 
-func (t *windowsTask) setExitGroup(cmd *exec.Cmd) error {
-	g, err := NewProcessExitGroup()
-	if err != nil {
-		return err
-	}
-	g.AddProcess(cmd.Process)
-	t.exitGroup = &g
-	return nil
+func (t *windowsTask) killProcess(cmd *exec.Cmd) error {
+	return killProcessTree(uint32(cmd.Process.Pid))
 }
 
-func (t *windowsTask) killProcess(process *os.Process) error {
-	if t.exitGroup != nil {
-		defer t.exitGroup.Dispose()
+func killProcessTree(pid uint32) error {
+	var entry struct {
+		Size              uint32
+		CntUsage          uint32
+		ProcessID         uint32
+		DefaultHeapID     uintptr
+		ModuleID          uint32
+		Threads           uint32
+		ParentProcessID   uint32
+		PriorityClassBase int32
+		Flags             uint32
+		ExeFile           [windows.MAX_PATH]uint16
 	}
-	cmd := exec.Command("taskkill", "/F", "/T", "/PID", strconv.Itoa(process.Pid))
-	return cmd.Run()
+	snapshot, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
+	if err != nil {
+		return fmt.Errorf("CreateToolhelp32Snapshot failed: %w", err)
+	}
+	defer windows.CloseHandle(snapshot)
+	entry.Size = uint32(unsafe.Sizeof(entry))
+
+	// Find first process
+	if err := windows.Process32First(snapshot, (*windows.ProcessEntry32)(unsafe.Pointer(&entry))); err != nil {
+		return err
+	}
+
+	// Iterate all processes
+	for {
+		if entry.ParentProcessID == pid {
+			// Recursively kill children first
+			killProcessTree(entry.ProcessID)
+		}
+
+		err = windows.Process32Next(snapshot, (*windows.ProcessEntry32)(unsafe.Pointer(&entry)))
+		if err != nil {
+			break
+		}
+	}
+
+	// Finally, kill this process
+	h, err := windows.OpenProcess(windows.PROCESS_TERMINATE, false, pid)
+	if err == nil {
+		defer windows.CloseHandle(h)
+		windows.TerminateProcess(h, 1)
+	}
+
+	return nil
 }
 
 func getTaskPlatform() taskPlatform {
 	return &windowsTask{}
-}
-
-type process struct {
-	Pid    int
-	Handle uintptr
-}
-
-type ProcessExitGroup windows.Handle
-
-func NewProcessExitGroup() (ProcessExitGroup, error) {
-	handle, err := windows.CreateJobObject(nil, nil)
-	if err != nil {
-		return 0, err
-	}
-
-	info := windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION{
-		BasicLimitInformation: windows.JOBOBJECT_BASIC_LIMIT_INFORMATION{
-			LimitFlags: windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-		},
-	}
-	if _, err := windows.SetInformationJobObject(
-		handle,
-		windows.JobObjectExtendedLimitInformation,
-		uintptr(unsafe.Pointer(&info)),
-		uint32(unsafe.Sizeof(info))); err != nil {
-		return 0, err
-	}
-
-	return ProcessExitGroup(handle), nil
-}
-
-func (g ProcessExitGroup) Dispose() error {
-	return windows.CloseHandle(windows.Handle(g))
-}
-
-func (g ProcessExitGroup) AddProcess(p *os.Process) error {
-	return windows.AssignProcessToJobObject(
-		windows.Handle(g),
-		windows.Handle((*process)(unsafe.Pointer(p)).Handle))
 }

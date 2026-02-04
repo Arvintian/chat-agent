@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -21,6 +20,12 @@ const (
 	TaskStatusFailed  TaskStatus = "failed"
 	TaskStatusKilled  TaskStatus = "killed"
 )
+
+type taskPlatform interface {
+	createCommand(ctx context.Context, command string) *exec.Cmd
+	setSysProcAttr(cmd *exec.Cmd)
+	killProcess(cmd *exec.Cmd) error
+}
 
 type BackgroundTask struct {
 	ID         string
@@ -107,13 +112,6 @@ func (tm *BackgroundTaskManager) StartTask(command, workdir string) (*Background
 		stderr.Close()
 		cancel()
 		return nil, fmt.Errorf("failed to start command: %w", err)
-	}
-
-	if err := task.platform.setExitGroup(cmd); err != nil {
-		stdout.Close()
-		stderr.Close()
-		cancel()
-		return nil, fmt.Errorf("failed to start command with exit group: %w", err)
 	}
 
 	task.Process = cmd
@@ -211,7 +209,7 @@ func (tm *BackgroundTaskManager) killTaskInternal(id string) error {
 	task.CancelFunc()
 
 	if task.Process != nil && task.Process.Process != nil {
-		task.platform.killProcess(task.Process.Process)
+		task.platform.killProcess(task.Process)
 	}
 
 	return nil
@@ -345,11 +343,4 @@ func (t *BackgroundTask) GetOutputString() string {
 		return output + "\nSTDERR:\n" + stderr
 	}
 	return output
-}
-
-type taskPlatform interface {
-	createCommand(ctx context.Context, command string) *exec.Cmd
-	setSysProcAttr(cmd *exec.Cmd)
-	setExitGroup(cmd *exec.Cmd) error
-	killProcess(process *os.Process) error
 }

@@ -27,7 +27,6 @@ func getSmartCommandTools(ctx context.Context, params map[string]interface{}) ([
 type SmartCmdTool struct {
 	baseTool          *RunTerminalCommandTool
 	dangerousPatterns []*regexp.Regexp
-	dangerousCommands []string
 }
 
 func NewSmartCmdTool(baseTool *RunTerminalCommandTool) *SmartCmdTool {
@@ -82,13 +81,6 @@ func NewSmartCmdTool(baseTool *RunTerminalCommandTool) *SmartCmdTool {
 		// Shell operations
 		regexp.MustCompile(`^\s*(bash|sh|zsh|dash|ksh|tcsh|csh|fish)\s+-c\s+.*(rm|dd|mkfs|fdisk|wipe|shred|kill).*`),
 
-		// Data destruction
-		regexp.MustCompile(`^\s*wipe\s+.*`),
-		regexp.MustCompile(`^\s*shred\s+.*`),
-
-		// Cryptocurrency mining (often malicious)
-		regexp.MustCompile(`^\s*(xmrig|ccminer|minerd|cpuminer|nicehash|ethminer|gminer).*`),
-
 		// Reverse shells and network connections
 		regexp.MustCompile(`^\s*(nc|netcat|socat|telnet|ncat)\s+.*`),
 		regexp.MustCompile(`^\s*curl\s+.*\|\s*(bash|sh|zsh|dash|ksh|tcsh|csh|fish)`),
@@ -98,21 +90,9 @@ func NewSmartCmdTool(baseTool *RunTerminalCommandTool) *SmartCmdTool {
 		regexp.MustCompile(`^\s*(mysql|psql|mongosh|sqlite3|mongo|redis-cli|sqlcmd)\s+.*(drop|delete|truncate|erase|remove|purge).*`),
 	}
 
-	// Pre-defined dangerous commands
-	dangerousCommands := []string{
-		"rm -rf",
-		"rm -r -f",
-		"rm -f -r",
-		":(){ :|:& };:", // fork bomb
-		"chmod 777 /",
-		"chmod 000 /",
-		"nohup",
-	}
-
 	return &SmartCmdTool{
 		baseTool:          baseTool,
 		dangerousPatterns: dangerousPatterns,
-		dangerousCommands: dangerousCommands,
 	}
 }
 
@@ -151,13 +131,6 @@ func (t *SmartCmdTool) isDangerousCommand(command string) bool {
 	// Check against pre-compiled dangerous patterns
 	for _, pattern := range t.dangerousPatterns {
 		if pattern.MatchString(cmdLower) {
-			return true
-		}
-	}
-
-	// Check for specific dangerous commands with arguments
-	for _, dangerousCmd := range t.dangerousCommands {
-		if strings.Contains(cmdLower, dangerousCmd) {
 			return true
 		}
 	}

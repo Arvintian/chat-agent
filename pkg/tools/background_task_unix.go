@@ -4,7 +4,6 @@ package tools
 
 import (
 	"context"
-	"os"
 	"os/exec"
 	"syscall"
 )
@@ -19,12 +18,8 @@ func (t *unixTask) setSysProcAttr(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 }
 
-func (t *unixTask) killProcess(process *os.Process) error {
-	return syscall.Kill(-process.Pid, syscall.SIGKILL)
-}
-
-func (t *unixTask) setExitGroup(cmd *exec.Cmd) error {
-	return nil
+func (t *unixTask) killProcess(cmd *exec.Cmd) error {
+	return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 }
 
 func getTaskPlatform() taskPlatform {

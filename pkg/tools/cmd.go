@@ -140,9 +140,6 @@ func (t *RunTerminalCommandTool) InvokableRun(ctx context.Context, argumentsInJS
 	if err != nil {
 		return "", err
 	}
-	if err := platform.setExitGroup(cmd); err != nil {
-		return "", err
-	}
 	done := make(chan error, 1)
 	go func() {
 		done <- cmd.Wait()
@@ -150,7 +147,7 @@ func (t *RunTerminalCommandTool) InvokableRun(ctx context.Context, argumentsInJS
 	select {
 	case err = <-done:
 	case <-timeoutCtx.Done():
-		platform.killProcess(cmd.Process)
+		platform.killProcess(cmd)
 		err = <-done
 		err = fmt.Errorf("command timed out or context canceled, process killed. %v", err)
 	}
