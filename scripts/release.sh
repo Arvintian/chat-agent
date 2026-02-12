@@ -95,7 +95,7 @@ git tag -a "${NEW_VERSION}" -m "Release ${NEW_VERSION}"
 
 # Push tag
 echo -e "\n${GREEN}Pushing tag to remote...${NC}"
-git push origin "${NEW_VERSION}"
+git push origin main --tags
 
 echo -e "\n${GREEN}✅ Release ${NEW_VERSION} created successfully!${NC}"
 echo -e "\nNext steps:"
