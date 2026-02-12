@@ -2,6 +2,7 @@ package chatbot
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -216,7 +217,12 @@ func (cb *ChatBot) StreamChat(ctx context.Context, userInput string) error {
 					firstword = true
 				}
 				if message.ReasoningContent != "" {
-					if out := filter.Process(message.ReasoningContent); out != nil {
+					//Decode JSON-encoded ReasoningContent (e.g. from OpenRouter)
+					decodedReasoning := message.ReasoningContent
+					if err := json.Unmarshal([]byte(message.ReasoningContent), &decodedReasoning); err != nil {
+						decodedReasoning = message.ReasoningContent
+					}
+					if out := filter.Process(decodedReasoning); out != nil {
 						fmt.Print(*out)
 					}
 				}

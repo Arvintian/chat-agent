@@ -51,6 +51,8 @@ func (f *Factory) CreateChatModel(ctx context.Context, modelName string) (model.
 		return f.createDeepSeekModel(ctx, &modelCfg, &providerCfg)
 	case "ollama":
 		return f.createOllamaModel(ctx, &modelCfg, &providerCfg)
+	case "openrouter":
+		return f.createOpenRouterModel(ctx, &modelCfg, &providerCfg)
 	default:
 		return nil, fmt.Errorf("unsupported provider type: %s", providerCfg.Type)
 	}

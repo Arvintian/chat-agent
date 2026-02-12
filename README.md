@@ -78,7 +78,7 @@ When in chat mode, you can use the following commands:
 - `/history` or `/i` - Get conversation history
 - `/clear` or `/c` - Clear conversation context
 - `/tools` or `/l` - List loaded tools
-- `/sys` or `/system` - Show current system prompt (with template variables rendered)
+- `/sys` or `/system` - Show current system prompt
 - `/t cmd` - Execute local command (e.g., `/t ls -la`)
 - `/exit` or `/q` - Exit program
 

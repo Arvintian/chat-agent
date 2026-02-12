@@ -12,6 +12,7 @@ import (
 	"github.com/cloudwego/eino-ext/components/model/gemini"
 	"github.com/cloudwego/eino-ext/components/model/ollama"
 	"github.com/cloudwego/eino-ext/components/model/openai"
+	"github.com/cloudwego/eino-ext/components/model/openrouter"
 	"github.com/cloudwego/eino-ext/components/model/qianfan"
 	"github.com/cloudwego/eino-ext/components/model/qwen"
 	"github.com/cloudwego/eino/components/model"
@@ -190,4 +191,35 @@ func (f *Factory) createOllamaModel(ctx context.Context, modelCfg *config.Model,
 		cfg.Options = &options
 	}
 	return ollama.NewChatModel(ctx, cfg)
+}
+
+func (f *Factory) createOpenRouterModel(ctx context.Context, modelCfg *config.Model, providerCfg *config.Provider) (model.ToolCallingChatModel, error) {
+	effort := openrouter.EffortOfMedium
+	if !modelCfg.Thinking {
+		effort = openrouter.EffortOfNone
+	}
+	cfg := &openrouter.Config{
+		Model:   modelCfg.Model,
+		BaseURL: providerCfg.BaseURL,
+		APIKey:  providerCfg.APIKey,
+		Reasoning: &openrouter.Reasoning{
+			Effort:  effort,
+			Exclude: !modelCfg.Thinking,
+			Enabled: &modelCfg.Thinking,
+		},
+	}
+
+	if modelCfg.MaxTokens > 0 {
+		cfg.MaxTokens = &modelCfg.MaxTokens
+	}
+	if modelCfg.Temperature > 0 {
+		temp := float32(modelCfg.Temperature)
+		cfg.Temperature = &temp
+	}
+	if modelCfg.TopP > 0 {
+		topP := float32(modelCfg.TopP)
+		cfg.TopP = &topP
+	}
+
+	return openrouter.NewChatModel(ctx, cfg)
 }
