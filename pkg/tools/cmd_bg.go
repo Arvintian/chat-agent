@@ -25,15 +25,15 @@ type RunBackgroundCommandArgs struct {
 func (t *RunBackgroundCommandTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
 	return &schema.ToolInfo{
 		Name: "cmd_bg",
-		Desc: `Manage background tasks. Available actions:
-- list: List all background tasks
-- show: Show details of a task (requires 'task_id' parameter)
-- output: Get output of a task (requires 'task_id' parameter)
-- remove: Remove/kill a task (requires 'task_id' parameter)`,
+		Desc: `Manage background tasks.`,
 		ParamsOneOf: schema.NewParamsOneOfByParams(map[string]*schema.ParameterInfo{
 			"action": {
-				Type:     schema.String,
-				Desc:     "Action to perform: list, show, output, remove",
+				Type: schema.String,
+				Desc: `Action to perform: list, show, output, remove.
+- list: List all background tasks
+- show: Show details of a task
+- output: Get output of a task
+- remove: Remove/kill a task`,
 				Required: true,
 			},
 			"task_id": {

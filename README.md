@@ -60,12 +60,27 @@ chat-agent --debug
 # Specify custom config file
 chat-agent --config /path/to/config.yml
 
- # Show help
+# One-time task (non-interactive)
+chat-agent --once "List files in current directory"
+
+# Show help
 chat-agent --help
 
 # Show version
 chat-agent --version
 ```
+
+### Interactive Commands
+
+When in chat mode, you can use the following commands:
+
+- `/help` or `/h` - Show help message
+- `/history` or `/i` - Get conversation history
+- `/clear` or `/c` - Clear conversation context
+- `/tools` or `/l` - List loaded tools
+- `/sys` or `/system` - Show current system prompt (with template variables rendered)
+- `/t cmd` - Execute local command (e.g., `/t ls -la`)
+- `/exit` or `/q` - Exit program
 
 ## Building from Source
 
@@ -162,7 +177,7 @@ models:
 ```
 
 ### Chat Presets
-Create reusable chat configurations:
+Create reusable chat configurations with Go template support:
 
 ```yaml
 chats:
@@ -174,7 +189,34 @@ chats:
     model: deepseek-reasoner
     desc: "Reasoning-focused assistant"
     system: "You are a reasoning assistant. Think step by step."
+  template-example:
+    model: deepseek-chat
+    desc: "Assistant with template variables"
+    system: |
+      You are a helpful assistant.
+      
+      Current working directory: {{.Cwd}}
+      Today's date: {{.Date}}
+      Current time: {{.Now.Format "2006-01-02 15:04:05"}}
+      
+      Please help the user with tasks in the current directory.
 ```
+
+**Available template variables:**
+- `{{.Cwd}}` - Current working directory
+- `{{.Date}}` - Today's date in YYYY-MM-DD format
+- `{{.Now}}` - Current time (time.Time object, can be formatted)
+  - Example: `{{.Now.Format "2006-01-02 15:04:05"}}`
+  - Example: `{{.Now.Format "Monday, January 2, 2006"}}`
+  - Example: `{{.Now.Year}}` - Current year
+  - Example: `{{.Now.Month}}` - Current month
+  - Example: `{{.Now.Day}}` - Current day of month
+- `{{.User}}` - Current username
+- `{{.Home}}` - User's home directory
+- `{{env "VAR_NAME"}}` - Access environment variables
+  - Example: `{{env "USER"}}` - Current user
+  - Example: `{{env "HOME"}}` - Home directory
+  - Example: `{{env "PATH"}}` - System PATH
 
 ### MCP Servers
 Integrate with Model Context Protocol servers:

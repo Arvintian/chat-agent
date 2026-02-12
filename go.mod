@@ -4,9 +4,9 @@ go 1.25.5
 
 require (
 	github.com/bytedance/sonic v1.14.1
-	github.com/cloudwego/eino v0.7.21
-	github.com/cloudwego/eino-ext/components/model/ark v0.1.63
-	github.com/cloudwego/eino-ext/components/model/claude v0.1.13
+	github.com/cloudwego/eino v0.7.32
+	github.com/cloudwego/eino-ext/components/model/ark v0.1.64
+	github.com/cloudwego/eino-ext/components/model/claude v0.1.15
 	github.com/cloudwego/eino-ext/components/model/deepseek v0.1.2
 	github.com/cloudwego/eino-ext/components/model/gemini v0.1.26
 	github.com/cloudwego/eino-ext/components/model/ollama v0.1.8
@@ -112,7 +112,7 @@ require (
 	github.com/tidwall/sjson v1.2.5 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/volcengine/volc-sdk-golang v1.0.23 // indirect
-	github.com/volcengine/volcengine-go-sdk v1.1.49 // indirect
+	github.com/volcengine/volcengine-go-sdk v1.2.9 // indirect
 	github.com/wk8/go-ordered-map/v2 v2.1.8 // indirect
 	github.com/yargevad/filepathx v1.0.0 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect

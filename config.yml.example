@@ -38,6 +38,21 @@ chats:
     system: "You are a helpful search assistant."
     mcp_servers:
       - web_search
+  template-example:
+    model: deepseek-chat
+    desc: "Assistant with template variables"
+    system: |
+      You are a helpful assistant.
+      
+      Context information:
+      - Current working directory: {{.Cwd}}
+      - Today's date: {{.Date}}
+      - Current time: {{.Now.Format "2006-01-02 15:04:05"}}
+      - Username: {{.User}}
+      - Home directory: {{.Home}}
+      - Environment USER: {{env "USER"}}
+      
+      Please help the user with tasks in the current directory.
 
 # MCP server configuration
 mcp_servers:
