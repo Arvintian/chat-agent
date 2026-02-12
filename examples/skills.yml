@@ -1,0 +1,91 @@
+# Example configuration with skills integration
+# This shows how to configure Chat-Agent to use skills
+
+# Model provider configuration
+providers:
+  deepseek:
+    type: deepseek
+    base_url: https://api.deepseek.com
+    api_key: your-api-key-here
+
+# Model configuration
+models:
+  deepseek-chat:
+    provider: deepseek
+    model: deepseek-chat
+    temperature: 0.8
+    max_tokens: 8192
+
+# Chat preset configuration with skills
+chats:
+  # Basic assistant with skills
+  assistant-with-skills:
+    default: true
+    model: deepseek-chat
+    desc: "An assistant with access to skills"
+    system: |
+      You are a helpful assistant with access to various skills.
+      
+      Available skills have been loaded and can help you with specific tasks.
+      When a user asks about a topic covered by a skill, you can reference
+      that skill's knowledge.
+      
+      Current working directory: {{.Cwd}}
+      Today's date: {{.Date}}
+      
+      Be concise and helpful in your responses.
+    
+    tools:
+      - file
+      - smart-cmd
+      # Skill tools (list-skills, view-skill) are automatically loaded when skills are configured
+    
+    # Skill configuration
+    skill:
+      dir: .chat-agent/skills  # Directory containing skills
+      workDir: .               # Working directory for skill execution
+      timeout: 30              # Timeout in seconds
+      autoApproval: true       # Auto-approve skill tool usage
+    
+    maxIterations: 50
+
+# Tool configurations
+tools:
+  file:
+    category: filesystem
+    params:
+      workDir: .
+    autoApproval: true
+  
+  smart-cmd:
+    category: smart_cmd
+    params:
+      workDir: .
+    autoApproval: true
+  
+  # Skill-related tools are automatically registered when skills are loaded
+  # No need to manually configure list-skills and view-skill tools
+
+# Skills Configuration
+# Skills are configured in each chat preset using the 'skill' field.
+# The skill configuration specifies:
+# - dir: Directory containing skills (default: .chat-agent/skills)
+# - workDir: Working directory for skill execution
+# - timeout: Timeout in seconds for skill operations
+# - autoApproval: Whether to auto-approve skill tool usage
+
+# Example skill directory structure:
+# .chat-agent/skills/
+# ├── git-helper/
+# │   ├── SKILL.md
+# │   ├── scripts/
+# │   └── references/
+# └── python-helper/
+#     ├── SKILL.md
+#     └── references/
+
+# The agent will automatically:
+# - Load skill metadata at startup
+# - Register skill tools (list-skills, view-skill)
+# - Make skill content available when needed
+# - Allow tools to interact with skills
