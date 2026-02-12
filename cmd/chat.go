@@ -42,6 +42,7 @@ type MultilineState int
 
 const (
 	DefaultMaxIterations int = 20
+	DefaultMaxRetries    int = 5
 )
 
 const (
@@ -201,6 +202,10 @@ var RootCmd = &cobra.Command{
 		if preset.MaxIterations > 0 {
 			maxIterations = preset.MaxIterations
 		}
+		maxRetries := DefaultMaxRetries
+		if preset.MaxRetries > 0 {
+			maxRetries = preset.MaxRetries
+		}
 		agent, err := adk.NewChatModelAgent(cmd.Context(), &adk.ChatModelAgentConfig{
 			Name:        chatName,
 			Description: preset.Desc,
@@ -212,6 +217,10 @@ var RootCmd = &cobra.Command{
 				},
 			},
 			MaxIterations: maxIterations,
+			ModelRetryConfig: &adk.ModelRetryConfig{
+				MaxRetries:  maxRetries,
+				IsRetryAble: utils.IsRetryAble,
+			},
 		})
 		if err != nil {
 			return err

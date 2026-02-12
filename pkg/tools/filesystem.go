@@ -35,11 +35,15 @@ func getFileSystemTools(ctx context.Context, params map[string]interface{}) ([]t
 		if err != nil {
 			return nil, fmt.Errorf("conv mcp tool input schema fail(unmarshal): %w, tool name: %s", err, mcpTool.Tool.Name)
 		}
+		params := schema.NewParamsOneOfByJSONSchema(inputSchema)
+		if inputSchema.Properties == nil {
+			params = nil
+		}
 		tools = append(tools, &toolHelper{
 			info: &schema.ToolInfo{
 				Name:        mcpTool.Tool.Name,
 				Desc:        mcpTool.Tool.Description,
-				ParamsOneOf: schema.NewParamsOneOfByJSONSchema(inputSchema),
+				ParamsOneOf: params,
 			},
 			handler: mcpTool.Handler,
 		})

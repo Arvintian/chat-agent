@@ -25,6 +25,7 @@ type Chat struct {
 	Model         string   `yaml:"model"`
 	MaxMessages   int      `yaml:"maxMessages"`
 	MaxIterations int      `yaml:"maxIterations"`
+	MaxRetries    int      `yaml:"maxRetries"`
 	MCPServers    []string `yaml:"mcp_servers,omitempty"`
 	Skill         *Skill   `yaml:"skill,omitempty"`
 	Tools         []string `yaml:"tools,omitempty"`
