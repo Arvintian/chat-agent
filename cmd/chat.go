@@ -38,6 +38,13 @@ var (
 	configPath string
 )
 
+// Global variables for chat switching functionality
+var (
+	availableChats  map[string]config.Chat
+	currentChatName string
+	renderedPrompt  string
+)
+
 type MultilineState int
 
 const (
@@ -49,6 +56,180 @@ const (
 	MultilineNone MultilineState = iota
 	MultilinePrompt
 )
+
+// ChatSession represents a chat session with its configuration
+type ChatSession struct {
+	Name    string
+	Preset  config.Chat
+	Agent   *adk.ChatModelAgent
+	Manager *manager.Manager
+	Tools   []tool.BaseTool
+}
+
+// initChatSession initializes a new chat session with the given chat name
+func initChatSession(ctx context.Context, cfg *config.Config, cleanupRegistry *utils.CleanupRegistry, chatName string, debug bool) (*ChatSession, error) {
+	preset, ok := cfg.Chats[chatName]
+	if !ok {
+		return nil, fmt.Errorf("chat preset does not exist: %s", chatName)
+	}
+
+	// chatmodel
+	providerFactory := providers.NewFactory(cfg)
+	model, err := providerFactory.CreateChatModel(ctx, preset.Model)
+	if err != nil {
+		return nil, err
+	}
+
+	var tools []tool.BaseTool
+	systemPrompt := preset.System
+
+	// builtin tools
+	for _, builtinTool := range preset.Tools {
+		toolCfg, ok := cfg.Tools[builtinTool]
+		if !ok {
+			return nil, fmt.Errorf("tool config %s not found", builtinTool)
+		}
+		builtinToolList, err := builtintools.GetBuiltinTools(context.WithValue(ctx, "cleanup", cleanupRegistry), toolCfg.Category, toolCfg.Params)
+		if err != nil {
+			return nil, err
+		}
+		if toolCfg.AutoApproval {
+			tools = append(tools, builtinToolList...)
+		} else {
+			for _, item := range builtinToolList {
+				info, err := item.Info(ctx)
+				if err != nil {
+					return nil, err
+				}
+				if slices.Contains(toolCfg.AutoApprovalTools, info.Name) {
+					tools = append(tools, item)
+				} else {
+					tools = append(tools, mcp.InvokableApprovableTool{InvokableTool: item.(tool.InvokableTool)})
+				}
+			}
+		}
+
+		// Auto-add cmd_bg tool when cmd tool is enabled (without approval control)
+		if toolCfg.Category == "cmd" || toolCfg.Category == "smart_cmd" {
+			bgToolList, err := builtintools.GetBuiltinTools(context.WithValue(ctx, "cleanup", cleanupRegistry), "cmd_bg", nil)
+			if err != nil {
+				return nil, err
+			}
+			tools = append(tools, bgToolList...)
+		}
+	}
+
+	// skills
+	if preset.Skill != nil {
+		skillDir, err := utils.ExpandPath(preset.Skill.Dir)
+		if err != nil {
+			return nil, err
+		}
+		registry := skillloader.NewRegistry(skillloader.NewLoader(
+			skillloader.WithProjectSkillsDir(skillDir),
+		))
+		if err := registry.Initialize(ctx); err != nil {
+			return nil, err
+		}
+		systemPrompt = skillmw.NewSkillsMiddleware(registry).InjectPrompt(systemPrompt)
+		skillstools := skilltools.NewSkillTools(registry)
+		if preset.Skill.Timeout <= 0 {
+			preset.Skill.Timeout = 30
+		}
+		if preset.Skill.AutoApproval {
+			tools = append(tools, skillstools...)
+		} else {
+			for _, item := range skillstools {
+				info, err := item.Info(ctx)
+				if err != nil {
+					return nil, err
+				}
+				if slices.Contains(preset.Skill.AutoApprovalTools, info.Name) {
+					tools = append(tools, item)
+				} else {
+					tools = append(tools, mcp.InvokableApprovableTool{InvokableTool: item.(tool.InvokableTool)})
+				}
+			}
+		}
+	}
+
+	// mcp client
+	toolsChan, errChan := make(chan []tool.BaseTool, 1), make(chan error, 1)
+	go func() {
+		mcpclient := mcp.NewClient(cfg)
+		if err := mcpclient.InitializeForChat(ctx, preset); err != nil {
+			toolsChan <- nil
+			errChan <- err
+		}
+		mcptools := mcpclient.GetToolListForServers(preset.MCPServers)
+		toolsChan <- mcptools
+		errChan <- nil
+	}()
+	select {
+	case <-time.After(10 * time.Second):
+		return nil, fmt.Errorf("load mcp tools timeout")
+	case err := <-errChan:
+		if err != nil {
+			return nil, err
+		}
+		mcptools := <-toolsChan
+		tools = append(tools, mcptools...)
+	}
+
+	// Render system prompt with template
+	prompt, err := renderSystemPrompt(systemPrompt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to render system prompt: %w", err)
+	}
+
+	// init agent
+	maxIterations := DefaultMaxIterations
+	if preset.MaxIterations > 0 {
+		maxIterations = preset.MaxIterations
+	}
+	maxRetries := DefaultMaxRetries
+	if preset.MaxRetries > 0 {
+		maxRetries = preset.MaxRetries
+	}
+	agent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
+		Name:        chatName,
+		Description: preset.Desc,
+		Instruction: prompt,
+		Model:       model,
+		ToolsConfig: adk.ToolsConfig{
+			ToolsNodeConfig: compose.ToolsNodeConfig{
+				Tools: tools,
+			},
+		},
+		MaxIterations: maxIterations,
+		ModelRetryConfig: &adk.ModelRetryConfig{
+			MaxRetries:  maxRetries,
+			IsRetryAble: utils.IsRetryAble,
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// init manager
+	manager := manager.NewManager(preset.MaxMessages)
+
+	return &ChatSession{
+		Name:    chatName,
+		Preset:  preset,
+		Agent:   agent,
+		Manager: manager,
+		Tools:   tools,
+	}, nil
+}
+
+// switchChat switches to a new chat session
+func switchChat(ctx context.Context, cfg *config.Config, cleanupRegistry *utils.CleanupRegistry, chatName string, debug bool) (*ChatSession, error) {
+	if _, ok := cfg.Chats[chatName]; !ok {
+		return nil, fmt.Errorf("chat preset does not exist: %s", chatName)
+	}
+	return initChatSession(ctx, cfg, cleanupRegistry, chatName, debug)
+}
 
 // RootCmd represents the base command when called without any subcommands
 var RootCmd = &cobra.Command{
@@ -67,6 +248,10 @@ var RootCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+
+		// Store available chats globally
+		availableChats = cfg.Chats
+
 		chatName, _ := cmd.Flags().GetString("chat")
 		debug, _ := cmd.Flags().GetBool("debug")
 
@@ -82,149 +267,14 @@ var RootCmd = &cobra.Command{
 		if chatName == "" {
 			return fmt.Errorf("Please specify the chat")
 		}
-		preset, ok := cfg.Chats[chatName]
-		if !ok {
-			return fmt.Errorf("chat preset does not exist: %s", chatName)
-		}
+		currentChatName = chatName
 
-		// chatmodel
-		providerFactory := providers.NewFactory(cfg)
-		model, err := providerFactory.CreateChatModel(cmd.Context(), preset.Model)
+		// Initialize chat session
+		session, err := initChatSession(cmd.Context(), cfg, cleanupRegistry, chatName, debug)
 		if err != nil {
 			return err
 		}
-
-		var tools []tool.BaseTool
-		systemPrompt := preset.System
-
-		// builtin tools
-		for _, builtinTool := range preset.Tools {
-			toolCfg, ok := cfg.Tools[builtinTool]
-			if !ok {
-				return fmt.Errorf("tool config %s not found", builtinTool)
-			}
-			builtinToolList, err := builtintools.GetBuiltinTools(context.WithValue(cmd.Context(), "cleanup", cleanupRegistry), toolCfg.Category, toolCfg.Params)
-			if err != nil {
-				return err
-			}
-			if toolCfg.AutoApproval {
-				tools = append(tools, builtinToolList...)
-			} else {
-				for _, item := range builtinToolList {
-					info, err := item.Info(cmd.Context())
-					if err != nil {
-						return err
-					}
-					if slices.Contains(toolCfg.AutoApprovalTools, info.Name) {
-						tools = append(tools, item)
-					} else {
-						tools = append(tools, mcp.InvokableApprovableTool{InvokableTool: item.(tool.InvokableTool)})
-					}
-				}
-			}
-
-			// Auto-add cmd_bg tool when cmd tool is enabled (without approval control)
-			if toolCfg.Category == "cmd" || toolCfg.Category == "smart_cmd" {
-				bgToolList, err := builtintools.GetBuiltinTools(context.WithValue(cmd.Context(), "cleanup", cleanupRegistry), "cmd_bg", nil)
-				if err != nil {
-					return err
-				}
-				tools = append(tools, bgToolList...)
-			}
-		}
-
-		// skills
-		if preset.Skill != nil {
-			skillDir, err := utils.ExpandPath(preset.Skill.Dir)
-			if err != nil {
-				return err
-			}
-			registry := skillloader.NewRegistry(skillloader.NewLoader(
-				skillloader.WithProjectSkillsDir(skillDir),
-			))
-			if err := registry.Initialize(cmd.Context()); err != nil {
-				return err
-			}
-			systemPrompt = skillmw.NewSkillsMiddleware(registry).InjectPrompt(systemPrompt)
-			skillstools := skilltools.NewSkillTools(registry)
-			if preset.Skill.Timeout <= 0 {
-				preset.Skill.Timeout = 30
-			}
-			if preset.Skill.AutoApproval {
-				tools = append(tools, skillstools...)
-			} else {
-				for _, item := range skillstools {
-					info, err := item.Info(cmd.Context())
-					if err != nil {
-						return err
-					}
-					if slices.Contains(preset.Skill.AutoApprovalTools, info.Name) {
-						tools = append(tools, item)
-					} else {
-						tools = append(tools, mcp.InvokableApprovableTool{InvokableTool: item.(tool.InvokableTool)})
-					}
-				}
-			}
-		}
-
-		// mcp client
-		toolLoadTimeout, _ := cmd.Flags().GetInt("tools-load-timeout")
-		toolsChan, errChan := make(chan []tool.BaseTool, 1), make(chan error, 1)
-		go func() {
-			mcpclient := mcp.NewClient(cfg)
-			if err := mcpclient.InitializeForChat(cmd.Context(), preset); err != nil {
-				toolsChan <- nil
-				errChan <- err
-			}
-			tools := mcpclient.GetToolListForServers(preset.MCPServers)
-			toolsChan <- tools
-			errChan <- nil
-		}()
-		select {
-		case <-time.After(time.Duration(toolLoadTimeout) * time.Second):
-			return fmt.Errorf("load mcp tools timeout")
-		case err := <-errChan:
-			if err != nil {
-				return err
-			}
-			mcptools := <-toolsChan
-			tools = append(tools, mcptools...)
-		}
-
-		// Render system prompt with template
-		renderedPrompt, err := renderSystemPrompt(systemPrompt)
-		if err != nil {
-			return fmt.Errorf("failed to render system prompt: %w", err)
-		}
-
-		// init agent
-		maxIterations := DefaultMaxIterations
-		if preset.MaxIterations > 0 {
-			maxIterations = preset.MaxIterations
-		}
-		maxRetries := DefaultMaxRetries
-		if preset.MaxRetries > 0 {
-			maxRetries = preset.MaxRetries
-		}
-		agent, err := adk.NewChatModelAgent(cmd.Context(), &adk.ChatModelAgentConfig{
-			Name:        chatName,
-			Description: preset.Desc,
-			Instruction: renderedPrompt,
-			Model:       model,
-			ToolsConfig: adk.ToolsConfig{
-				ToolsNodeConfig: compose.ToolsNodeConfig{
-					Tools: tools,
-				},
-			},
-			MaxIterations: maxIterations,
-			ModelRetryConfig: &adk.ModelRetryConfig{
-				MaxRetries:  maxRetries,
-				IsRetryAble: utils.IsRetryAble,
-			},
-		})
-		if err != nil {
-			return err
-		}
+		renderedPrompt, _ = renderSystemPrompt(session.Preset.System)
 
 		// init readline
 		placeholder := "Send a message (/h for help)"
@@ -241,14 +291,13 @@ var RootCmd = &cobra.Command{
 		defer fmt.Printf(readline.EndBracketedPaste)
 
 		// init chatbot
-		manager := manager.NewManager(preset.MaxMessages)
-		chatbot := chatbot.NewChatBot(context.WithValue(cmd.Context(), "debug", debug), agent, manager, scanner)
+		cb := chatbot.NewChatBot(context.WithValue(cmd.Context(), "debug", debug), session.Agent, session.Manager, scanner)
 
 		// one-time task or chat
 		welcome, _ := cmd.Flags().GetString("welcome")
 		once, _ := cmd.Flags().GetString("once")
 		if once != "" {
-			err = chatbot.StreamChat(cmd.Context(), once)
+			err = cb.StreamChat(cmd.Context(), once)
 			if err != nil {
 				os.Stderr.WriteString("\nerror: " + err.Error() + "\n")
 			}
@@ -333,25 +382,44 @@ var RootCmd = &cobra.Command{
 					sb.Reset()
 					continue
 				}
+				// switch chat start with /s, eg: `/s code`
+				if strings.HasPrefix(input, "/s ") {
+					targetName := strings.TrimSpace(strings.TrimPrefix(input, "/s"))
+					if targetName == "" {
+						printChats()
+					} else if newSession, err := switchChat(cmd.Context(), cfg, cleanupRegistry, targetName, debug); err != nil {
+						fmt.Printf("Error switching chat: %v\n", err)
+					} else {
+						session = newSession
+						currentChatName = targetName
+						renderedPrompt, _ = renderSystemPrompt(session.Preset.System)
+						cb = chatbot.NewChatBot(context.WithValue(cmd.Context(), "debug", debug), session.Agent, session.Manager, scanner)
+						fmt.Printf("Switched to chat: %s\n", targetName)
+					}
+					sb.Reset()
+					continue
+				}
 
 				switch input {
 				case "/help", "/h":
 					printHelp()
 				case "/clear", "/c":
-					manager.Clear()
+					session.Manager.Clear()
 					fmt.Println("The conversation context is cleared")
 				case "/summary", "/history", "/i":
-					os.Stdout.WriteString(manager.GetSummary())
+					os.Stdout.WriteString(session.Manager.GetSummary())
 					fmt.Println()
 				case "/tools", "/l":
-					printTools(tools)
+					printTools(session.Tools)
 				case "/sys", "/system":
 					printSystemPrompt(renderedPrompt)
+				case "/chat":
+					printChats()
 				case "/quit", "/exit", "/bye", "/q":
 					os.Stdout.WriteString("bye!\n")
 					return nil
 				default:
-					err = chatbot.StreamChat(chatctx, input)
+					err = cb.StreamChat(chatctx, input)
 					if err != nil {
 						os.Stderr.WriteString("\nerror: " + err.Error() + "\n")
 					}
@@ -368,8 +436,10 @@ func printHelp() {
 	fmt.Println("  /history or /i   - Get conversation history")
 	fmt.Println("  /clear   or /c   - Clear conversation context")
 	fmt.Println("  /tools   or /l   - List the loaded tools")
-	fmt.Println("  /sys     or /system - Show current system prompt")
-	fmt.Println("  /t cmd           - Execute local command")
+	fmt.Println("  /sys             - Show current system prompt")
+	fmt.Println("  /chat            - List available chats")
+	fmt.Println("  /s <name>        - Switch to another chat directly")
+	fmt.Println("  /t <cmd>         - Execute local command")
 	fmt.Println("  /exit    or /q   - Exit program")
 }
 
@@ -385,6 +455,24 @@ func printTools(tools []tool.BaseTool) {
 		fmt.Printf("(%s) %s", info.Name, info.Desc)
 		if !strings.HasSuffix(info.Desc, "\n") {
 			fmt.Print("\n")
+		}
+	}
+}
+
+// printChats prints the list of available chats
+func printChats() {
+	fmt.Println("Available chats:")
+	for name, preset := range availableChats {
+		marker := ""
+		if name == currentChatName {
+			marker = " (current)"
+		}
+		fmt.Printf("  - %s%s\n", name, marker)
+		if preset.Desc != "" {
+			fmt.Printf("    Description: %s\n", preset.Desc)
+		}
+		if preset.Model != "" {
+			fmt.Printf("    Model: %s\n", preset.Model)
 		}
 	}
 }
