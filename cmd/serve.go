@@ -94,6 +94,8 @@ type WSSession struct {
 	sessionID  string
 	cfg        *config.Config
 	cleanupReg *utils.CleanupRegistry
+	chatName   string       // 当前选中的 chat 名称
+	chatSession *ChatSession // 已初始化的 chat session，复用
 }
 
 func NewWSSession(conn *websocket.Conn, sessionID string, cfg *config.Config, cleanupReg *utils.CleanupRegistry) *WSSession {
@@ -102,6 +104,8 @@ func NewWSSession(conn *websocket.Conn, sessionID string, cfg *config.Config, cl
 		sessionID:  sessionID,
 		cfg:        cfg,
 		cleanupReg: cleanupReg,
+		chatName:   "",
+		chatSession: nil,
 	}
 }
 
@@ -207,20 +211,15 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request, sessionManager *Ses
 	}
 	defer conn.Close()
 
+	// Each connection is a new session - no session persistence needed
 	sessionID := fmt.Sprintf("session-%d", time.Now().UnixNano())
-	log.Printf("New WebSocket connection: %s", sessionID)
+	log.Printf("WebSocket connection: %s", sessionID)
 
 	session := NewWSSession(conn, sessionID, cfg, cleanupRegistry)
-	sessionManager.AddSession(sessionID, &SessionInfo{
-		ID:        sessionID,
-		ChatName:  "",
-		CreatedAt: time.Now(),
-	})
 
-	// Send welcome message
+	// Send welcome message (no session_id needed)
 	session.sendMessage("welcome", map[string]interface{}{
-		"message":    "Welcome to Chat-Agent Web!",
-		"session_id": sessionID,
+		"message": "Welcome to Chat-Agent Web!",
 	})
 
 	// Handle messages
@@ -243,6 +242,11 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request, sessionManager *Ses
 		processWebSocketMessage(session, sessionManager, &wsMsg)
 	}
 
+	// 清理 chat session
+	if session.chatSession != nil {
+		session.chatSession = nil
+	}
+
 	sessionManager.RemoveSession(sessionID)
 	log.Printf("Session %s closed", sessionID)
 }
@@ -252,13 +256,9 @@ func processWebSocketMessage(session *WSSession, sessionManager *SessionManager,
 	case "select_chat":
 		handleSelectChat(session, msg, sessionManager)
 	case "chat":
-		handleChat(session, msg, sessionManager)
+		handleChat(session, msg)
 	case "clear":
 		handleClear(session)
-	case "clear_session":
-		handleClearSession(session, msg)
-	case "history":
-		handleHistory(session)
 	default:
 		session.sendError(fmt.Sprintf("Unknown message type: %s", msg.Type))
 	}
@@ -272,103 +272,88 @@ func handleSelectChat(session *WSSession, msg *WSMessage, sessionManager *Sessio
 	}
 
 	// Verify chat exists
-	if _, ok := session.cfg.Chats[req.ChatName]; !ok {
+	chatCfg, ok := session.cfg.Chats[req.ChatName]
+	if !ok {
 		session.sendError(fmt.Sprintf("Chat '%s' not found", req.ChatName))
 		return
 	}
 
-	sessionManager.mu.Lock()
-	if info, ok := sessionManager.sessions[session.sessionID]; ok {
-		info.ChatName = req.ChatName
+	// 如果已初始化相同的 chat，直接返回
+	if session.chatName == req.ChatName && session.chatSession != nil {
+		session.sendMessage("chat_selected", map[string]interface{}{
+			"session_id": session.sessionID,
+			"chat_name":  req.ChatName,
+			"message":    fmt.Sprintf("Already selected chat: %s", req.ChatName),
+		})
+		return
 	}
-	sessionManager.mu.Unlock()
+
+	// 如果已有不同的 chat session，先清理
+	if session.chatSession != nil {
+		session.chatSession = nil
+	}
+
+	// 初始化 chat session
+	ctx := context.Background()
+	chatSession, err := initChatSession(ctx, session.cfg, session.cleanupReg, req.ChatName, false)
+	if err != nil {
+		session.sendError(fmt.Sprintf("Failed to initialize chat session: %v", err))
+		return
+	}
+
+	// 保存 chat session
+	session.chatName = req.ChatName
+	session.chatSession = chatSession
 
 	session.sendMessage("chat_selected", map[string]interface{}{
-		"session_id": session.sessionID,
-		"chat_name":  req.ChatName,
-		"message":    fmt.Sprintf("Selected chat: %s", req.ChatName),
+		"chat_name":   req.ChatName,
+		"description": chatCfg.Desc,
+		"message":     fmt.Sprintf("Selected chat: %s", req.ChatName),
 	})
 }
 
-func handleChat(session *WSSession, msg *WSMessage, sessionManager *SessionManager) {
+func handleChat(session *WSSession, msg *WSMessage) {
 	var req ChatRequest
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		session.sendError("Invalid chat request")
 		return
 	}
 
-	sessionManager.mu.RLock()
-	info, ok := sessionManager.sessions[session.sessionID]
-	sessionManager.mu.RUnlock()
-
-	if !ok || info.ChatName == "" {
+	// 检查是否已选择 chat 并已初始化 session
+	if session.chatName == "" || session.chatSession == nil {
 		session.sendError("Please select a chat first")
 		return
 	}
 
-	// Send thinking indicator
+	// 发送 thinking indicator
 	session.sendMessage("thinking", map[string]interface{}{"status": true})
 
-	// Initialize chat session
+	// 直接使用已初始化的 session 处理消息
 	ctx := context.Background()
-	chatSession, err := initChatSession(ctx, session.cfg, session.cleanupReg, info.ChatName, false)
-	if err != nil {
-		session.sendError(fmt.Sprintf("Failed to initialize chat: %v", err))
-		return
-	}
-
-	// Process chat message
-	err = processChatMessage(ctx, session, chatSession, req.Message)
+	err := processChatMessage(ctx, session, session.chatSession, req.Message)
 	if err != nil {
 		session.sendError(err.Error())
 		return
 	}
 
 	session.sendMessage("complete", map[string]interface{}{
-		"session_id": session.sessionID,
-		"message":    "Response completed",
+		"message": "Response completed",
 	})
 }
 
 func handleClear(session *WSSession) {
-	session.sendMessage("cleared", map[string]interface{}{
-		"message": "Context cleared",
-	})
-}
-
-func handleClearSession(session *WSSession, msg *WSMessage) {
-	var req ChatRequest
-	if err := json.Unmarshal(msg.Payload, &req); err != nil {
-		session.sendError("Invalid clear_session request")
-		return
+	// 清除对应 session 的对话记录
+	if session.chatSession != nil {
+		session.chatSession.Manager.Clear()
+		session.sendMessage("cleared", map[string]interface{}{
+			"chat_name": session.chatName,
+			"message":   "Conversation context cleared",
+		})
+	} else {
+		session.sendMessage("cleared", map[string]interface{}{
+			"message": "No active session to clear",
+		})
 	}
-
-	if req.ChatName == "" {
-		session.sendError("Chat name is required")
-		return
-	}
-
-	// Clear the context for this chat session
-	ctx := context.Background()
-	chatSession, err := initChatSession(ctx, session.cfg, session.cleanupReg, req.ChatName, false)
-	if err != nil {
-		session.sendError(fmt.Sprintf("Failed to clear session: %v", err))
-		return
-	}
-
-	// Clear all messages in the manager
-	chatSession.Manager.Clear()
-
-	session.sendMessage("cleared", map[string]interface{}{
-		"chat_name": req.ChatName,
-		"message":   fmt.Sprintf("Session cleared for %s", req.ChatName),
-	})
-}
-
-func handleHistory(session *WSSession) {
-	session.sendMessage("history", map[string]interface{}{
-		"history": "History feature coming soon",
-	})
 }
 
 // processChatMessage handles the chat processing

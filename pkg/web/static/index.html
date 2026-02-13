@@ -1,12 +1,17 @@
 <!DOCTYPE html>
 <html>
+
 <head>
     <title>Chat-Agent Web</title>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
 
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -24,7 +29,7 @@
             width: 70%;
             margin: 0 auto;
             background: white;
-            box-shadow: 0 0 20px rgba(0,0,0,0.1);
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
             overflow: hidden;
         }
 
@@ -47,8 +52,18 @@
             flex-shrink: 0;
         }
 
-        .header-left { display: flex; align-items: center; gap: 10px; }
-        .header-right { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-left: auto;
+        }
 
         #messages {
             flex: 1;
@@ -58,14 +73,41 @@
             -webkit-overflow-scrolling: touch;
         }
 
-        #messages::-webkit-scrollbar { width: 6px; }
-        #messages::-webkit-scrollbar-thumb { background: #ccc; border-radius: 3px; }
+        #messages::-webkit-scrollbar {
+            width: 6px;
+        }
 
-        .message { margin: 8px 0; padding: 12px 15px; border-radius: 8px; }
-        .user { background-color: #e3f2fd; text-align: right; margin-left: 40px; }
-        .assistant { background-color: #f5f5f5; margin-right: 40px; }
-        .error { color: #d32f2f; background-color: #ffebee; }
-        .thinking { color: #1976d2; font-style: italic; }
+        #messages::-webkit-scrollbar-thumb {
+            background: #ccc;
+            border-radius: 3px;
+        }
+
+        .message {
+            margin: 8px 0;
+            padding: 12px 15px;
+            border-radius: 8px;
+        }
+
+        .user {
+            background-color: #e3f2fd;
+            text-align: right;
+            margin-left: 40px;
+        }
+
+        .assistant {
+            background-color: #f5f5f5;
+            margin-right: 40px;
+        }
+
+        .error {
+            color: #d32f2f;
+            background-color: #ffebee;
+        }
+
+        .thinking {
+            color: #1976d2;
+            font-style: italic;
+        }
 
         #input-area {
             display: flex;
@@ -103,7 +145,9 @@
             transition: border-color 0.2s;
         }
 
-        #message-input:focus { border-color: #764ba2; }
+        #message-input:focus {
+            border-color: #764ba2;
+        }
 
         #send-btn {
             padding: 12px 24px;
@@ -116,8 +160,13 @@
             flex-shrink: 0;
         }
 
-        #send-btn:hover { background-color: #45a049; }
-        #send-btn:disabled { background-color: #ccc; }
+        #send-btn:hover {
+            background-color: #45a049;
+        }
+
+        #send-btn:disabled {
+            background-color: #ccc;
+        }
 
         .login-panel {
             display: flex;
@@ -130,7 +179,11 @@
             background: white;
         }
 
-        .login-panel h2 { margin-bottom: 20px; color: #333; }
+        .login-panel h2 {
+            margin-bottom: 20px;
+            color: #333;
+        }
+
         .login-controls {
             display: flex;
             align-items: center;
@@ -138,9 +191,28 @@
             width: 100%;
             max-width: 400px;
         }
-        .login-panel select { padding: 10px; font-size: 14px; flex: 1; border: 1px solid #ccc; border-radius: 4px; }
-        .login-panel button { padding: 10px 24px; background-color: #2196F3; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
-        .login-panel button:hover { background-color: #1976D2; }
+
+        .login-panel select {
+            padding: 10px;
+            font-size: 14px;
+            flex: 1;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+
+        .login-panel button {
+            padding: 10px 24px;
+            background-color: #2196F3;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .login-panel button:hover {
+            background-color: #1976D2;
+        }
 
         /* Toast notification styles */
         .toast-container {
@@ -188,7 +260,9 @@
             line-height: 1;
         }
 
-        .toast-close:hover { opacity: 1; }
+        .toast-close:hover {
+            opacity: 1;
+        }
 
         @media (max-width: 768px) {
             .toast-container {
@@ -203,15 +277,18 @@
 
         #clear-btn {
             padding: 4px 12px;
-            background: rgba(255,255,255,0.2);
-            border: 1px solid rgba(255,255,255,0.4);
+            background: rgba(255, 255, 255, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.4);
             color: white;
             border-radius: 4px;
             cursor: pointer;
             font-size: 12px;
             transition: all 0.2s;
         }
-        #clear-btn:hover { background: rgba(255,255,255,0.3); }
+
+        #clear-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
 
         /* Modal styles */
         .modal {
@@ -237,8 +314,15 @@
         }
 
         @keyframes modalSlideIn {
-            from { transform: translateY(-20px); opacity: 0; }
-            to { transform: translateY(0); opacity: 1; }
+            from {
+                transform: translateY(-20px);
+                opacity: 0;
+            }
+
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
         }
 
         .modal-header {
@@ -249,7 +333,11 @@
             border-bottom: 1px solid #eee;
         }
 
-        .modal-header h3 { margin: 0; font-size: 18px; color: #333; }
+        .modal-header h3 {
+            margin: 0;
+            font-size: 18px;
+            color: #333;
+        }
 
         .modal-close {
             font-size: 28px;
@@ -258,13 +346,19 @@
             line-height: 1;
         }
 
-        .modal-close:hover { color: #333; }
+        .modal-close:hover {
+            color: #333;
+        }
 
         .modal-body {
             padding: 24px;
         }
 
-        .modal-body p { margin: 0 0 8px 0; color: #333; font-size: 14px; }
+        .modal-body p {
+            margin: 0 0 8px 0;
+            color: #333;
+            font-size: 14px;
+        }
 
         .modal-footer {
             display: flex;
@@ -276,7 +370,8 @@
             border-top: 1px solid #eee;
         }
 
-        .btn-cancel, .btn-confirm {
+        .btn-cancel,
+        .btn-confirm {
             padding: 10px 20px;
             border: none;
             border-radius: 6px;
@@ -290,35 +385,129 @@
             color: #333;
         }
 
-        .btn-cancel:hover { background: #e0e0e0; }
+        .btn-cancel:hover {
+            background: #e0e0e0;
+        }
 
         .btn-confirm {
             background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%);
             color: white;
         }
 
-        .btn-confirm:hover { opacity: 0.9; }
+        .btn-confirm:hover {
+            opacity: 0.9;
+        }
 
         /* Markdown styles */
-        .message-content { word-wrap: break-word; line-height: 1.6; }
-        .markdown-body { font-size: 14px; }
-        .markdown-body pre { background-color: #f6f8fa; padding: 12px; border-radius: 6px; overflow-x: auto; }
-        .markdown-body code { background-color: #f6f8fa; padding: 2px 6px; border-radius: 3px; font-family: 'Courier New', monospace; font-size: 13px; }
-        .markdown-body pre code { background-color: transparent; padding: 0; }
-        .markdown-body blockquote { border-left: 4px solid #dfe2e5; padding-left: 16px; margin: 0; color: #6a737d; }
-        .markdown-body ul, .markdown-body ol { padding-left: 24px; }
-        .markdown-body table { border-collapse: collapse; width: 100%; margin: 8px 0; }
-        .markdown-body th, .markdown-body td { border: 1px solid #dfe2e5; padding: 6px 12px; text-align: left; }
-        .markdown-body th { background-color: #f6f8fa; }
-        .markdown-body img { max-width: 100%; height: auto; }
-        .markdown-body a { color: #0366d6; text-decoration: none; }
-        .markdown-body a:hover { text-decoration: underline; }
-        .markdown-body hr { height: 0.25em; padding: 0; margin: 24px 0; background-color: #e1e4e8; border: 0; }
-        .markdown-body h1, .markdown-body h2, .markdown-body h3, .markdown-body h4 { margin-top: 16px; margin-bottom: 8px; font-weight: 600; line-height: 1.25; }
-        .markdown-body h1 { font-size: 2em; border-bottom: 1px solid #eaecef; padding-bottom: 0.3em; }
-        .markdown-body h2 { font-size: 1.5em; border-bottom: 1px solid #eaecef; padding-bottom: 0.3em; }
-        .markdown-body h3 { font-size: 1.25em; }
-        .markdown-body h4 { font-size: 1em; }
+        .message-content {
+            word-wrap: break-word;
+            line-height: 1.6;
+        }
+
+        .markdown-body {
+            font-size: 14px;
+        }
+
+        .markdown-body pre {
+            background-color: #f6f8fa;
+            padding: 12px;
+            border-radius: 6px;
+            overflow-x: auto;
+        }
+
+        .markdown-body code {
+            background-color: #f6f8fa;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+        }
+
+        .markdown-body pre code {
+            background-color: transparent;
+            padding: 0;
+        }
+
+        .markdown-body blockquote {
+            border-left: 4px solid #dfe2e5;
+            padding-left: 16px;
+            margin: 0;
+            color: #6a737d;
+        }
+
+        .markdown-body ul,
+        .markdown-body ol {
+            padding-left: 24px;
+        }
+
+        .markdown-body table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 8px 0;
+        }
+
+        .markdown-body th,
+        .markdown-body td {
+            border: 1px solid #dfe2e5;
+            padding: 6px 12px;
+            text-align: left;
+        }
+
+        .markdown-body th {
+            background-color: #f6f8fa;
+        }
+
+        .markdown-body img {
+            max-width: 100%;
+            height: auto;
+        }
+
+        .markdown-body a {
+            color: #0366d6;
+            text-decoration: none;
+        }
+
+        .markdown-body a:hover {
+            text-decoration: underline;
+        }
+
+        .markdown-body hr {
+            height: 0.25em;
+            padding: 0;
+            margin: 24px 0;
+            background-color: #e1e4e8;
+            border: 0;
+        }
+
+        .markdown-body h1,
+        .markdown-body h2,
+        .markdown-body h3,
+        .markdown-body h4 {
+            margin-top: 16px;
+            margin-bottom: 8px;
+            font-weight: 600;
+            line-height: 1.25;
+        }
+
+        .markdown-body h1 {
+            font-size: 2em;
+            border-bottom: 1px solid #eaecef;
+            padding-bottom: 0.3em;
+        }
+
+        .markdown-body h2 {
+            font-size: 1.5em;
+            border-bottom: 1px solid #eaecef;
+            padding-bottom: 0.3em;
+        }
+
+        .markdown-body h3 {
+            font-size: 1.25em;
+        }
+
+        .markdown-body h4 {
+            font-size: 1em;
+        }
 
         /* Mobile Responsive */
         @media (max-width: 768px) {
@@ -335,7 +524,8 @@
                 width: 100%;
             }
 
-            .page-wrapper, .login-panel {
+            .page-wrapper,
+            .login-panel {
                 width: 100%;
             }
 
@@ -415,7 +605,8 @@
                 padding: 12px 20px;
             }
 
-            .btn-cancel, .btn-confirm {
+            .btn-cancel,
+            .btn-confirm {
                 padding: 10px 16px;
                 font-size: 13px;
             }
@@ -511,13 +702,15 @@
                 padding: 10px 15px;
             }
 
-            .btn-cancel, .btn-confirm {
+            .btn-cancel,
+            .btn-confirm {
                 padding: 8px 14px;
                 font-size: 12px;
             }
         }
     </style>
 </head>
+
 <body>
     <div class="login-panel" id="login-panel">
         <h2 id="login-header">Chat-Agent</h2>
@@ -536,7 +729,7 @@
                 <span id="agent-header">🤖 Chat-Agent</span>
             </div>
             <div class="header-right">
-                <button id="clear-btn" onclick="showClearModal()" title="Clear Session">🗑️ Clear</button>
+                <button id="clear-btn" onclick="showClearModal()" title="Clear Conversation">🗑️ Clear</button>
             </div>
         </div>
 
@@ -544,17 +737,18 @@
         <div id="clear-modal" class="modal" style="display: none;">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h3>🗑️ Clear Session</h3>
+                    <h3>🗑️ Clear Conversation</h3>
                     <span class="modal-close" onclick="hideClearModal()">&times;</span>
                 </div>
                 <div class="modal-body">
-                    <p>Are you sure you want to clear the session for:</p>
+                    <p>Are you sure you want to clear the conversation for:</p>
                     <p id="clear-chat-name" style="font-weight: bold; margin: 10px 0; color: #667eea;"></p>
-                    <p style="color: #666; font-size: 13px;">⚠️ This action cannot be undone. All messages will be permanently deleted.</p>
+                    <p style="color: #666; font-size: 13px;">⚠️ This action cannot be undone. All messages will be
+                        permanently deleted.</p>
                 </div>
                 <div class="modal-footer">
                     <button class="btn-cancel" onclick="hideClearModal()">Cancel</button>
-                    <button class="btn-confirm" onclick="confirmClear()">Clear Session</button>
+                    <button class="btn-confirm" onclick="confirmClear()">Clear</button>
                 </div>
             </div>
         </div>
@@ -564,7 +758,8 @@
         <div id="messages"></div>
         <div id="input-area">
             <div class="input-wrapper">
-                <textarea id="message-input" placeholder="Type your message..." onkeydown="handleKeyDown(event)" oninput="autoResize(this)"></textarea>
+                <textarea id="message-input" placeholder="Type your message..." onkeydown="handleKeyDown(event)"
+                    oninput="autoResize(this)"></textarea>
                 <button id="send-btn" onclick="sendMessage()">Send</button>
             </div>
         </div>
@@ -625,16 +820,21 @@
 
         function connectWebSocket() {
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            ws = new WebSocket(protocol + '//' + window.location.host + '/ws');
+            let wsUrl = protocol + '//' + window.location.host + '/ws';
 
-            ws.onopen = function() {
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = function () {
                 console.log('WebSocket connected');
                 reconnectAttempts = 0;
                 closeStatus(); // Close any existing status when connected
-                ws.send(JSON.stringify({type: 'select_chat', payload: {chat_name: currentChat}}));
+                // 自动选择当前 chat
+                if (currentChat) {
+                    ws.send(JSON.stringify({ type: 'select_chat', payload: { chat_name: currentChat } }));
+                }
             };
 
-            ws.onmessage = function(event) {
+            ws.onmessage = function (event) {
                 try {
                     const msg = JSON.parse(event.data);
                     handleMessage(msg);
@@ -643,7 +843,7 @@
                 }
             };
 
-            ws.onclose = function() {
+            ws.onclose = function () {
                 console.log('WebSocket disconnected');
                 if (reconnectAttempts < maxReconnectAttempts) {
                     setStatus('Connection lost. Reconnecting in 3 seconds...', true);
@@ -654,15 +854,18 @@
                 }
             };
 
-            ws.onerror = function(error) {
+            ws.onerror = function (error) {
                 console.error('WebSocket error:', error);
             };
         }
 
         function handleMessage(msg) {
             switch (msg.type) {
+                case 'welcome':
+                    setStatus(msg.payload.message || 'Connected', false);
+                    break;
                 case 'chat_selected':
-                    // Chat name already shown in header
+                    setStatus(msg.payload.message, false);
                     break;
                 case 'chunk':
                     displayChunk(msg.payload.content, msg.payload.first, msg.payload.last);
@@ -674,7 +877,7 @@
                 case 'complete':
                     const thinking = document.getElementById('thinking');
                     if (thinking) thinking.remove();
-                    setStatus('Response completed', false);
+                    //setStatus('Response completed', false);
                     break;
                 case 'error':
                     setStatus(msg.payload.error, true);
@@ -697,9 +900,10 @@
             autoResize(input);
             input.focus();
 
+            // 直接发送 message，后端已缓存 chat session
             ws.send(JSON.stringify({
                 type: 'chat',
-                payload: {chat_name: currentChat, message: message}
+                payload: { message: message }
             }));
         }
 
@@ -808,7 +1012,8 @@
 
         function confirmClear() {
             if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({type: 'clear_session', payload: {chat_name: currentChat}}));
+                // 清除当前 chat session 的对话记录
+                ws.send(JSON.stringify({ type: 'clear', payload: {} }));
             }
             hideClearModal();
         }
@@ -827,7 +1032,7 @@
 
         // Mobile keyboard adaptation
         let lastViewportHeight = window.innerHeight;
-        
+
         function handleViewportChange() {
             const viewport = window.visualViewport;
             if (!viewport) return;
@@ -842,7 +1047,7 @@
             // Detect keyboard show/hide by comparing viewport height change
             const heightDiff = lastViewportHeight - viewportHeight;
             const isKeyboardShown = heightDiff > 150; // Keyboard typically takes >150px
-            
+
             if (isKeyboardShown) {
                 // Keyboard is shown - scroll to make input visible
                 const inputArea = document.getElementById('input-area');
@@ -879,7 +1084,7 @@
         // Focus input when keyboard is shown on mobile
         const messageInput = document.getElementById('message-input');
         if (messageInput) {
-            messageInput.addEventListener('focus', function() {
+            messageInput.addEventListener('focus', function () {
                 // Small delay to allow keyboard to start appearing
                 setTimeout(scrollToBottom, 300);
             });
@@ -888,4 +1093,5 @@
         init();
     </script>
 </body>
+
 </html>
