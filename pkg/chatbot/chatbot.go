@@ -212,10 +212,6 @@ func (cb *ChatBot) StreamChat(ctx context.Context, userInput string) error {
 					fmt.Print("Thinking:\n")
 					reasoning = true
 				}
-				if message.Content != "" && reasoning && !firstword {
-					fmt.Print("\n---\n")
-					firstword = true
-				}
 				if message.ReasoningContent != "" {
 					//Decode JSON-encoded ReasoningContent (e.g. from OpenRouter)
 					decodedReasoning := message.ReasoningContent
@@ -225,6 +221,10 @@ func (cb *ChatBot) StreamChat(ctx context.Context, userInput string) error {
 					if out := filter.Process(decodedReasoning); out != nil {
 						fmt.Print(*out)
 					}
+				}
+				if message.Content != "" && reasoning && !firstword {
+					fmt.Print("\n---\n")
+					firstword = true
 				}
 				if message.Content != "" {
 					if out := filter.Process(message.Content); out != nil {
