@@ -226,16 +226,16 @@ func (f *Factory) createOpenRouterModel(ctx context.Context, modelCfg *config.Mo
 }
 
 func (f *Factory) createLocalOpenRouterModel(ctx context.Context, modelCfg *config.Model, providerCfg *config.Provider) (model.ToolCallingChatModel, error) {
-	effort := openrouter.EffortOfMedium
+	effort := localopenrouter.EffortOfMedium
 	if !modelCfg.Thinking {
-		effort = openrouter.EffortOfNone
+		effort = localopenrouter.EffortOfNone
 	}
 	cfg := localopenrouter.Config{
 		Model:   modelCfg.Model,
 		BaseURL: providerCfg.BaseURL,
 		APIKey:  providerCfg.APIKey,
 		Reasoning: &localopenrouter.ReasoningConfig{
-			Effort:  string(effort),
+			Effort:  effort,
 			Exclude: !modelCfg.Thinking,
 			Enabled: &modelCfg.Thinking,
 		},

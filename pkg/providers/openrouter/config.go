@@ -33,6 +33,13 @@ type Config struct {
 	Temperature *float32
 }
 
+const (
+	EffortOfNone   = "none"
+	EffortOfLow    = "low"
+	EffortOfMedium = "medium"
+	EffortOfHigh   = "high"
+)
+
 // ReasoningConfig mirrors OpenRouter's reasoning parameter.
 type ReasoningConfig struct {
 	Effort    string
