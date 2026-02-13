@@ -180,44 +180,71 @@
         }
 
         .login-panel h2 {
-            margin-bottom: 20px;
+            margin-bottom: 15px;
             color: #333;
+        }
+
+        .login-panel p {
+            margin-bottom: 30px;
+            color: #666;
+            font-size: 14px;
         }
 
         .login-controls {
             display: flex;
+            flex-direction: column;
             align-items: center;
-            gap: 10px;
+            gap: 15px;
             width: 100%;
-            max-width: 400px;
+            max-width: 350px;
         }
 
         .login-panel select {
-            padding: 10px;
-            font-size: 14px;
-            flex: 1;
-            border: 1px solid #ccc;
-            border-radius: 4px;
+            width: 100%;
+            padding: 14px 16px;
+            font-size: 16px;
+            border: 2px solid #667eea;
+            border-radius: 8px;
+            background: white;
+            cursor: pointer;
+            appearance: none;
+            background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23667eea' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+            background-repeat: no-repeat;
+            background-position: right 12px center;
+            background-size: 16px;
+        }
+
+        .login-panel select:focus {
+            outline: none;
+            border-color: #764ba2;
         }
 
         .login-panel button {
-            padding: 10px 24px;
-            background-color: #2196F3;
+            width: 100%;
+            padding: 14px 24px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
             border: none;
-            border-radius: 4px;
+            border-radius: 8px;
             cursor: pointer;
-            font-size: 14px;
+            font-size: 16px;
+            font-weight: 600;
+            transition: transform 0.2s, box-shadow 0.2s;
         }
 
         .login-panel button:hover {
-            background-color: #1976D2;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .login-panel button:active {
+            transform: translateY(0);
         }
 
         /* Toast notification styles */
         .toast-container {
             position: fixed;
-            top: 20px;
+            top: 10px;
             left: 50%;
             transform: translateX(-50%);
             z-index: 2000;
@@ -233,15 +260,23 @@
             align-items: center;
             justify-content: center;
             gap: 8px;
-            padding: 8px 16px;
+            padding: 10px 20px;
             background: rgba(102, 126, 234, 0.95);
             color: white;
-            font-size: 13px;
-            border-radius: 20px;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+            font-size: 14px;
+            border-radius: 25px;
+            box-shadow: 0 2px 15px rgba(102, 126, 234, 0.4);
             pointer-events: auto;
-            max-width: 80%;
-            word-wrap: break-word;
+            max-width: 90%;
+            min-width: 200px;
+            white-space: nowrap;
+            overflow-x: auto;
+            overflow-y: hidden;
+        }
+
+        .toast::-webkit-scrollbar {
+            display: none;
+            height: 0;
         }
 
         .toast.error {
@@ -266,12 +301,16 @@
 
         @media (max-width: 768px) {
             .toast-container {
-                top: 10px;
+                top: 15px;
+                width: 100%;
+                padding: 0 10px;
             }
 
             .toast {
-                font-size: 12px;
-                padding: 6px 14px;
+                font-size: 13px;
+                padding: 8px 16px;
+                max-width: 100%;
+                min-width: 120px;
             }
         }
 
@@ -513,24 +552,66 @@
         @media (max-width: 768px) {
             body {
                 height: 100dvh;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             }
 
-            /* Hide send button on mobile, use keyboard done key */
+            /* Login panel mobile styles */
+            .login-panel {
+                justify-content: flex-start;
+                padding-top: 20vh;
+                width: 100%;
+                max-width: 100%;
+                background: white;
+            }
+
+            .login-panel h2 {
+                font-size: 28px;
+                margin-bottom: 10px;
+                color: #333;
+                text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            }
+
+            .login-panel p {
+                font-size: 15px;
+                margin-bottom: 40px;
+                color: #555;
+            }
+
+            .login-controls {
+                width: 85%;
+                max-width: 320px;
+                gap: 20px;
+            }
+
+            .login-panel select {
+                padding: 16px 16px;
+                font-size: 17px;
+                border-radius: 12px;
+                border-width: 2px;
+                background-color: white;
+                box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+            }
+
+            .login-panel button {
+                padding: 16px 24px;
+                font-size: 17px;
+                border-radius: 12px;
+                box-shadow: 0 4px 20px rgba(102, 126, 234, 0.4);
+            }
+
+            /* Keep send button visible on mobile */
             #send-btn {
-                display: none;
+                display: block;
             }
 
             .input-wrapper {
                 width: 100%;
             }
 
-            .page-wrapper,
-            .login-panel {
-                width: 100%;
-            }
-
             .page-wrapper {
+                width: 100%;
                 box-shadow: none;
+                background: white;
             }
 
             .header {
@@ -615,6 +696,45 @@
         @media (max-width: 480px) {
             body {
                 height: 100dvh;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            }
+
+            /* Login panel on small mobile */
+            .login-panel {
+                justify-content: flex-start;
+                padding-top: 15vh;
+                padding-left: 20px;
+                padding-right: 20px;
+                width: 100%;
+                max-width: 100%;
+                background: white;
+            }
+
+            .login-panel h2 {
+                font-size: 26px;
+                margin-bottom: 8px;
+            }
+
+            .login-panel p {
+                font-size: 14px;
+                margin-bottom: 35px;
+            }
+
+            .login-controls {
+                width: 90%;
+                gap: 18px;
+            }
+
+            .login-panel select {
+                padding: 15px 16px;
+                font-size: 16px;
+                border-radius: 10px;
+            }
+
+            .login-panel button {
+                padding: 15px 24px;
+                font-size: 16px;
+                border-radius: 10px;
             }
 
             .header {
@@ -713,8 +833,7 @@
 
 <body>
     <div class="login-panel" id="login-panel">
-        <h2 id="login-header">Chat-Agent</h2>
-        <p style="margin-bottom: 20px; color: #666;">Select a chat to start</p>
+        <h2 id="login-header">🤖 Chat-Agent</h2>
         <div class="login-controls">
             <select id="chat-select">
                 <option value="">-- Select a chat --</option>
