@@ -3,6 +3,10 @@ module github.com/Arvintian/chat-agent
 go 1.25.5
 
 require (
+	github.com/gorilla/websocket v1.5.3
+)
+
+require (
 	github.com/bytedance/sonic v1.14.1
 	github.com/cloudwego/eino v0.7.32
 	github.com/cloudwego/eino-ext/components/model/ark v0.1.64
