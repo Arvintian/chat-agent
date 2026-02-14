@@ -90,21 +90,21 @@ func (sm *SessionManager) RemoveSession(sessionID string) {
 
 // WSSession represents a WebSocket session with its connection
 type WSSession struct {
-	conn       *websocket.Conn
-	sessionID  string
-	cfg        *config.Config
-	cleanupReg *utils.CleanupRegistry
-	chatName   string       // 当前选中的 chat 名称
+	conn        *websocket.Conn
+	sessionID   string
+	cfg         *config.Config
+	cleanupReg  *utils.CleanupRegistry
+	chatName    string       // 当前选中的 chat 名称
 	chatSession *ChatSession // 已初始化的 chat session，复用
 }
 
 func NewWSSession(conn *websocket.Conn, sessionID string, cfg *config.Config, cleanupReg *utils.CleanupRegistry) *WSSession {
 	return &WSSession{
-		conn:       conn,
-		sessionID:  sessionID,
-		cfg:        cfg,
-		cleanupReg: cleanupReg,
-		chatName:   "",
+		conn:        conn,
+		sessionID:   sessionID,
+		cfg:         cfg,
+		cleanupReg:  cleanupReg,
+		chatName:    "",
 		chatSession: nil,
 	}
 }
@@ -155,6 +155,7 @@ Example:
 
 		port, _ := cmd.Flags().GetInt("port")
 		host, _ := cmd.Flags().GetString("host")
+		welcome, _ := cmd.Flags().GetString("welcome")
 
 		// Create session manager
 		sessionManager := NewSessionManager(cfg)
@@ -182,6 +183,19 @@ Example:
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"chats":        chats,
 				"default_chat": defaultChat,
+			})
+		})
+		http.HandleFunc("/config", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			// Use --welcome as title, fallback to default
+			title := welcome
+			if title == "" {
+				title = "Chat-Agent"
+			}
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"webui": map[string]interface{}{
+					"title": title,
+				},
 			})
 		})
 
@@ -216,11 +230,6 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request, sessionManager *Ses
 	log.Printf("WebSocket connection: %s", sessionID)
 
 	session := NewWSSession(conn, sessionID, cfg, cleanupRegistry)
-
-	// Send welcome message (no session_id needed)
-	session.sendMessage("welcome", map[string]interface{}{
-		"message": "Welcome to Chat-Agent Web!",
-	})
 
 	// Handle messages
 	for {

@@ -13,6 +13,18 @@ const maxReconnectAttempts = 5;
 let toastTimeout = null;
 
 async function init() {
+    // Load webui config from server
+    try {
+        const configResponse = await fetch('/config');
+        const configData = await configResponse.json();
+        const title = configData.webui?.title || 'Chat-Agent';
+        document.title = title;
+        document.getElementById('login-header').textContent = '🤖 ' + title;
+        document.getElementById('agent-header').textContent = '🤖 ' + title;
+    } catch (e) {
+        console.error('Failed to load webui config:', e);
+    }
+
     try {
         const response = await fetch('/chats');
         const data = await response.json();
