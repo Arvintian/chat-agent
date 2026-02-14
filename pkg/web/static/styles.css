@@ -1,0 +1,821 @@
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background-color: #f5f5f5;
+    height: 100dvh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.page-wrapper {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    width: 70%;
+    margin: 0 auto;
+    background: white;
+    box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
+    overflow: hidden;
+}
+
+#chat-panel {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+}
+
+.header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 15px 20px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    font-size: 18px;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+
+.header-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.header-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+}
+
+#messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 15px;
+    background: #fafafa;
+    -webkit-overflow-scrolling: touch;
+}
+
+#messages::-webkit-scrollbar {
+    width: 6px;
+}
+
+#messages::-webkit-scrollbar-thumb {
+    background: #ccc;
+    border-radius: 3px;
+}
+
+.message {
+    margin: 8px 0;
+    padding: 12px 15px;
+    border-radius: 8px;
+}
+
+.user {
+    background-color: #e3f2fd;
+    text-align: right;
+    margin-left: 40px;
+}
+
+.assistant {
+    background-color: #f5f5f5;
+    margin-right: 40px;
+}
+
+.error {
+    color: #d32f2f;
+    background-color: #ffebee;
+}
+
+.thinking {
+    color: #1976d2;
+    font-style: italic;
+}
+
+#input-area {
+    display: flex;
+    gap: 10px;
+    padding: 15px;
+    background: white;
+    border-top: 1px solid #eee;
+    flex-shrink: 0;
+}
+
+.input-wrapper {
+    display: flex;
+    flex: 1;
+    gap: 10px;
+    width: 100%;
+}
+
+@media (max-width: 768px) {
+    .input-wrapper {
+        width: 100%;
+    }
+}
+
+#message-input {
+    flex: 1;
+    padding: 12px 15px;
+    border: 1px solid #667eea;
+    border-radius: 4px;
+    font-size: 15px;
+    min-height: 60px;
+    height: 60px;
+    max-height: 120px;
+    resize: none;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+#message-input:focus {
+    border-color: #764ba2;
+}
+
+#send-btn {
+    padding: 12px 24px;
+    background-color: #4CAF50;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    flex-shrink: 0;
+}
+
+#send-btn:hover {
+    background-color: #45a049;
+}
+
+#send-btn:disabled {
+    background-color: #ccc;
+}
+
+.login-panel {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    height: 100%;
+    width: 70%;
+    margin: 0 auto;
+    background: white;
+}
+
+.login-panel h2 {
+    margin-bottom: 15px;
+    color: #333;
+}
+
+.login-panel p {
+    margin-bottom: 30px;
+    color: #666;
+    font-size: 14px;
+}
+
+.login-controls {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 15px;
+    width: 100%;
+    max-width: 350px;
+}
+
+.login-panel select {
+    width: 100%;
+    padding: 14px 16px;
+    font-size: 16px;
+    border: 2px solid #667eea;
+    border-radius: 8px;
+    background: white;
+    cursor: pointer;
+    appearance: none;
+    background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23667eea' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    background-size: 16px;
+}
+
+.login-panel select:focus {
+    outline: none;
+    border-color: #764ba2;
+}
+
+.login-panel button {
+    width: 100%;
+    padding: 14px 24px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 16px;
+    font-weight: 600;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.login-panel button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+}
+
+.login-panel button:active {
+    transform: translateY(0);
+}
+
+/* Toast notification styles */
+.toast-container {
+    position: fixed;
+    top: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 2000;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    pointer-events: none;
+}
+
+.toast {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 10px 20px;
+    background: rgba(102, 126, 234, 0.95);
+    color: white;
+    font-size: 14px;
+    border-radius: 25px;
+    box-shadow: 0 2px 15px rgba(102, 126, 234, 0.4);
+    pointer-events: auto;
+    max-width: 90%;
+    min-width: 200px;
+    white-space: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+}
+
+.toast::-webkit-scrollbar {
+    display: none;
+    height: 0;
+}
+
+.toast.error {
+    background: rgba(255, 107, 107, 0.95);
+}
+
+.toast.success {
+    background: rgba(76, 175, 80, 0.95);
+}
+
+.toast-close {
+    cursor: pointer;
+    opacity: 0.8;
+    font-size: 16px;
+    padding: 0 2px;
+    line-height: 1;
+}
+
+.toast-close:hover {
+    opacity: 1;
+}
+
+@media (max-width: 768px) {
+    .toast-container {
+        top: 15px;
+        width: 100%;
+        padding: 0 10px;
+    }
+
+    .toast {
+        font-size: 13px;
+        padding: 8px 16px;
+        max-width: 100%;
+        min-width: 120px;
+    }
+}
+
+#clear-btn {
+    padding: 4px 12px;
+    background: rgba(255, 255, 255, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    color: white;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    transition: all 0.2s;
+}
+
+#clear-btn:hover {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+/* Modal styles */
+.modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+}
+
+.modal-content {
+    background: white;
+    border-radius: 12px;
+    width: 400px;
+    max-width: 90%;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+    animation: modalSlideIn 0.3s ease;
+}
+
+@keyframes modalSlideIn {
+    from {
+        transform: translateY(-20px);
+        opacity: 0;
+    }
+
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px 24px;
+    border-bottom: 1px solid #eee;
+}
+
+.modal-header h3 {
+    margin: 0;
+    font-size: 18px;
+    color: #333;
+}
+
+.modal-close {
+    font-size: 28px;
+    color: #999;
+    cursor: pointer;
+    line-height: 1;
+}
+
+.modal-close:hover {
+    color: #333;
+}
+
+.modal-body {
+    padding: 24px;
+}
+
+.modal-body p {
+    margin: 0 0 8px 0;
+    color: #333;
+    font-size: 14px;
+}
+
+.modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 16px 24px;
+    background: #fafafa;
+    border-radius: 0 0 12px 12px;
+    border-top: 1px solid #eee;
+}
+
+.btn-cancel,
+.btn-confirm {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: all 0.2s;
+}
+
+.btn-cancel {
+    background: #f0f0f0;
+    color: #333;
+}
+
+.btn-cancel:hover {
+    background: #e0e0e0;
+}
+
+.btn-confirm {
+    background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%);
+    color: white;
+}
+
+.btn-confirm:hover {
+    opacity: 0.9;
+}
+
+/* Markdown styles */
+.message-content {
+    word-wrap: break-word;
+    line-height: 1.6;
+}
+
+.markdown-body {
+    font-size: 14px;
+}
+
+.markdown-body pre {
+    background-color: #f6f8fa;
+    padding: 12px;
+    border-radius: 6px;
+    overflow-x: auto;
+}
+
+.markdown-body code {
+    background-color: #f6f8fa;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+}
+
+.markdown-body pre code {
+    background-color: transparent;
+    padding: 0;
+}
+
+.markdown-body blockquote {
+    border-left: 4px solid #dfe2e5;
+    padding-left: 16px;
+    margin: 0;
+    color: #6a737d;
+}
+
+.markdown-body ul,
+.markdown-body ol {
+    padding-left: 24px;
+}
+
+.markdown-body table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 8px 0;
+}
+
+.markdown-body th,
+.markdown-body td {
+    border: 1px solid #dfe2e5;
+    padding: 6px 12px;
+    text-align: left;
+}
+
+.markdown-body th {
+    background-color: #f6f8fa;
+}
+
+.markdown-body img {
+    max-width: 100%;
+    height: auto;
+}
+
+.markdown-body a {
+    color: #0366d6;
+    text-decoration: none;
+}
+
+.markdown-body a:hover {
+    text-decoration: underline;
+}
+
+.markdown-body hr {
+    height: 0.25em;
+    padding: 0;
+    margin: 24px 0;
+    background-color: #e1e4e8;
+    border: 0;
+}
+
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4 {
+    margin-top: 16px;
+    margin-bottom: 8px;
+    font-weight: 600;
+    line-height: 1.25;
+}
+
+.markdown-body h1 {
+    font-size: 2em;
+    border-bottom: 1px solid #eaecef;
+    padding-bottom: 0.3em;
+}
+
+.markdown-body h2 {
+    font-size: 1.5em;
+    border-bottom: 1px solid #eaecef;
+    padding-bottom: 0.3em;
+}
+
+.markdown-body h3 {
+    font-size: 1.25em;
+}
+
+.markdown-body h4 {
+    font-size: 1em;
+}
+
+/* Mobile Responsive */
+@media (max-width: 768px) {
+    body {
+        height: 100dvh;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    }
+
+    /* Login panel mobile styles */
+    .login-panel {
+        justify-content: flex-start;
+        padding-top: 20vh;
+        width: 100%;
+        max-width: 100%;
+        background: white;
+    }
+
+    .login-panel h2 {
+        font-size: 28px;
+        margin-bottom: 10px;
+        color: #333;
+        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+
+    .login-panel p {
+        font-size: 15px;
+        margin-bottom: 40px;
+        color: #555;
+    }
+
+    .login-controls {
+        width: 85%;
+        max-width: 320px;
+        gap: 20px;
+    }
+
+    .login-panel select {
+        padding: 16px 16px;
+        font-size: 17px;
+        border-radius: 12px;
+        border-width: 2px;
+        background-color: white;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+    }
+
+    .login-panel button {
+        padding: 16px 24px;
+        font-size: 17px;
+        border-radius: 12px;
+        box-shadow: 0 4px 20px rgba(102, 126, 234, 0.4);
+    }
+
+    /* Keep send button visible on mobile */
+    #send-btn {
+        display: block;
+    }
+
+    .input-wrapper {
+        width: 100%;
+    }
+
+    .page-wrapper {
+        width: 100%;
+        box-shadow: none;
+        background: white;
+    }
+
+    .header {
+        padding: 12px 15px;
+        font-size: 16px;
+        flex-shrink: 0;
+    }
+
+    #agent-header {
+        font-size: 15px;
+    }
+
+    #clear-btn {
+        padding: 6px 10px;
+        font-size: 11px;
+    }
+
+    #messages {
+        flex: 1;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        padding: 12px 10px;
+    }
+
+    .message {
+        padding: 10px 12px;
+        margin: 6px 0;
+    }
+
+    .user {
+        margin-left: 20px;
+    }
+
+    .assistant {
+        margin-right: 20px;
+    }
+
+    #input-area {
+        padding: 12px 10px;
+        gap: 8px;
+        flex-shrink: 0;
+    }
+
+    #message-input {
+        padding: 10px 12px;
+        font-size: 14px;
+    }
+
+    #send-btn {
+        padding: 10px 16px;
+        font-size: 13px;
+        flex-shrink: 0;
+    }
+
+    .login-panel h2 {
+        font-size: 20px;
+    }
+
+    .modal-content {
+        width: 90%;
+    }
+
+    .modal-header {
+        padding: 15px 20px;
+    }
+
+    .modal-body {
+        padding: 15px 20px;
+    }
+
+    .modal-footer {
+        padding: 12px 20px;
+    }
+
+    .btn-cancel,
+    .btn-confirm {
+        padding: 10px 16px;
+        font-size: 13px;
+    }
+}
+
+@media (max-width: 480px) {
+    body {
+        height: 100dvh;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    }
+
+    /* Login panel on small mobile */
+    .login-panel {
+        justify-content: flex-start;
+        padding-top: 15vh;
+        padding-left: 20px;
+        padding-right: 20px;
+        width: 100%;
+        max-width: 100%;
+        background: white;
+    }
+
+    .login-panel h2 {
+        font-size: 26px;
+        margin-bottom: 8px;
+    }
+
+    .login-panel p {
+        font-size: 14px;
+        margin-bottom: 35px;
+    }
+
+    .login-controls {
+        width: 90%;
+        gap: 18px;
+    }
+
+    .login-panel select {
+        padding: 15px 16px;
+        font-size: 16px;
+        border-radius: 10px;
+    }
+
+    .login-panel button {
+        padding: 15px 24px;
+        font-size: 16px;
+        border-radius: 10px;
+    }
+
+    .header {
+        padding: 10px 12px;
+        font-size: 14px;
+    }
+
+    #agent-header {
+        font-size: 13px;
+    }
+
+    #clear-btn {
+        padding: 5px 8px;
+        font-size: 10px;
+    }
+
+    #messages {
+        padding: 10px 8px;
+    }
+
+    .message {
+        padding: 8px 10px;
+        margin: 4px 0;
+    }
+
+    .user {
+        margin-left: 15px;
+    }
+
+    .assistant {
+        margin-right: 15px;
+    }
+
+    #input-area {
+        padding: 10px 8px;
+        gap: 6px;
+    }
+
+    #message-input {
+        min-height: 44px;
+        height: 44px;
+        max-height: 100px;
+        padding: 8px 10px;
+        font-size: 14px;
+    }
+
+    #send-btn {
+        padding: 8px 12px;
+        font-size: 12px;
+    }
+
+    .message-content {
+        font-size: 14px;
+    }
+
+    .markdown-body {
+        font-size: 13px;
+    }
+
+    .markdown-body pre {
+        padding: 8px 10px;
+    }
+
+    .markdown-body code {
+        font-size: 12px;
+    }
+
+    .modal-content {
+        width: 95%;
+    }
+
+    .modal-header {
+        padding: 12px 15px;
+    }
+
+    .modal-header h3 {
+        font-size: 16px;
+    }
+
+    .modal-body {
+        padding: 12px 15px;
+    }
+
+    .modal-footer {
+        padding: 10px 15px;
+    }
+
+    .btn-cancel,
+    .btn-confirm {
+        padding: 8px 14px;
+        font-size: 12px;
+    }
+}
