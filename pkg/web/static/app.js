@@ -370,14 +370,14 @@ function approveTarget(targetId) {
     if (pendingApprovals[targetId]) {
         pendingApprovals[targetId].approved = true;
         pendingApprovals[targetId].reason = '';
-        
+
         // Update UI
         const resultEl = document.getElementById(`approval-result-${targetId}`);
         if (resultEl) {
             resultEl.innerHTML = '<span class="approved-text">✅ Approved</span>';
             resultEl.className = 'approval-result approved';
         }
-        
+
         // Disable buttons
         const targetDiv = document.querySelector(`[data-target-id="${targetId}"]`);
         if (targetDiv) {
@@ -389,7 +389,7 @@ function approveTarget(targetId) {
             });
             targetDiv.classList.add('decided');
         }
-        
+
         checkAllApprovalsDone();
     }
 }
@@ -540,7 +540,7 @@ function cancelApprovals() {
         if (pendingApprovals[targetId].approved === null || pendingApprovals[targetId].approved === undefined) {
             pendingApprovals[targetId].approved = false;
             pendingApprovals[targetId].reason = 'Cancelled by user';
-            
+
             // Update UI
             const resultEl = document.getElementById(`approval-result-${targetId}`);
             if (resultEl) {
@@ -549,7 +549,7 @@ function cancelApprovals() {
             }
         }
     });
-    
+
     // Submit the approvals (all denied)
     submitApprovals();
 }
@@ -786,10 +786,13 @@ function displayChunk(content, isFirst, isLast) {
     // 标记最后一个块完成
     if (isLast) {
         chunkElement = null;
-        // 为流式响应完成后的消息添加代码块复制按钮
+
+        // 重置 id 以便后续消息不会混淆
         const responseDiv = document.getElementById('current-response');
         if (responseDiv) {
-            // 添加页脚复制按钮
+            responseDiv.removeAttribute('id');
+
+            // 添加页脚复制按钮（确保它不在 message-content 内）
             if (!responseDiv.querySelector('.message-footer')) {
                 const footer = document.createElement('div');
                 footer.className = 'message-footer';
@@ -866,7 +869,7 @@ function addCopyButtonsToCodeBlocks(messageDiv) {
         copyBtn.title = 'Copy code';
 
         // 添加点击事件
-        copyBtn.onclick = function(e) {
+        copyBtn.onclick = function (e) {
             e.stopPropagation();
             copyCodeBlock(this, codeText);
         };
