@@ -21,6 +21,26 @@ import (
 	"github.com/hekmon/liveterm/v2"
 )
 
+// Handler interface for handling chat output events
+// This allows the same streaming logic to be used in different contexts
+// (CLI with readline, WebSocket, etc.)
+type Handler interface {
+	// SendChunk sends a content chunk with position markers
+	SendChunk(content string, first, last bool)
+
+	// SendToolCall sends a tool call notification
+	SendToolCall(name string)
+
+	// SendThinking sends a thinking indicator
+	SendThinking(status bool)
+
+	// SendComplete sends a completion signal
+	SendComplete(message string)
+
+	// SendError sends an error message
+	SendError(err string)
+}
+
 // ChatBot struct for the chatbot
 type ChatBot struct {
 	runner *adk.Runner
@@ -35,6 +55,9 @@ type ChatBot struct {
 	manager *manager.Manager
 
 	scanner *readline.Instance
+
+	// handler for output (CLI or WebSocket)
+	handler Handler
 }
 
 func NewChatBot(ctx context.Context, agent *adk.ChatModelAgent, manager *manager.Manager, scanner *readline.Instance) ChatBot {
@@ -51,7 +74,12 @@ func NewChatBot(ctx context.Context, agent *adk.ChatModelAgent, manager *manager
 	}
 }
 
-// StreamChat performs streaming chat conversation
+// SetHandler sets the output handler for the chatbot
+func (cb *ChatBot) SetHandler(handler Handler) {
+	cb.handler = handler
+}
+
+// StreamChat performs streaming chat conversation with CLI output
 func (cb *ChatBot) StreamChat(ctx context.Context, userInput string) error {
 	// Add user message to context
 	cb.manager.AddMessage(schema.UserMessage(userInput))
@@ -66,6 +94,7 @@ func (cb *ChatBot) StreamChat(ctx context.Context, userInput string) error {
 	if v, ok := cb.ctx.Value("debug").(bool); ok {
 		debug = v
 	}
+
 	for {
 		event, ok := streamReader.Next()
 		if !ok {
@@ -268,6 +297,127 @@ func (cb *ChatBot) StreamChat(ctx context.Context, userInput string) error {
 	fmt.Print("\n")
 	cb.manager.AddMessage(schema.AssistantMessage(response.String(), nil))
 
+	return nil
+}
+
+// StreamChatWithHandler performs streaming chat with a custom handler
+func (cb *ChatBot) StreamChatWithHandler(ctx context.Context, userInput string) error {
+	if cb.handler == nil {
+		return fmt.Errorf("handler not set")
+	}
+
+	// Add user message to context
+	cb.manager.AddMessage(schema.UserMessage(userInput))
+
+	// Get context messages
+	messages := cb.manager.GetMessages()
+
+	// Generate streaming response
+	streamReader := cb.runner.Run(ctx, messages, adk.WithCheckPointID("web"))
+
+	response := strings.Builder{}
+	firstChunk := true
+
+	for {
+		event, ok := streamReader.Next()
+		if !ok {
+			break
+		}
+		if event.Err != nil {
+			return event.Err
+		}
+
+		if event.Action != nil && event.Action.Interrupted != nil {
+			// Handle interruption (approval requests)
+			targets := map[string]any{}
+			for _, intCtx := range event.Action.Interrupted.InterruptContexts {
+				approvalInfo, ok := intCtx.Info.(*mcp.ApprovalInfo)
+				if !ok {
+					continue
+				}
+				cb.handler.SendThinking(false)
+				var apResult *mcp.ApprovalResult
+				for {
+					fmt.Printf("%s\n", approvalInfo.String())
+					fmt.Print("Y/N: ")
+					var input string
+					fmt.Scanln(&input)
+					if strings.ToUpper(input) == "Y" {
+						apResult = &mcp.ApprovalResult{Approved: true}
+						break
+					} else if strings.ToUpper(input) == "N" {
+						apResult = &mcp.ApprovalResult{Approved: false}
+						break
+					}
+					fmt.Println("Invalid input, please input Y or N")
+				}
+				targets[intCtx.ID] = apResult
+			}
+			if len(targets) < 1 {
+				return fmt.Errorf("wait approval error")
+			}
+			var err error
+			streamReader, err = cb.runner.ResumeWithParams(ctx, "web", &adk.ResumeParams{
+				Targets: targets,
+			})
+			if err != nil {
+				return err
+			}
+			cb.handler.SendThinking(true)
+			continue
+		}
+
+		if event.Output == nil {
+			continue
+		}
+
+		if event.Output.MessageOutput.Role == schema.Tool {
+			cb.handler.SendToolCall(event.Output.MessageOutput.ToolName)
+			continue
+		}
+
+		response.Reset()
+		if event.Output.MessageOutput.MessageStream != nil {
+			for {
+				message, err := event.Output.MessageOutput.MessageStream.Recv()
+				if err == io.EOF {
+					break
+				}
+				if err != nil {
+					return fmt.Errorf("error receiving message stream: %w", err)
+				}
+
+				if len(message.ToolCalls) > 0 {
+					for _, tc := range message.ToolCalls {
+						cb.handler.SendToolCall(tc.Function.Name)
+					}
+				}
+
+				if message.Content != "" {
+					cb.handler.SendChunk(message.Content, firstChunk, false)
+					firstChunk = false
+					response.WriteString(message.Content)
+				}
+			}
+			// Send final chunk marker
+			cb.handler.SendChunk("", false, true)
+		} else if event.Output.MessageOutput.Message != nil {
+			if len(event.Output.MessageOutput.Message.ToolCalls) > 0 {
+				for _, tc := range event.Output.MessageOutput.Message.ToolCalls {
+					cb.handler.SendToolCall(tc.Function.Name)
+				}
+			}
+			if event.Output.MessageOutput.Message.Content != "" {
+				cb.handler.SendChunk(event.Output.MessageOutput.Message.Content, firstChunk, false)
+				firstChunk = false
+				response.WriteString(event.Output.MessageOutput.Message.Content)
+			}
+			// Send final chunk marker
+			cb.handler.SendChunk("", false, true)
+		}
+	}
+
+	cb.manager.AddMessage(schema.AssistantMessage(response.String(), nil))
 	return nil
 }
 
