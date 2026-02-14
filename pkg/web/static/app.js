@@ -12,6 +12,10 @@ let reconnectAttempts = 0;
 const maxReconnectAttempts = 5;
 let toastTimeout = null;
 
+// Track tool calls for streaming updates
+// index -> { name, argsElement, argsText, complete }
+let toolCalls = {};
+
 async function init() {
     // Load webui config from server
     try {
@@ -114,9 +118,29 @@ function handleMessage(msg) {
         case 'chunk':
             displayChunk(msg.payload.content, msg.payload.first, msg.payload.last);
             break;
+        case 'tool_call':
+            displayToolCall(
+                msg.payload.name,
+                msg.payload.arguments,
+                msg.payload.index,
+                msg.payload.streaming
+            );
+            break;
         case 'thinking':
-            document.getElementById('messages').insertAdjacentHTML('beforeend', '<div id="thinking" class="message thinking">Thinking...</div>');
-            scrollToBottom();
+            const thinkingStatus = msg.payload.status;
+            const thinkingEl = document.getElementById('thinking');
+            if (thinkingStatus) {
+                // Thinking started - insert if not already present
+                if (!thinkingEl) {
+                    document.getElementById('messages').insertAdjacentHTML('beforeend', '<div id="thinking" class="message thinking">Thinking...</div>');
+                    scrollToBottom();
+                }
+            } else {
+                // Thinking ended - remove the element
+                if (thinkingEl) {
+                    thinkingEl.remove();
+                }
+            }
             break;
         case 'complete':
             const thinking = document.getElementById('thinking');
@@ -174,18 +198,120 @@ function addMessage(text, type) {
     scrollToBottom();
 }
 
+function displayToolCall(name, args, index, streaming) {
+    // Clean up any existing thinking element
+    const thinking = document.getElementById('thinking');
+    if (thinking) thinking.remove();
+
+    // Get or create the tool call entry
+    let toolCall = toolCalls[index];
+
+    if (!toolCall) {
+        // First time seeing this tool call - create new element
+        toolCall = {
+            name: name,
+            argsText: args || '',
+            complete: false
+        };
+
+        const div = document.createElement('div');
+        div.className = 'message tool-call';
+        div.id = 'tool-call-' + index;
+
+        // Create tool call content with args area
+        div.innerHTML = `
+            <div class="tool-call-content">
+                <span class="tool-icon">🔧</span>
+                <span class="tool-name">${escapeHtml(name)}</span>
+            </div>
+            <div class="tool-args">
+                <pre><code class="language-json"></code></pre>
+            </div>
+        `;
+
+        document.getElementById('messages').appendChild(div);
+        toolCall.element = div;
+        toolCall.argsElement = div.querySelector('.tool-args pre');
+        toolCalls[index] = toolCall;
+
+        // Update args if provided
+        if (args !== undefined && args !== null) {
+            toolCall.argsText = args;
+            toolCall.argsElement.textContent = args;
+        }
+
+        scrollToBottom();
+    } else {
+        // Update existing tool call
+        if (name !== toolCall.name) {
+            // Name changed (shouldn't happen normally)
+            toolCall.name = name;
+            const nameElement = toolCall.element.querySelector('.tool-name');
+            if (nameElement) {
+                nameElement.textContent = name;
+            }
+        }
+
+        // Update args (accumulate streaming updates)
+        // Always update argsText and display when we receive args
+        if (args !== undefined && args !== null && streaming === true) {
+            toolCall.argsText = args;
+            if (toolCall.argsElement) {
+                toolCall.argsElement.textContent = args;
+            }
+        }
+
+        // If streaming=false, mark as complete and add visual indicator
+        if (streaming === false) {
+            toolCall.complete = true;
+            if (!toolCall.element.querySelector('.tool-complete')) {
+                const completeDiv = document.createElement('div');
+                completeDiv.className = 'tool-complete';
+                completeDiv.textContent = '✓ Complete';
+                toolCall.element.appendChild(completeDiv);
+            }
+            // Remove from tracking
+            delete toolCalls[index];
+        }
+
+        scrollToBottom();
+    }
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
 let currentChunk = '';
 let chunkElement = null;
 function displayChunk(content, isFirst, isLast) {
+    // 创建新的响应元素
     if (isFirst) {
-        currentChunk = '';
+        currentChunk = content;
         const div = document.createElement('div');
         div.className = 'message assistant';
         div.id = 'current-response';
         div.innerHTML = '<div class="message-content markdown-body"></div>';
         document.getElementById('messages').appendChild(div);
         chunkElement = div.querySelector('.message-content');
+        if (chunkElement) {
+            try {
+                chunkElement.innerHTML = marked.parse(currentChunk);
+            } catch (e) {
+                chunkElement.textContent = currentChunk;
+            }
+        }
+        scrollToBottom();
+        if (isLast) {
+            chunkElement = null;
+        }
+        return;
     }
+
+    // 追加内容到现有响应
     currentChunk += content;
     if (chunkElement) {
         try {
@@ -194,9 +320,13 @@ function displayChunk(content, isFirst, isLast) {
             chunkElement.textContent = currentChunk;
         }
     }
-    if (isLast || !isFirst) {
+
+    // 滚动到底部（如果有实际内容）
+    if (content || !isLast) {
         scrollToBottom();
     }
+
+    // 标记最后一个块完成
     if (isLast) {
         chunkElement = null;
     }
@@ -296,7 +426,7 @@ function handleViewportChange() {
         // Keyboard is shown - scroll to make input visible
         const inputArea = document.getElementById('input-area');
         if (inputArea) {
-            // Use setTimeout to ensure keyboard animation completes
+            // Use setTimeout to allow keyboard animation completes
             setTimeout(() => {
                 inputArea.scrollIntoView({ behavior: 'smooth', block: 'end' });
                 // Also scroll messages to bottom

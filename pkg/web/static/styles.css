@@ -100,6 +100,56 @@ body {
     font-style: italic;
 }
 
+.tool-call {
+    background-color: #fff3e0;
+    margin-right: 40px;
+    border-left: 3px solid #ff9800;
+}
+
+.tool-call-content {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #e65100;
+    font-size: 13px;
+}
+
+.tool-icon {
+    font-size: 14px;
+}
+
+.tool-name {
+    font-weight: 500;
+}
+
+.tool-args {
+    margin-top: 8px;
+    padding: 8px 10px;
+    background: rgba(255, 255, 255, 0.7);
+    border-radius: 4px;
+    overflow-x: auto;
+    max-height: 72px;
+    overflow-y: auto;
+}
+
+.tool-args pre {
+    margin: 0;
+    padding: 0;
+    background: transparent;
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    color: #333;
+}
+
+.tool-complete {
+    margin-top: 6px;
+    font-size: 11px;
+    color: #4caf50;
+    font-weight: 500;
+}
+
 #input-area {
     display: flex;
     gap: 10px;

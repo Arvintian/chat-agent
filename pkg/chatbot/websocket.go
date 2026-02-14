@@ -2,7 +2,6 @@ package chatbot
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 
 	"github.com/Arvintian/chat-agent/pkg/config"
@@ -76,8 +75,13 @@ func (h *WSChatHandler) SendChunk(content string, first, last bool) {
 	h.session.SendChunk(content, first, last)
 }
 
-func (h *WSChatHandler) SendToolCall(name string) {
-	h.session.SendChunk(fmt.Sprintf("[Tool: %s]", name), false, false)
+func (h *WSChatHandler) SendToolCall(name string, arguments string, id string, streaming bool) {
+	h.session.SendMessage("tool_call", map[string]interface{}{
+		"name":      name,
+		"arguments": arguments,
+		"index":     id,
+		"streaming": streaming,
+	})
 }
 
 func (h *WSChatHandler) SendThinking(status bool) {
