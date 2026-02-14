@@ -12,6 +12,7 @@ import (
 	"github.com/Arvintian/chat-agent/pkg/chatbot"
 	"github.com/Arvintian/chat-agent/pkg/config"
 	"github.com/Arvintian/chat-agent/pkg/logger"
+	"github.com/Arvintian/chat-agent/pkg/mcp"
 	"github.com/Arvintian/chat-agent/pkg/utils"
 	"github.com/Arvintian/chat-agent/pkg/web"
 	"github.com/gorilla/websocket"
@@ -108,6 +109,18 @@ type SessionInfo struct {
 	CreatedAt time.Time
 }
 
+// ApprovalResponsePayload represents the approval response from the client
+type ApprovalResponsePayload struct {
+	ApprovalID string                  `json:"approval_id"`
+	Results    map[string]ApprovalItem `json:"results"`
+}
+
+// ApprovalItem represents a single approval result
+type ApprovalItem struct {
+	Approved bool   `json:"approved"`
+	Reason   string `json:"reason,omitempty"`
+}
+
 // WebSocket upgrader
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
@@ -202,7 +215,7 @@ func (h *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Reques
 			continue
 		}
 
-		h.processMessage(session, &wsMsg)
+		go h.processMessage(session, &wsMsg)
 	}
 
 	// Cleanup chat session
@@ -223,6 +236,8 @@ func (h *WebSocketHandler) processMessage(session *chatbot.WSSession, msg *chatb
 		h.handleChat(session, msg)
 	case "clear":
 		h.handleClear(session)
+	case "approval_response":
+		h.handleApprovalResponse(session, msg)
 	default:
 		session.SendError(fmt.Sprintf("Unknown message type: %s", msg.Type))
 	}
@@ -321,6 +336,34 @@ func (h *WebSocketHandler) handleClear(session *chatbot.WSSession) {
 			"message": "No active session to clear",
 		})
 	}
+}
+
+// handleApprovalResponse handles approval response from the client
+func (h *WebSocketHandler) handleApprovalResponse(session *chatbot.WSSession, msg *chatbot.WSMessage) {
+	var payload ApprovalResponsePayload
+	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+		log.Printf("Invalid approval_response format: %v", err)
+		session.SendError("Invalid approval_response format")
+		return
+	}
+
+	log.Printf("Session %s: Processing approval_response for approval %s with %d results",
+		session.SessionID, payload.ApprovalID, len(payload.Results))
+
+	// Convert results to ApprovalResultMap
+	results := make(chatbot.ApprovalResultMap, len(payload.Results))
+	for id, item := range payload.Results {
+		result := &mcp.ApprovalResult{
+			Approved: item.Approved,
+		}
+		if item.Reason != "" {
+			result.DisapproveReason = &item.Reason
+		}
+		results[id] = result
+	}
+
+	// Pass the response to the session
+	session.HandleApprovalResponse(payload.ApprovalID, results)
 }
 
 func init() {

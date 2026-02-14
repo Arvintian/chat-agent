@@ -35,7 +35,7 @@
             <div class="modal-content">
                 <div class="modal-header">
                     <h3>🗑️ Clear Conversation</h3>
-                    <span class="modal-close" onclick="hideClearModal()">&times;</span>
+                    <span class="modal-close" onclick="hideClearModal()">×</span>
                 </div>
                 <div class="modal-body">
                     <p>Are you sure you want to clear the conversation for:</p>
@@ -50,9 +50,33 @@
             </div>
         </div>
 
+        <!-- Approval Modal -->
+        <div id="approval-modal" class="modal" style="display: none;" onclick="return false;">
+            <div class="modal-content approval-modal-content" onclick="event.stopPropagation();">
+                <div class="modal-header approval-modal-header">
+                    <h3>⚠️ Tool Approval Required</h3>
+                </div>
+                <div class="modal-body approval-modal-body">
+                    <p class="approval-description">The following tool(s) require your approval to execute:</p>
+                    <p class="approval-count">Total: <span id="approval-count">0</span> tool(s)</p>
+                    <div id="approval-targets" class="approval-targets-container">
+                        <!-- Targets will be dynamically inserted here -->
+                    </div>
+                </div>
+                <div class="modal-footer approval-modal-footer">
+                    <div class="bulk-actions">
+                        <button class="btn-approve-all" onclick="approveAllAndSubmit()">✅ Approve All</button>
+                        <button class="btn-deny-all" onclick="denyAllAndSubmit()">❌ Deny All</button>
+                    </div>
+                    <button class="btn-confirm" id="btn-submit-approval" onclick="submitApprovals()" disabled>Submit Decision</button>
+                </div>
+            </div>
+        </div>
+
         <div class="toast-container" id="toast-container">
         </div>
-        <div id="messages"></div>
+        <div id="messages">
+        </div>
         <div id="input-area">
             <div class="input-wrapper">
                 <textarea id="message-input" placeholder="Type your message..." onkeydown="handleKeyDown(event)"

@@ -2,7 +2,10 @@ package chatbot
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
+	"sync"
+	"time"
 
 	"github.com/Arvintian/chat-agent/pkg/config"
 	"github.com/Arvintian/chat-agent/pkg/utils"
@@ -10,10 +13,19 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// Default approval timeout
+const DefaultApprovalTimeout = 5 * time.Minute
+
 // WebSocket message types
 type WSMessage struct {
 	Type    string          `json:"type"`
 	Payload json.RawMessage `json:"payload"`
+}
+
+// ApprovalRequest holds the approval ID and result channel
+type ApprovalRequest struct {
+	ApprovalID string
+	ResultChan chan ApprovalResultMap
 }
 
 // WSSession represents a WebSocket session with its connection
@@ -26,19 +38,27 @@ type WSSession struct {
 	ChatSession *ChatSession
 	ChatBot     *ChatBot
 	WSHandler   *WSChatHandler
+
+	// Approval state for handling authorization requests
+	approvalTimeout time.Duration
+	pendingApproval *ApprovalRequest
+	approvalMu      sync.Mutex
 }
 
 func NewWSSession(conn *websocket.Conn, sessionID string, cfg *config.Config, cleanupReg *utils.CleanupRegistry) *WSSession {
-	return &WSSession{
-		conn:        conn,
-		cfg:         cfg,
-		cleanupReg:  cleanupReg,
-		SessionID:   sessionID,
-		ChatName:    "",
-		ChatSession: nil,
-		ChatBot:     nil,
-		WSHandler:   nil,
+	session := &WSSession{
+		conn:            conn,
+		cfg:             cfg,
+		cleanupReg:      cleanupReg,
+		SessionID:       sessionID,
+		ChatName:        "",
+		ChatSession:     nil,
+		ChatBot:         nil,
+		WSHandler:       nil,
+		approvalTimeout: DefaultApprovalTimeout,
+		pendingApproval: nil,
 	}
+	return session
 }
 
 func (s *WSSession) SendMessage(msgType string, content interface{}) {
@@ -60,6 +80,50 @@ func (s *WSSession) SendChunk(content string, isFirst, isLast bool) {
 
 func (s *WSSession) SendError(errMsg string) {
 	s.SendMessage("error", map[string]string{"error": errMsg})
+}
+
+// HandleApprovalResponse processes an approval response from the client
+// This method is called from the main read loop when an approval_response message is received
+func (s *WSSession) HandleApprovalResponse(approvalID string, results ApprovalResultMap) {
+	s.approvalMu.Lock()
+
+	if s.pendingApproval == nil {
+		s.approvalMu.Unlock()
+		log.Printf("Session %s: No pending approval request for %s", s.SessionID, approvalID)
+		return
+	}
+
+	if s.pendingApproval.ApprovalID != approvalID {
+		s.approvalMu.Unlock()
+		log.Printf("Session %s: Ignoring stale approval response (expected %s, got %s)",
+			s.SessionID, s.pendingApproval.ApprovalID, approvalID)
+		return
+	}
+
+	log.Printf("Session %s: Received approval response for %s with %d results", s.SessionID, approvalID, len(results))
+
+	// Capture the channel reference before clearing pendingApproval
+	resultChan := s.pendingApproval.ResultChan
+
+	// Clear pending approval BEFORE sending to avoid race with timeout
+	s.pendingApproval = nil
+	s.approvalMu.Unlock()
+
+	// Send result to waiting request using non-blocking send
+	// This ensures we don't block the WebSocket read loop
+	select {
+	case resultChan <- results:
+		log.Printf("Session %s: Approval result sent successfully for %s", s.SessionID, approvalID)
+	default:
+		// Channel might be full (timeout already fired) or closed
+		// Log and silently ignore - the timeout handler will clean up
+		log.Printf("Session %s: Approval result channel full or closed for %s (timeout may have fired)", s.SessionID, approvalID)
+	}
+}
+
+// SetApprovalTimeout sets the timeout for approval requests
+func (s *WSSession) SetApprovalTimeout(timeout time.Duration) {
+	s.approvalTimeout = timeout
 }
 
 // WSChatHandler implements Handler for WebSocket output
@@ -94,4 +158,84 @@ func (h *WSChatHandler) SendComplete(message string) {
 
 func (h *WSChatHandler) SendError(err string) {
 	h.session.SendError(err)
+}
+
+// SendApprovalRequest sends an approval request to the client and waits for the result
+func (h *WSChatHandler) SendApprovalRequest(targets []ApprovalTarget) (ApprovalResultMap, error) {
+	session := h.session
+
+	// Generate a unique approval ID
+	approvalID := generateApprovalID()
+	log.Printf("Session %s: Sending approval request %s for %d targets", session.SessionID, approvalID, len(targets))
+
+	// Create a channel to receive the result
+	resultChan := make(chan ApprovalResultMap, 1)
+	req := &ApprovalRequest{
+		ApprovalID: approvalID,
+		ResultChan: resultChan,
+	}
+
+	// Convert targets to a format suitable for JSON
+	targetList := make([]map[string]interface{}, len(targets))
+	for i, t := range targets {
+		targetList[i] = map[string]interface{}{
+			"id":      t.ID,
+			"tool":    t.ToolName,
+			"details": t.ArgumentsInfo,
+		}
+	}
+
+	// Store pending approval request (thread-safe)
+	session.approvalMu.Lock()
+	if session.pendingApproval != nil {
+		session.approvalMu.Unlock()
+		log.Printf("Session %s: Approval channel busy with pending request %s", session.SessionID, session.pendingApproval.ApprovalID)
+		return nil, fmt.Errorf("approval channel is busy")
+	}
+	session.pendingApproval = req
+	session.approvalMu.Unlock()
+
+	// Send approval request to client
+	log.Printf("Session %s: Sending approval_request message for %s", session.SessionID, approvalID)
+	session.SendMessage("approval_request", map[string]interface{}{
+		"approval_id": approvalID,
+		"targets":     targetList,
+	})
+
+	// Wait for response with timeout
+	timeout := session.approvalTimeout
+	if timeout <= 0 {
+		timeout = DefaultApprovalTimeout
+	}
+	log.Printf("Session %s: Waiting for approval response for %s (timeout: %v)", session.SessionID, approvalID, timeout)
+
+	select {
+	case result := <-resultChan:
+		log.Printf("Session %s: Received approval response for %s with %d results", session.SessionID, approvalID, len(result))
+		// Clear pending approval
+		session.approvalMu.Lock()
+		session.pendingApproval = nil
+		session.approvalMu.Unlock()
+
+		if result == nil {
+			return nil, fmt.Errorf("approval request got stale response")
+		}
+		return result, nil
+	case <-time.After(timeout):
+		log.Printf("Session %s: Approval request %s timed out after %v", session.SessionID, approvalID, timeout)
+
+		// Clear pending approval on timeout
+		session.approvalMu.Lock()
+		if session.pendingApproval != nil && session.pendingApproval.ApprovalID == approvalID {
+			session.pendingApproval = nil
+		}
+		session.approvalMu.Unlock()
+
+		return nil, fmt.Errorf("approval request timed out after %v", timeout)
+	}
+}
+
+// generateApprovalID generates a unique approval request ID
+func generateApprovalID() string {
+	return fmt.Sprintf("approval-%d", time.Now().UnixNano())
 }

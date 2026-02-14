@@ -16,6 +16,10 @@ let toastTimeout = null;
 // index -> { name, argsElement, argsText, complete }
 let toolCalls = {};
 
+// Track pending approval requests
+let pendingApprovals = {};
+let currentApprovalId = null;
+
 async function init() {
     // Load webui config from server
     try {
@@ -145,6 +149,12 @@ function handleMessage(msg) {
         case 'complete':
             const thinking = document.getElementById('thinking');
             if (thinking) thinking.remove();
+            // 重新启用输入框
+            const input = document.getElementById('message-input');
+            const sendBtn = document.getElementById('send-btn');
+            if (input) input.disabled = false;
+            if (sendBtn) sendBtn.disabled = false;
+            if (input) input.focus();
             //setStatus('Response completed', false);
             break;
         case 'error':
@@ -153,9 +163,270 @@ function handleMessage(msg) {
         case 'cleared':
             setStatus(msg.payload.message, false);
             break;
+        case 'approval_request':
+            handleApprovalRequest(msg.payload);
+            break;
         default:
             console.log('Unknown message type:', msg.type);
     }
+}
+
+// Handle approval request from server
+function handleApprovalRequest(payload) {
+    const { approval_id, targets } = payload;
+    currentApprovalId = approval_id;
+
+    // Store targets for approval
+    pendingApprovals = {};
+    targets.forEach(target => {
+        pendingApprovals[target.id] = {
+            tool: target.tool,
+            details: target.details,
+            approved: null,  // null = no decision yet, true = approved, false = denied
+            reason: ''
+        };
+    });
+
+    // Show approval modal
+    showApprovalModal(targets);
+}
+
+// Show approval modal with tool details
+function showApprovalModal(targets) {
+    const modal = document.getElementById('approval-modal');
+    const container = document.getElementById('approval-targets');
+    container.innerHTML = '';
+
+    targets.forEach(target => {
+        const targetDiv = document.createElement('div');
+        targetDiv.className = 'approval-target';
+        targetDiv.dataset.targetId = target.id;
+
+        // Format the details - single line (same as tool-call dialog)
+        let detailsHtml = '';
+        if (target.details) {
+            try {
+                const detailsObj = typeof target.details === 'string'
+                    ? JSON.parse(target.details)
+                    : target.details;
+                detailsHtml = `<pre>${escapeHtml(JSON.stringify(detailsObj))}</pre>`;
+            } catch (e) {
+                detailsHtml = `<pre>${escapeHtml(String(target.details))}</pre>`;
+            }
+        }
+
+        targetDiv.innerHTML = `
+            <div class="approval-target-header">
+                <span class="approval-tool-icon">🔧</span>
+                <span class="approval-tool-name">${escapeHtml(target.tool)}</span>
+            </div>
+            ${detailsHtml ? `<div class="approval-target-details">${detailsHtml}</div>` : ''}
+            <div class="approval-footer">
+                <div class="approval-result" id="approval-result-${escapeHtml(target.id)}"></div>
+                <div class="approval-actions">
+                    <button class="btn-approve" onclick="approveTarget('${escapeHtml(target.id)}')">Approve</button>
+                    <button class="btn-deny" onclick="denyTarget('${escapeHtml(target.id)}')">Deny</button>
+                </div>
+            </div>
+        `;
+
+        container.appendChild(targetDiv);
+    });
+
+    // Update modal header with count
+    document.getElementById('approval-count').textContent = targets.length;
+
+    modal.style.display = 'flex';
+    document.body.style.overflow = 'hidden'; // Prevent background scrolling
+}
+
+// Approve a specific target
+function approveTarget(targetId) {
+    if (pendingApprovals[targetId]) {
+        pendingApprovals[targetId].approved = true;
+        pendingApprovals[targetId].reason = '';
+        
+        // Update UI
+        const resultEl = document.getElementById(`approval-result-${targetId}`);
+        if (resultEl) {
+            resultEl.innerHTML = '<span class="approved-text">✅ Approved</span>';
+            resultEl.className = 'approval-result approved';
+        }
+        
+        // Disable buttons
+        const targetDiv = document.querySelector(`[data-target-id="${targetId}"]`);
+        if (targetDiv) {
+            const buttons = targetDiv.querySelectorAll('button');
+            buttons.forEach(btn => {
+                btn.disabled = true;
+                btn.style.opacity = '0.5';
+                btn.style.cursor = 'not-allowed';
+            });
+            targetDiv.classList.add('decided');
+        }
+        
+        checkAllApprovalsDone();
+    }
+}
+
+// Deny a specific target
+function denyTarget(targetId) {
+    if (pendingApprovals[targetId]) {
+        pendingApprovals[targetId].approved = false;
+        pendingApprovals[targetId].reason = '';
+
+        // Update UI
+        const resultEl = document.getElementById(`approval-result-${targetId}`);
+        if (resultEl) {
+            resultEl.innerHTML = `<span class="denied-text">❌ Denied</span>`;
+            resultEl.className = 'approval-result denied';
+        }
+
+        // Disable buttons
+        const targetDiv = document.querySelector(`[data-target-id="${targetId}"]`);
+        if (targetDiv) {
+            const buttons = targetDiv.querySelectorAll('button');
+            buttons.forEach(btn => {
+                btn.disabled = true;
+                btn.style.opacity = '0.5';
+                btn.style.cursor = 'not-allowed';
+            });
+            targetDiv.classList.add('decided');
+        }
+
+        checkAllApprovalsDone();
+    }
+}
+
+// Approve all pending targets
+function approveAll() {
+    Object.keys(pendingApprovals).forEach(targetId => {
+        if (pendingApprovals[targetId].approved === null) {
+            approveTarget(targetId);
+        }
+    });
+}
+
+// Deny all pending targets
+function denyAll() {
+    Object.keys(pendingApprovals).forEach(targetId => {
+        if (pendingApprovals[targetId].approved === null) {
+            denyTarget(targetId);
+        }
+    });
+}
+
+// Approve all and submit immediately
+function approveAllAndSubmit() {
+    approveAll();
+    // Submit immediately
+    setTimeout(() => {
+        submitApprovals();
+    }, 300);
+}
+
+// Deny all and submit immediately
+function denyAllAndSubmit() {
+    denyAll();
+    // Submit immediately
+    setTimeout(() => {
+        submitApprovals();
+    }, 300);
+}
+
+// Check if all targets have been approved/denied
+function checkAllApprovalsDone() {
+    // Check if at least one target has a decision (approved or denied)
+    const hasDecision = Object.values(pendingApprovals).some(t => t.approved === true || t.approved === false);
+
+    const submitBtn = document.getElementById('btn-submit-approval');
+    if (submitBtn) {
+        // Enable submit button once user has made at least one decision
+        submitBtn.disabled = !hasDecision;
+    }
+}
+
+// Submit all approval decisions
+function submitApprovals() {
+    console.log('submitApprovals called, currentApprovalId:', currentApprovalId);
+    console.log('pendingApprovals:', pendingApprovals);
+
+    if (!currentApprovalId) {
+        console.log('No currentApprovalId, returning');
+        return;
+    }
+
+    const results = {};
+    let decisionCount = 0;
+    Object.keys(pendingApprovals).forEach(targetId => {
+        const target = pendingApprovals[targetId];
+        console.log(`Target ${targetId}: approved=${target.approved}`);
+        // Only include targets that have a decision (approved or denied)
+        if (target.approved === true || target.approved === false) {
+            results[targetId] = {
+                approved: target.approved,
+                reason: target.reason || ''
+            };
+            decisionCount++;
+        }
+    });
+
+    console.log('Submitting approval response:', {
+        approval_id: currentApprovalId,
+        results: results,
+        decisionCount: decisionCount
+    });
+
+    // Send response to server
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        const message = JSON.stringify({
+            type: 'approval_response',
+            payload: {
+                approval_id: currentApprovalId,
+                results: results
+            }
+        });
+        console.log('Sending approval_response message:', message);
+        ws.send(message);
+    } else {
+        console.error('WebSocket not open, readyState:', ws ? ws.readyState : 'ws is null');
+    }
+
+    // Close modal
+    hideApprovalModal();
+
+    // Reset state
+    currentApprovalId = null;
+    pendingApprovals = {};
+}
+
+// Hide approval modal
+function hideApprovalModal() {
+    document.getElementById('approval-modal').style.display = 'none';
+    document.body.style.overflow = ''; // Restore scrolling
+    currentApprovalId = null;
+    pendingApprovals = {};
+}
+
+// Cancel approval (deny all with default reason)
+function cancelApprovals() {
+    // Deny all pending targets
+    Object.keys(pendingApprovals).forEach(targetId => {
+        if (pendingApprovals[targetId].approved === null || pendingApprovals[targetId].approved === undefined) {
+            pendingApprovals[targetId].approved = false;
+            pendingApprovals[targetId].reason = 'Cancelled by user';
+            
+            // Update UI
+            const resultEl = document.getElementById(`approval-result-${targetId}`);
+            if (resultEl) {
+                resultEl.innerHTML = '<span class="denied-text">❌ Cancelled</span>';
+                resultEl.className = 'approval-result denied';
+            }
+        }
+    });
+    
+    // Submit the approvals (all denied)
+    submitApprovals();
 }
 
 function sendMessage() {
@@ -166,7 +437,10 @@ function sendMessage() {
     addMessage(message, 'user');
     input.value = '';
     autoResize(input);
-    input.focus();
+
+    // 禁用输入框
+    input.disabled = true;
+    document.getElementById('send-btn').disabled = true;
 
     // 直接发送 message，后端已缓存 chat session
     ws.send(JSON.stringify({

@@ -21,6 +21,16 @@ import (
 	"github.com/hekmon/liveterm/v2"
 )
 
+// ApprovalTarget represents a single approval request target
+type ApprovalTarget struct {
+	ID            string
+	ToolName      string
+	ArgumentsInfo string
+}
+
+// ApprovalResultMap holds approval results for multiple targets
+type ApprovalResultMap map[string]*mcp.ApprovalResult
+
 // Handler interface for handling chat output events
 // This allows the same streaming logic to be used in different contexts
 // (CLI with readline, WebSocket, etc.)
@@ -41,6 +51,11 @@ type Handler interface {
 
 	// SendError sends an error message
 	SendError(err string)
+
+	// SendApprovalRequest sends an approval request to the client and waits for the result
+	// targets: list of approval targets requiring user authorization
+	// Returns a map of target IDs to their approval results
+	SendApprovalRequest(targets []ApprovalTarget) (ApprovalResultMap, error)
 }
 
 // ChatBot struct for the chatbot
@@ -331,43 +346,49 @@ func (cb *ChatBot) StreamChatWithHandler(ctx context.Context, userInput string) 
 		}
 
 		if event.Action != nil && event.Action.Interrupted != nil {
-			// Handle interruption (approval requests)
-			targets := map[string]any{}
+			// Handle interruption (approval requests) via handler
+			cb.handler.SendThinking(false)
+
+			// Collect all approval targets from interrupt contexts
+			approvalTargets := make([]ApprovalTarget, 0, len(event.Action.Interrupted.InterruptContexts))
 			for _, intCtx := range event.Action.Interrupted.InterruptContexts {
 				approvalInfo, ok := intCtx.Info.(*mcp.ApprovalInfo)
 				if !ok {
 					continue
 				}
-				cb.handler.SendThinking(false)
-				var apResult *mcp.ApprovalResult
-				for {
-					fmt.Printf("%s\n", approvalInfo.String())
-					fmt.Print("Y/N: ")
-					var input string
-					fmt.Scanln(&input)
-					if strings.ToUpper(input) == "Y" {
-						apResult = &mcp.ApprovalResult{Approved: true}
-						break
-					} else if strings.ToUpper(input) == "N" {
-						apResult = &mcp.ApprovalResult{Approved: false}
-						break
-					}
-					fmt.Println("Invalid input, please input Y or N")
-				}
-				targets[intCtx.ID] = apResult
+				approvalTargets = append(approvalTargets, ApprovalTarget{
+					ID:            intCtx.ID,
+					ToolName:      approvalInfo.ToolName,
+					ArgumentsInfo: approvalInfo.ArgumentsInJSON,
+				})
 			}
-			if len(targets) < 1 {
+
+			if len(approvalTargets) < 1 {
 				err := fmt.Errorf("wait approval error")
 				cb.handler.SendError(err.Error())
 				return err
 			}
-			var err error
-			streamReader, err = cb.runner.ResumeWithParams(ctx, "web", &adk.ResumeParams{
-				Targets: targets,
-			})
+
+			// Send approval request to handler and wait for result
+			approvalResultMap, err := cb.handler.SendApprovalRequest(approvalTargets)
 			if err != nil {
 				cb.handler.SendError(err.Error())
 				return err
+			}
+
+			// Convert approval results to targets map for resume
+			targets := make(map[string]any, len(approvalResultMap))
+			for id, result := range approvalResultMap {
+				targets[id] = result
+			}
+
+			var resumeErr error
+			streamReader, resumeErr = cb.runner.ResumeWithParams(ctx, "web", &adk.ResumeParams{
+				Targets: targets,
+			})
+			if resumeErr != nil {
+				cb.handler.SendError(resumeErr.Error())
+				return resumeErr
 			}
 			cb.handler.SendThinking(true)
 			continue
