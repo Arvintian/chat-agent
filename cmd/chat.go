@@ -575,7 +575,6 @@ func init() {
 	RootCmd.PersistentFlags().StringVarP(&configPath, "config", "f", defaultConfigPath, "Configuration file path")
 	RootCmd.PersistentFlags().BoolP("debug", "", false, "Enable debug mode")
 	RootCmd.Flags().StringP("chat", "c", "", "Specify chat preset name (from config file chats)")
-	RootCmd.Flags().StringP("welcome", "w", "Welcome to Chat-Agent Cli", "Specify chat welcome message")
-	RootCmd.Flags().IntP("tools-load-timeout", "t", 10, "Tool loading timeout, in seconds")
+	RootCmd.PersistentFlags().StringP("welcome", "w", "Welcome to Chat-Agent", "Specify chat welcome message")
 	RootCmd.Flags().String("once", "", "Prompt for one-time task")
 }
