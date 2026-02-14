@@ -11,6 +11,7 @@ let currentChat = null;
 let reconnectAttempts = 0;
 const maxReconnectAttempts = 5;
 let toastTimeout = null;
+let isGenerating = false;
 
 // Track tool calls for streaming updates
 // index -> { name, argsElement, argsText, complete }
@@ -151,14 +152,31 @@ function handleMessage(msg) {
             if (thinking) thinking.remove();
             // 重新启用输入框
             const input = document.getElementById('message-input');
-            const sendBtn = document.getElementById('send-btn');
             if (input) input.disabled = false;
-            if (sendBtn) sendBtn.disabled = false;
             if (input) input.focus();
+            isGenerating = false;
+            updateSendButton();
             //setStatus('Response completed', false);
             break;
         case 'error':
             setStatus(msg.payload.error, true);
+            // 重新启用输入框
+            const inputErr = document.getElementById('message-input');
+            if (inputErr) inputErr.disabled = false;
+            isGenerating = false;
+            updateSendButton();
+            if (inputErr) inputErr.focus();
+            break;
+        case 'stopped':
+            // 流已停止
+            isGenerating = false;
+            updateSendButton();
+            const inputStopped = document.getElementById('message-input');
+            if (inputStopped) inputStopped.disabled = false;
+            if (inputStopped) inputStopped.focus();
+            // 移除 thinking 指示器
+            const thinkingStopped = document.getElementById('thinking');
+            if (thinkingStopped) thinkingStopped.remove();
             break;
         case 'cleared':
             setStatus(msg.payload.message, false);
@@ -431,6 +449,23 @@ function cancelApprovals() {
 
 function sendMessage() {
     const input = document.getElementById('message-input');
+
+    // If currently generating, this is a stop action
+    if (isGenerating) {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+                type: 'stop',
+                payload: {}
+            }));
+        } else {
+            // WebSocket not available, reset state
+            isGenerating = false;
+            input.disabled = false;
+            updateSendButton();
+        }
+        return;
+    }
+
     const message = input.value.trim();
     if (!message || !ws || ws.readyState !== WebSocket.OPEN) return;
 
@@ -438,15 +473,32 @@ function sendMessage() {
     input.value = '';
     autoResize(input);
 
-    // 禁用输入框
+    // 禁用输入框，发送按钮保持可用（用于停止）
     input.disabled = true;
-    document.getElementById('send-btn').disabled = true;
+    isGenerating = true;
+    updateSendButton();
 
     // 直接发送 message，后端已缓存 chat session
     ws.send(JSON.stringify({
         type: 'chat',
         payload: { message: message }
     }));
+}
+
+// Update send button text and style based on state
+function updateSendButton() {
+    const sendBtn = document.getElementById('send-btn');
+    if (!sendBtn) return;
+
+    if (isGenerating) {
+        sendBtn.innerHTML = '⏹';
+        sendBtn.title = 'Stop current response';
+        sendBtn.classList.add('stopping');
+    } else {
+        sendBtn.innerHTML = '➤';
+        sendBtn.title = 'Send message';
+        sendBtn.classList.remove('stopping');
+    }
 }
 
 function addMessage(text, type) {

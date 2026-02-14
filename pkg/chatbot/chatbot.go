@@ -336,6 +336,14 @@ func (cb *ChatBot) StreamChatWithHandler(ctx context.Context, userInput string) 
 	firstChunk := true
 
 	for {
+		// Check for context cancellation
+		select {
+		case <-ctx.Done():
+			cb.handler.SendComplete("")
+			return ctx.Err()
+		default:
+		}
+
 		event, ok := streamReader.Next()
 		if !ok {
 			break

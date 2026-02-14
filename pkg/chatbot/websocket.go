@@ -1,6 +1,7 @@
 package chatbot
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -43,6 +44,11 @@ type WSSession struct {
 	approvalTimeout time.Duration
 	pendingApproval *ApprovalRequest
 	approvalMu      sync.Mutex
+
+	// Cancel state for stopping ongoing chat
+	cancelMu     sync.Mutex
+	cancelFunc   context.CancelFunc
+	isCancelled  bool
 }
 
 func NewWSSession(conn *websocket.Conn, sessionID string, cfg *config.Config, cleanupReg *utils.CleanupRegistry) *WSSession {
@@ -57,8 +63,45 @@ func NewWSSession(conn *websocket.Conn, sessionID string, cfg *config.Config, cl
 		WSHandler:       nil,
 		approvalTimeout: DefaultApprovalTimeout,
 		pendingApproval: nil,
+		isCancelled:     false,
 	}
 	return session
+}
+
+// SetCancelled marks the session as cancelled
+func (s *WSSession) SetCancelled() {
+	s.cancelMu.Lock()
+	defer s.cancelMu.Unlock()
+	if !s.isCancelled {
+		s.isCancelled = true
+		if s.cancelFunc != nil {
+			s.cancelFunc()
+		}
+	}
+}
+
+// IsCancelled returns true if the session is cancelled
+func (s *WSSession) IsCancelled() bool {
+	s.cancelMu.Lock()
+	defer s.cancelMu.Unlock()
+	return s.isCancelled
+}
+
+// ResetCancel resets the cancel state for a new request
+func (s *WSSession) ResetCancel() {
+	s.cancelMu.Lock()
+	defer s.cancelMu.Unlock()
+	if s.isCancelled {
+		s.isCancelled = false
+		s.cancelFunc = nil
+	}
+}
+
+// SetCancelFunc sets the cancel function for the current request
+func (s *WSSession) SetCancelFunc(cancelFunc context.CancelFunc) {
+	s.cancelMu.Lock()
+	defer s.cancelMu.Unlock()
+	s.cancelFunc = cancelFunc
 }
 
 func (s *WSSession) SendMessage(msgType string, content interface{}) {

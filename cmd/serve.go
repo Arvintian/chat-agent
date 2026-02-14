@@ -234,6 +234,8 @@ func (h *WebSocketHandler) processMessage(session *chatbot.WSSession, msg *chatb
 		h.handleSelectChat(session, msg)
 	case "chat":
 		h.handleChat(session, msg)
+	case "stop":
+		h.handleStop(session)
 	case "clear":
 		h.handleClear(session)
 	case "approval_response":
@@ -313,12 +315,25 @@ func (h *WebSocketHandler) handleChat(session *chatbot.WSSession, msg *chatbot.W
 		return
 	}
 
+	// Reset cancel state for new request
+	session.ResetCancel()
+
+	// Create a cancellable context
+	ctx, cancelFunc := context.WithCancel(context.Background())
+	session.SetCancelFunc(cancelFunc)
+
 	// Use pre-initialized ChatBot to process message
-	ctx := context.Background()
 	err := session.ChatBot.StreamChatWithHandler(ctx, req.Message)
-	if err != nil {
+	if err != nil && !session.IsCancelled() {
 		session.SendError(err.Error())
 		return
+	}
+
+	// If cancelled, send stopped message
+	if session.IsCancelled() {
+		session.SendMessage("stopped", map[string]interface{}{
+			"message": "Response stopped by user",
+		})
 	}
 }
 
@@ -336,6 +351,19 @@ func (h *WebSocketHandler) handleClear(session *chatbot.WSSession) {
 			"message": "No active session to clear",
 		})
 	}
+}
+
+// handleStop handles stop request for ongoing chat
+func (h *WebSocketHandler) handleStop(session *chatbot.WSSession) {
+	log.Printf("Session %s: Stop requested", session.SessionID)
+
+	// Set cancelled flag to stop ongoing stream
+	session.SetCancelled()
+
+	// Send stopped message to client
+	session.SendMessage("stopped", map[string]interface{}{
+		"message": "Response stopped by user",
+	})
 }
 
 // handleApprovalResponse handles approval response from the client
