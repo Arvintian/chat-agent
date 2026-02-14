@@ -430,9 +430,9 @@ func (cb *ChatBot) StreamChatWithHandler(ctx context.Context, userInput string) 
 					break
 				}
 				if err != nil {
-					errMsg := fmt.Errorf("error receiving message stream: %w", err).Error()
-					cb.handler.SendError(errMsg)
-					return fmt.Errorf(errMsg)
+					err = fmt.Errorf("error receiving message stream: %w", err)
+					cb.handler.SendError(err.Error())
+					return err
 				}
 
 				if len(message.ToolCalls) > 0 {
