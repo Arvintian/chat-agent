@@ -13,6 +13,110 @@ const maxReconnectAttempts = 5;
 let toastTimeout = null;
 let isGenerating = false;
 
+// Input history management
+const INPUT_HISTORY_KEY = 'chat_input_history';
+const MAX_HISTORY_SIZE = 50;
+let inputHistory = [];
+let historyIndex = -1;  // -1 means not browsing history, 0 is the newest entry
+let lastInputValue = '';  // Store current input before browsing history
+
+// Load input history from localStorage
+// History is stored with oldest at index 0, newest at the end
+function loadHistory() {
+    try {
+        const stored = localStorage.getItem(INPUT_HISTORY_KEY);
+        if (stored) {
+            inputHistory = JSON.parse(stored);
+            // Ensure it's an array
+            if (!Array.isArray(inputHistory)) {
+                inputHistory = [];
+            }
+        }
+    } catch (e) {
+        console.error('Failed to load input history:', e);
+        inputHistory = [];
+    }
+    historyIndex = -1;
+}
+
+// Save input to history (only non-empty, unique inputs) - newest at the end
+function saveToHistory(text) {
+    if (!text || !text.trim()) return;
+
+    const trimmed = text.trim();
+    // Remove if already exists (to move to end)
+    const existingIndex = inputHistory.indexOf(trimmed);
+    if (existingIndex !== -1) {
+        inputHistory.splice(existingIndex, 1);
+    }
+
+    // Add to end
+    inputHistory.push(trimmed);
+
+    // Limit size - remove oldest entries if exceeds max
+    if (inputHistory.length > MAX_HISTORY_SIZE) {
+        inputHistory = inputHistory.slice(-MAX_HISTORY_SIZE);
+    }
+
+    // Save to localStorage
+    try {
+        localStorage.setItem(INPUT_HISTORY_KEY, JSON.stringify(inputHistory));
+    } catch (e) {
+        console.error('Failed to save input history:', e);
+    }
+
+    historyIndex = -1;
+}
+
+// Navigate history (up = older, down = newer)
+// History is stored with oldest at index 0, newest at index length-1
+function navigateHistory(direction) {
+    if (inputHistory.length === 0) return;
+
+    const input = document.getElementById('message-input');
+    if (!input) return;
+
+    // First key press - save current input
+    if (historyIndex === -1) {
+        lastInputValue = input.value;
+        // Start from newest entry
+        historyIndex = inputHistory.length;
+    }
+
+    // Calculate new index
+    const newIndex = historyIndex + direction;
+
+    // Bounds check
+    if (newIndex < 0) {
+        // Going up beyond oldest - restore original input
+        input.value = lastInputValue;
+        historyIndex = -1;
+        return;
+    } else if (newIndex >= inputHistory.length) {
+        // Going down from beyond oldest - restore original input
+        input.value = lastInputValue;
+        historyIndex = -1;
+        return;
+    } else {
+        historyIndex = newIndex;
+    }
+
+    // Apply selected history item
+    input.value = inputHistory[historyIndex];
+    autoResize(input);
+}
+
+// Clear all input history
+function clearHistory() {
+    inputHistory = [];
+    historyIndex = -1;
+    try {
+        localStorage.removeItem(INPUT_HISTORY_KEY);
+    } catch (e) {
+        console.error('Failed to clear input history:', e);
+    }
+}
+
 // Track tool calls for streaming updates
 // index -> { name, argsElement, argsText, complete }
 let toolCalls = {};
@@ -22,6 +126,9 @@ let pendingApprovals = {};
 let currentApprovalId = null;
 
 async function init() {
+    // Load input history from localStorage
+    loadHistory();
+
     // Load webui config from server
     try {
         const configResponse = await fetch('/config');
@@ -469,6 +576,9 @@ function sendMessage() {
     const message = input.value.trim();
     if (!message || !ws || ws.readyState !== WebSocket.OPEN) return;
 
+    // Save to input history
+    saveToHistory(message);
+
     addMessage(message, 'user');
     input.value = '';
     autoResize(input);
@@ -724,9 +834,63 @@ function autoResize(textarea) {
 }
 
 function handleKeyDown(e) {
+    const input = document.getElementById('message-input');
+    if (!input) return;
+
+    // Enter without shift = send
     if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         sendMessage();
+        return;
+    }
+
+    // Arrow Up = navigate to older history (only when input is empty or at cursor start)
+    if (e.key === 'ArrowUp') {
+        // Only navigate history when:
+        // 1. Input is empty, OR
+        // 2. Cursor is at the start and user is not selecting text
+        const isSelection = window.getSelection().toString().length > 0;
+        const hasContent = input.value.length > 0;
+        const atStart = input.selectionStart === 0;
+
+        if ((!hasContent || (atStart && !isSelection)) && !e.shiftKey) {
+            e.preventDefault();
+            navigateHistory(-1);  // -1 = show older entries (decreasing index)
+        }
+        return;
+    }
+
+    // Arrow Down = navigate to newer history
+    if (e.key === 'ArrowDown') {
+        // Only navigate history when:
+        // 1. Input is empty, OR
+        // 2. Cursor is at the end and user is not selecting text
+        const isSelection = window.getSelection().toString().length > 0;
+        const hasContent = input.value.length > 0;
+        const atEnd = input.selectionEnd === input.value.length;
+
+        if ((!hasContent || (atEnd && !isSelection)) && !e.shiftKey) {
+            e.preventDefault();
+            navigateHistory(1);  // 1 = show newer entries (increasing index)
+        }
+        return;
+    }
+
+    // Escape = cancel history navigation, restore last input
+    if (e.key === 'Escape') {
+        if (historyIndex !== -1) {
+            input.value = lastInputValue;
+            historyIndex = -1;
+            autoResize(input);
+        }
+        return;
+    }
+
+    // When user starts typing, reset history navigation
+    if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) {
+        if (historyIndex !== -1) {
+            historyIndex = -1;
+        }
     }
 }
 
