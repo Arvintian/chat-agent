@@ -630,7 +630,28 @@ function addMessage(text, type) {
     }
 
     div.appendChild(contentDiv);
+
+    // 添加消息页脚复制按钮（仅 assistant 消息）
+    if (type === 'assistant') {
+        const footer = document.createElement('div');
+        footer.className = 'message-footer';
+        footer.innerHTML = `
+            <button class="copy-btn" onclick="copyMessage(this)" title="Copy message">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+                <span class="copy-text">Copy</span>
+            </button>
+        `;
+        div.appendChild(footer);
+    }
+
     document.getElementById('messages').appendChild(div);
+
+    // 为消息中的代码块添加复制按钮
+    addCopyButtonsToCodeBlocks(div);
+
     scrollToBottom();
 }
 
@@ -765,6 +786,28 @@ function displayChunk(content, isFirst, isLast) {
     // 标记最后一个块完成
     if (isLast) {
         chunkElement = null;
+        // 为流式响应完成后的消息添加代码块复制按钮
+        const responseDiv = document.getElementById('current-response');
+        if (responseDiv) {
+            // 添加页脚复制按钮
+            if (!responseDiv.querySelector('.message-footer')) {
+                const footer = document.createElement('div');
+                footer.className = 'message-footer';
+                footer.innerHTML = `
+                    <button class="copy-btn" onclick="copyMessage(this)" title="Copy message">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                        </svg>
+                        <span class="copy-text">Copy</span>
+                    </button>
+                `;
+                responseDiv.appendChild(footer);
+            }
+
+            // 为代码块添加复制按钮
+            addCopyButtonsToCodeBlocks(responseDiv);
+        }
     }
 }
 
@@ -773,6 +816,110 @@ function scrollToBottom() {
     requestAnimationFrame(() => {
         messages.scrollTop = messages.scrollHeight;
     });
+}
+
+// 复制整个消息内容
+function copyMessage(btn) {
+    const messageDiv = btn.closest('.message');
+    const contentDiv = messageDiv.querySelector('.message-content');
+    const textToCopy = contentDiv.innerText;
+
+    navigator.clipboard.writeText(textToCopy).then(() => {
+        // 显示成功状态
+        const copyText = btn.querySelector('.copy-text');
+        const originalText = copyText.textContent;
+        copyText.textContent = 'Copied!';
+        btn.classList.add('copied');
+
+        setTimeout(() => {
+            copyText.textContent = originalText;
+            btn.classList.remove('copied');
+        }, 1500);
+    }).catch(err => {
+        console.error('Failed to copy:', err);
+        showToast('Copy failed', false);
+    });
+}
+
+// 为消息中的代码块添加复制按钮
+function addCopyButtonsToCodeBlocks(messageDiv) {
+    const codeBlocks = messageDiv.querySelectorAll('pre');
+    codeBlocks.forEach((pre, index) => {
+        // 检查是否已经添加了复制按钮
+        if (pre.querySelector('.code-copy-btn')) {
+            return;
+        }
+
+        // 获取代码文本
+        const codeElement = pre.querySelector('code');
+        const codeText = codeElement ? codeElement.innerText : pre.innerText;
+
+        // 创建复制按钮
+        const copyBtn = document.createElement('button');
+        copyBtn.className = 'code-copy-btn';
+        copyBtn.innerHTML = `
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>
+        `;
+        copyBtn.title = 'Copy code';
+
+        // 添加点击事件
+        copyBtn.onclick = function(e) {
+            e.stopPropagation();
+            copyCodeBlock(this, codeText);
+        };
+
+        // 将按钮添加到 pre 元素
+        pre.style.position = 'relative';
+        pre.appendChild(copyBtn);
+    });
+}
+
+// 复制代码块内容
+function copyCodeBlock(btn, codeText) {
+    navigator.clipboard.writeText(codeText).then(() => {
+        // 显示成功状态
+        btn.classList.add('copied');
+        btn.innerHTML = `
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="20 6 9 17 4 12"></polyline>
+            </svg>
+        `;
+        btn.title = 'Copied!';
+
+        setTimeout(() => {
+            btn.classList.remove('copied');
+            btn.innerHTML = `
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+            `;
+            btn.title = 'Copy code';
+        }, 1500);
+    }).catch(err => {
+        console.error('Failed to copy code:', err);
+        showToast('Copy failed', false);
+    });
+}
+
+// Toast 提示（复用现有逻辑或创建新函数）
+function showToast(message, isError) {
+    const container = document.getElementById('toast-container');
+    container.innerHTML = '';
+
+    const toast = document.createElement('div');
+    toast.className = 'toast' + (isError ? ' error' : '');
+    toast.innerHTML = `<span>${message}</span>`;
+
+    container.appendChild(toast);
+    container.style.display = 'flex';
+
+    setTimeout(() => {
+        closeStatus();
+    }, 1500);
 }
 
 function setStatus(text, isError) {

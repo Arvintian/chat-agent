@@ -156,6 +156,92 @@ body {
     font-weight: 500;
 }
 
+/* Message footer styles */
+.message-footer {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.copy-btn {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 10px;
+    background: transparent;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    color: #666;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.copy-btn:hover {
+    background: #f0f0f0;
+    border-color: #ccc;
+    color: #333;
+}
+
+.copy-btn.copied {
+    background: #e8f5e9;
+    border-color: #4caf50;
+    color: #4caf50;
+}
+
+/* Code block copy button styles */
+.markdown-body pre,
+pre.code-block {
+    position: relative;
+    padding-right: 36px;
+}
+
+.code-copy-btn {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    background: transparent;
+    border: none;
+    color: #999;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.2s ease, color 0.2s ease;
+    z-index: 10;
+    padding: 0;
+    margin: 0;
+    width: 18px;
+    height: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0;
+    line-height: 1;
+    overflow: hidden;
+}
+
+.markdown-body pre:hover .code-copy-btn,
+pre.code-block:hover .code-copy-btn {
+    opacity: 1;
+}
+
+.code-copy-btn:hover {
+    color: #333;
+}
+
+.code-copy-btn.copied {
+    color: #4caf50;
+    opacity: 1;
+}
+
+/* Ensure code blocks have proper styling */
+.markdown-body pre code {
+    display: block;
+    padding: 12px;
+    overflow-x: auto;
+}
+
 #input-area {
     display: flex;
     gap: 10px;
@@ -1110,6 +1196,25 @@ body {
     .message {
         padding: 8px 10px;
         margin: 4px 0;
+    }
+
+    /* Message footer - make copy button more visible on mobile */
+    .message-footer {
+        margin-top: 6px;
+        padding-top: 6px;
+    }
+
+    .copy-btn {
+        padding: 6px 12px;
+        font-size: 13px;
+    }
+
+    /* Code block copy button - always visible on mobile */
+    .code-copy-btn {
+        opacity: 1;
+        top: 4px;
+        right: 4px;
+        padding: 6px;
     }
 
     #input-area {
