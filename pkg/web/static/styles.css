@@ -99,11 +99,6 @@ body {
     background-color: #ffebee;
 }
 
-.thinking {
-    color: #1976d2;
-    font-style: italic;
-}
-
 .tool-call {
     background-color: #fff3e0;
     margin-right: 40px;
@@ -570,6 +565,35 @@ pre.code-block:hover .code-copy-btn {
 
 .btn-cancel:hover {
     background: #e0e0e0;
+}
+
+/* Clear option checkbox style */
+.clear-option {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid #eee;
+}
+
+.clear-option label {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    cursor: pointer;
+    color: #666;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.clear-option input[type="checkbox"] {
+    margin-top: 2px;
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+    accent-color: #667eea;
+}
+
+.clear-option label:hover {
+    color: #333;
 }
 
 .btn-confirm {

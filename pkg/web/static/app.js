@@ -125,6 +125,137 @@ let toolCalls = {};
 let pendingApprovals = {};
 let currentApprovalId = null;
 
+// Local storage history configuration
+const MAX_HISTORY_MESSAGES = 200;
+const HISTORY_KEY_PREFIX = 'chat_history_';
+
+// ========== Message History Storage ==========
+
+// Get storage key for a specific chat
+function getHistoryKey(chatName) {
+    return HISTORY_KEY_PREFIX + chatName;
+}
+
+// Save message to local storage (for current chat)
+function saveMessageToStorage(message, type, toolData = null) {
+    if (!currentChat) return;
+
+    const key = getHistoryKey(currentChat);
+    let history = [];
+
+    try {
+        const stored = localStorage.getItem(key);
+        if (stored) {
+            history = JSON.parse(stored);
+            if (!Array.isArray(history)) {
+                history = [];
+            }
+        }
+    } catch (e) {
+        console.error('Failed to load message history:', e);
+        history = [];
+    }
+
+    // Build message object
+    const messageObj = {
+        type: type,
+        content: message,
+        timestamp: Date.now()
+    };
+
+    // Include tool call data if present
+    if (toolData) {
+        messageObj.toolData = toolData;
+    }
+
+    // Add to history
+    history.push(messageObj);
+
+    // Trim to max size - keep only the last 200 user, assistant, and tool_call messages
+    let count = 0;
+    const typesToKeep = ['user', 'assistant', 'tool_call'];
+    for (const msg of history) {
+        if (typesToKeep.includes(msg.type)) {
+            count++;
+        }
+    }
+
+    // If over limit, trim from the beginning
+    if (count > MAX_HISTORY_MESSAGES) {
+        let removed = 0;
+        const typesToTrim = ['user', 'assistant', 'tool_call'];
+        while (removed < count - MAX_HISTORY_MESSAGES) {
+            // Find first message to trim
+            const idx = history.findIndex(msg => typesToTrim.includes(msg.type));
+            if (idx >= 0) {
+                history.splice(idx, 1);
+                removed++;
+            } else {
+                break;
+            }
+        }
+    }
+
+    // Save to localStorage
+    try {
+        localStorage.setItem(key, JSON.stringify(history));
+    } catch (e) {
+        console.error('Failed to save message history:', e);
+    }
+}
+
+// Load message history from local storage (for current chat)
+function loadMessageHistoryFromStorage() {
+    if (!currentChat) return [];
+
+    const key = getHistoryKey(currentChat);
+    try {
+        const stored = localStorage.getItem(key);
+        if (stored) {
+            const history = JSON.parse(stored);
+            if (Array.isArray(history)) {
+                return history;
+            }
+        }
+    } catch (e) {
+        console.error('Failed to load message history:', e);
+    }
+    return [];
+}
+
+// Clear message history for current chat
+function clearMessageHistory() {
+    if (!currentChat) return;
+
+    const key = getHistoryKey(currentChat);
+    try {
+        localStorage.removeItem(key);
+    } catch (e) {
+        console.error('Failed to clear message history:', e);
+    }
+}
+
+// Clear all chat histories
+function clearAllChatHistories() {
+    const prefix = HISTORY_KEY_PREFIX;
+    const keysToDelete = [];
+
+    for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith(prefix)) {
+            keysToDelete.push(key);
+        }
+    }
+
+    keysToDelete.forEach(key => {
+        try {
+            localStorage.removeItem(key);
+        } catch (e) {
+            console.error('Failed to clear history:', e);
+        }
+    });
+}
+
 async function init() {
     // Load input history from localStorage
     loadHistory();
@@ -175,7 +306,93 @@ function startChat() {
     document.getElementById('login-panel').style.display = 'none';
     document.getElementById('chat-panel').style.display = 'flex';
     document.getElementById('agent-header').textContent = chatName;
+
+    // Load message history from local storage
+    loadMessageHistory();
+
     connectWebSocket();
+}
+
+// Load and display message history from local storage
+function loadMessageHistory() {
+    const history = loadMessageHistoryFromStorage();
+
+    history.forEach(msg => {
+        if (msg.type === 'user') {
+            displayStoredMessage(msg.content, 'user');
+        } else if (msg.type === 'assistant') {
+            displayStoredMessage(msg.content, 'assistant');
+        } else if (msg.type === 'tool_call' && msg.toolData) {
+            displayStoredToolCall(msg.toolData);
+        }
+    });
+}
+
+// Display a stored user message
+function displayStoredMessage(content, type) {
+    const div = document.createElement('div');
+    div.className = 'message ' + type;
+
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'message-content';
+
+    if (type === 'assistant') {
+        try {
+            contentDiv.innerHTML = marked.parse(content);
+        } catch (e) {
+            console.error('Markdown parsing error:', e);
+            contentDiv.textContent = content;
+        }
+    } else {
+        contentDiv.textContent = content;
+    }
+
+    div.appendChild(contentDiv);
+
+    // Add footer for assistant messages
+    if (type === 'assistant') {
+        const footer = document.createElement('div');
+        footer.className = 'message-footer';
+        footer.innerHTML = `
+            <button class="copy-btn" onclick="copyMessage(this)" title="Copy message">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+                <span class="copy-text">Copy</span>
+            </button>
+        `;
+        div.appendChild(footer);
+    }
+
+    document.getElementById('messages').appendChild(div);
+
+    // Add copy buttons to code blocks
+    addCopyButtonsToCodeBlocks(div);
+}
+
+// Display a stored tool call
+function displayStoredToolCall(toolData) {
+    const { name, arguments: args } = toolData;
+
+    const div = document.createElement('div');
+    div.className = 'message tool-call';
+    div.id = 'tool-call-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+
+    // Mark as complete
+    div.innerHTML = `
+        <div class="tool-call-content">
+            <span class="tool-icon">🔧</span>
+            <span class="tool-name">${escapeHtml(name)}</span>
+        </div>
+        <div class="tool-args">
+            <pre><code class="language-json">${escapeHtml(args)}</code></pre>
+        </div>
+        <div class="tool-complete">✓ Complete</div>
+    `;
+
+    document.getElementById('messages').appendChild(div);
+    scrollToBottom();
 }
 
 function connectWebSocket() {
@@ -238,25 +455,7 @@ function handleMessage(msg) {
                 msg.payload.streaming
             );
             break;
-        case 'thinking':
-            const thinkingStatus = msg.payload.status;
-            const thinkingEl = document.getElementById('thinking');
-            if (thinkingStatus) {
-                // Thinking started - insert if not already present
-                if (!thinkingEl) {
-                    document.getElementById('messages').insertAdjacentHTML('beforeend', '<div id="thinking" class="message thinking">Thinking...</div>');
-                    scrollToBottom();
-                }
-            } else {
-                // Thinking ended - remove the element
-                if (thinkingEl) {
-                    thinkingEl.remove();
-                }
-            }
-            break;
         case 'complete':
-            const thinking = document.getElementById('thinking');
-            if (thinking) thinking.remove();
             // 重新启用输入框
             const input = document.getElementById('message-input');
             if (input) input.disabled = false;
@@ -281,9 +480,6 @@ function handleMessage(msg) {
             const inputStopped = document.getElementById('message-input');
             if (inputStopped) inputStopped.disabled = false;
             if (inputStopped) inputStopped.focus();
-            // 移除 thinking 指示器
-            const thinkingStopped = document.getElementById('thinking');
-            if (thinkingStopped) thinkingStopped.remove();
             break;
         case 'cleared':
             setStatus(msg.payload.message, false);
@@ -291,6 +487,8 @@ function handleMessage(msg) {
         case 'approval_request':
             handleApprovalRequest(msg.payload);
             break;
+        case 'thinking':
+            break
         default:
             console.log('Unknown message type:', msg.type);
     }
@@ -579,6 +777,9 @@ function sendMessage() {
     // Save to input history
     saveToHistory(message);
 
+    // Save to local storage history
+    saveMessageToStorage(message, 'user');
+
     addMessage(message, 'user');
     input.value = '';
     autoResize(input);
@@ -656,10 +857,6 @@ function addMessage(text, type) {
 }
 
 function displayToolCall(name, args, index, streaming) {
-    // Clean up any existing thinking element
-    const thinking = document.getElementById('thinking');
-    if (thinking) thinking.remove();
-
     // Get or create the tool call entry
     let toolCall = toolCalls[index];
 
@@ -727,6 +924,13 @@ function displayToolCall(name, args, index, streaming) {
                 completeDiv.textContent = '✓ Complete';
                 toolCall.element.appendChild(completeDiv);
             }
+
+            // Save tool call to local storage
+            saveMessageToStorage(null, 'tool_call', {
+                name: name,
+                arguments: args || toolCall.argsText
+            });
+
             // Remove from tracking
             delete toolCalls[index];
         }
@@ -744,10 +948,12 @@ function escapeHtml(text) {
 
 let currentChunk = '';
 let chunkElement = null;
+let currentAssistantMessage = '';
 function displayChunk(content, isFirst, isLast) {
     // 创建新的响应元素
     if (isFirst) {
         currentChunk = content;
+        currentAssistantMessage = content;
         const div = document.createElement('div');
         div.className = 'message assistant';
         div.id = 'current-response';
@@ -770,6 +976,7 @@ function displayChunk(content, isFirst, isLast) {
 
     // 追加内容到现有响应
     currentChunk += content;
+    currentAssistantMessage += content;
     if (chunkElement) {
         try {
             chunkElement.innerHTML = marked.parse(currentChunk);
@@ -786,6 +993,9 @@ function displayChunk(content, isFirst, isLast) {
     // 标记最后一个块完成
     if (isLast) {
         chunkElement = null;
+
+        // Save assistant message to local storage
+        saveMessageToStorage(currentAssistantMessage, 'assistant');
 
         // 重置 id 以便后续消息不会混淆
         const responseDiv = document.getElementById('current-response');
@@ -946,10 +1156,12 @@ function setStatus(text, isError) {
     container.appendChild(toast);
     container.style.display = 'flex';
 
-    // Auto close after 1 second (1000ms)
+    // Auto close based on message type
+    // Normal messages: 1.5 seconds, Error messages: 3 seconds
+    const displayTime = isError ? 3000 : 1500;
     toastTimeout = setTimeout(() => {
         closeStatus();
-    }, 1000);
+    }, displayTime);
 }
 
 function closeStatus() {
@@ -963,6 +1175,8 @@ function closeStatus() {
 function showClearModal() {
     if (!currentChat) return;
     document.getElementById('clear-chat-name').textContent = currentChat;
+    // Reset the checkbox
+    document.getElementById('clear-all-records').checked = false;
     document.getElementById('clear-modal').style.display = 'flex';
 }
 
@@ -971,10 +1185,25 @@ function hideClearModal() {
 }
 
 function confirmClear() {
+    const clearAllRecords = document.getElementById('clear-all-records').checked;
+
+    // 发送 clear 消息到服务器（服务端不再携带 context）
     if (ws && ws.readyState === WebSocket.OPEN) {
-        // 清除当前 chat session 的对话记录
         ws.send(JSON.stringify({ type: 'clear', payload: {} }));
     }
+
+    // 勾选时：清空消息展示 + 删除本地存储记录
+    if (clearAllRecords) {
+        // 清空消息展示区
+        const messagesContainer = document.getElementById('messages');
+        if (messagesContainer) {
+            messagesContainer.innerHTML = '';
+        }
+        // 清除 local storage 历史记录
+        clearMessageHistory();
+    }
+    // 不勾选时：只发送 clear 消息，不清空展示，不删记录
+
     hideClearModal();
 }
 
