@@ -36,7 +36,8 @@ type ApprovalResultMap map[string]*mcp.ApprovalResult
 // (CLI with readline, WebSocket, etc.)
 type Handler interface {
 	// SendChunk sends a content chunk with position markers
-	SendChunk(content string, first, last bool)
+	// contentType: "response" or "thinking"
+	SendChunk(content string, first, last bool, contentType string)
 
 	// SendToolCall sends a tool call notification with name, arguments, index and streaming status
 	// index: the tool call index
@@ -504,7 +505,7 @@ func (cb *ChatBot) StreamChatWithHandler(ctx context.Context, userInput string) 
 					if err := json.Unmarshal([]byte(message.ReasoningContent), &decodedReasoning); err != nil {
 						decodedReasoning = message.ReasoningContent
 					}
-					cb.handler.SendChunk(decodedReasoning, firstChunk, false)
+					cb.handler.SendChunk(decodedReasoning, firstChunk, false, "thinking")
 					firstChunk = false
 				}
 
@@ -515,13 +516,14 @@ func (cb *ChatBot) StreamChatWithHandler(ctx context.Context, userInput string) 
 				}
 
 				if message.Content != "" {
-					cb.handler.SendChunk(message.Content, firstChunk, false)
+					cb.handler.SendChunk(message.Content, firstChunk, false, "response")
 					firstChunk = false
 					response.WriteString(message.Content)
 				}
 			}
-			// Send final chunk marker
-			cb.handler.SendChunk("", false, true)
+			// Send final chunk marker to indicate stream end
+			// contentType "response" indicates the end of the entire response
+			cb.handler.SendChunk("", false, true, "response")
 			// Ensure thinking state is reset at the end
 			if reasoning {
 				cb.handler.SendThinking(false)
@@ -539,12 +541,12 @@ func (cb *ChatBot) StreamChatWithHandler(ctx context.Context, userInput string) 
 				firstChunk = true
 			}
 			if event.Output.MessageOutput.Message.Content != "" {
-				cb.handler.SendChunk(event.Output.MessageOutput.Message.Content, firstChunk, false)
+				cb.handler.SendChunk(event.Output.MessageOutput.Message.Content, firstChunk, false, "response")
 				firstChunk = false
 				response.WriteString(event.Output.MessageOutput.Message.Content)
 			}
 			// Send final chunk marker
-			cb.handler.SendChunk("", false, true)
+			cb.handler.SendChunk("", false, true, "response")
 		}
 	}
 

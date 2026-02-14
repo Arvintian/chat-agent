@@ -137,7 +137,7 @@ function getHistoryKey(chatName) {
 }
 
 // Save message to local storage (for current chat)
-function saveMessageToStorage(message, type, toolData = null) {
+function saveMessageToStorage(message, type, toolData = null, thinkingContent = null) {
     if (!currentChat) return;
 
     const key = getHistoryKey(currentChat);
@@ -162,6 +162,11 @@ function saveMessageToStorage(message, type, toolData = null) {
         content: message,
         timestamp: Date.now()
     };
+
+    // Include thinking content if present
+    if (thinkingContent) {
+        messageObj.thinking = thinkingContent;
+    }
 
     // Include tool call data if present
     if (toolData) {
@@ -321,17 +326,84 @@ function loadMessageHistory() {
         if (msg.type === 'user') {
             displayStoredMessage(msg.content, 'user');
         } else if (msg.type === 'assistant') {
-            displayStoredMessage(msg.content, 'assistant');
+            // Check if this message has separate thinking content
+            if (msg.thinking && msg.thinking.trim()) {
+                displayStoredThinkingAndResponse(msg.thinking, msg.content);
+            } else {
+                displayStoredMessage(msg.content, 'assistant');
+            }
         } else if (msg.type === 'tool_call' && msg.toolData) {
             displayStoredToolCall(msg.toolData);
         }
     });
 }
 
+// Display stored thinking and response message
+function displayStoredThinkingAndResponse(thinkingContent, responseContent) {
+    // Display thinking message if exists
+    if (thinkingContent && thinkingContent.trim()) {
+        const div = document.createElement('div');
+        div.className = 'message assistant thinking-message';
+        div.innerHTML = `
+            <div class="thinking-header">
+                <span class="thinking-icon">💭</span>
+                <span class="thinking-title">Thinking</span>
+            </div>
+            <div class="thinking-content markdown-body"></div>
+            <div class="message-footer">
+                <button class="copy-btn" onclick="copyThinkingMessage(this)" title="Copy thinking content">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                    </svg>
+                    <span class="copy-text">Copy</span>
+                </button>
+            </div>
+        `;
+        const thinkingDiv = div.querySelector('.thinking-content');
+        try {
+            thinkingDiv.innerHTML = marked.parse(thinkingContent.trim());
+        } catch (e) {
+            console.error('Markdown parsing error for thinking:', e);
+            thinkingDiv.textContent = thinkingContent.trim();
+        }
+        document.getElementById('messages').appendChild(div);
+        addCopyButtonsToCodeBlocks(div);
+    }
+
+    // Display response message if exists
+    if (responseContent && responseContent.trim()) {
+        const div = document.createElement('div');
+        div.className = 'message assistant response-message';
+        div.innerHTML = `
+            <div class="response-content markdown-body"></div>
+            <div class="message-footer">
+                <button class="copy-btn" onclick="copyResponseMessage(this)" title="Copy response content">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                    </svg>
+                    <span class="copy-text">Copy</span>
+                </button>
+            </div>
+        `;
+        const responseDiv = div.querySelector('.response-content');
+        try {
+            responseDiv.innerHTML = marked.parse(responseContent.trim());
+        } catch (e) {
+            console.error('Markdown parsing error for response:', e);
+            responseDiv.textContent = responseContent.trim();
+        }
+        document.getElementById('messages').appendChild(div);
+        addCopyButtonsToCodeBlocks(div);
+    }
+}
+
 // Display a stored user message
 function displayStoredMessage(content, type) {
     const div = document.createElement('div');
-    div.className = 'message ' + type;
+    // For assistant messages, add 'response-message' class for consistent styling
+    div.className = 'message ' + type + (type === 'assistant' ? ' response-message' : '');
 
     const contentDiv = document.createElement('div');
     contentDiv.className = 'message-content' + (type === 'assistant' ? ' markdown-body' : '');
@@ -349,7 +421,7 @@ function displayStoredMessage(content, type) {
 
     div.appendChild(contentDiv);
 
-    // Add footer for assistant messages
+    // Add footer for assistant messages only
     if (type === 'assistant') {
         const footer = document.createElement('div');
         footer.className = 'message-footer';
@@ -445,7 +517,7 @@ function handleMessage(msg) {
             setStatus(msg.payload.message, false);
             break;
         case 'chunk':
-            displayChunk(msg.payload.content, msg.payload.first, msg.payload.last);
+            displayChunk(msg.payload.content, msg.payload.first, msg.payload.last, msg.payload.content_type);
             break;
         case 'tool_call':
             displayToolCall(
@@ -948,66 +1020,27 @@ function escapeHtml(text) {
 
 let currentChunk = '';
 let chunkElement = null;
+let currentThinkingChunk = '';
+let thinkingElement = null;
 let currentAssistantMessage = '';
-function displayChunk(content, isFirst, isLast) {
-    // 创建新的响应元素
-    if (isFirst) {
-        currentChunk = content;
-        currentAssistantMessage = content;
-        const div = document.createElement('div');
-        div.className = 'message assistant';
-        div.id = 'current-response';
-        div.innerHTML = '<div class="message-content markdown-body"></div>';
-        document.getElementById('messages').appendChild(div);
-        chunkElement = div.querySelector('.message-content');
-        if (chunkElement) {
-            try {
-                chunkElement.innerHTML = marked.parse(currentChunk);
-            } catch (e) {
-                chunkElement.textContent = currentChunk;
-            }
-        }
-        scrollToBottom();
-        if (isLast) {
-            chunkElement = null;
-        }
-        return;
-    }
+let currentThinkingMessage = '';
+let currentContentType = '';
 
-    // 追加内容到现有响应
-    currentChunk += content;
-    currentAssistantMessage += content;
-    if (chunkElement) {
-        try {
-            chunkElement.innerHTML = marked.parse(currentChunk);
-        } catch (e) {
-            chunkElement.textContent = currentChunk;
-        }
-    }
+// 存储每个消息块（thinking 和 response）
+let thinkingBlock = null;
+let responseBlock = null;
 
-    // 滚动到底部（如果有实际内容）
-    if (content || !isLast) {
-        scrollToBottom();
-    }
-
-    // 标记最后一个块完成
-    if (isLast) {
-        chunkElement = null;
-
-        // Save assistant message to local storage
-        saveMessageToStorage(currentAssistantMessage, 'assistant');
-
-        // 重置 id 以便后续消息不会混淆
-        const responseDiv = document.getElementById('current-response');
-        if (responseDiv) {
-            responseDiv.removeAttribute('id');
-
-            // 添加页脚复制按钮（确保它不在 message-content 内）
-            if (!responseDiv.querySelector('.message-footer')) {
+function displayChunk(content, isFirst, isLast, contentType = 'response') {
+    // 检查是否是最后的 final chunk（空内容）
+    if (isLast && content === '') {
+        // 最终完成处理
+        if (thinkingBlock) {
+            // 为思考消息添加 footer
+            if (!thinkingBlock.querySelector('.message-footer')) {
                 const footer = document.createElement('div');
                 footer.className = 'message-footer';
                 footer.innerHTML = `
-                    <button class="copy-btn" onclick="copyMessage(this)" title="Copy message">
+                    <button class="copy-btn" onclick="copyThinkingMessage(this)" title="Copy thinking content">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
                             <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
@@ -1015,11 +1048,133 @@ function displayChunk(content, isFirst, isLast) {
                         <span class="copy-text">Copy</span>
                     </button>
                 `;
-                responseDiv.appendChild(footer);
+                thinkingBlock.appendChild(footer);
             }
+            addCopyButtonsToCodeBlocks(thinkingBlock);
+        }
 
-            // 为代码块添加复制按钮
-            addCopyButtonsToCodeBlocks(responseDiv);
+        if (responseBlock) {
+            // 为回答消息添加 footer（如果没有）
+            if (!responseBlock.querySelector('.message-footer')) {
+                const footer = document.createElement('div');
+                footer.className = 'message-footer';
+                footer.innerHTML = `
+                    <button class="copy-btn" onclick="copyResponseMessage(this)" title="Copy response content">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                        </svg>
+                        <span class="copy-text">Copy</span>
+                    </button>
+                `;
+                responseBlock.appendChild(footer);
+            }
+            addCopyButtonsToCodeBlocks(responseBlock);
+        }
+
+        // 保存完整消息到本地存储（包含思考内容和回答内容）
+        const fullContent = (currentAssistantMessage || '').trim();
+        const thinkingContent = (currentThinkingChunk || '').trim();
+        if (fullContent || thinkingContent) {
+            saveMessageToStorage(fullContent, 'assistant', null, thinkingContent);
+        }
+
+        // 重置状态
+        thinkingBlock = null;
+        responseBlock = null;
+        currentChunk = '';
+        currentThinkingChunk = '';
+        currentAssistantMessage = '';
+        currentThinkingMessage = '';
+        currentContentType = '';
+        chunkElement = null;
+        thinkingElement = null;
+
+        // 重新启用输入框
+        const input = document.getElementById('message-input');
+        if (input) input.disabled = false;
+        if (input) input.focus();
+        isGenerating = false;
+        updateSendButton();
+
+        scrollToBottom();
+        return;
+    }
+
+    // 处理实际内容
+    if (contentType === 'thinking') {
+        // 处理思考消息
+        if (isFirst || !thinkingBlock) {
+            // 创建新的思考消息块
+            thinkingBlock = document.createElement('div');
+            thinkingBlock.className = 'message assistant thinking-message';
+            thinkingBlock.innerHTML = `
+                <div class="thinking-header">
+                    <span class="thinking-icon">💭</span>
+                    <span class="thinking-title">Thinking</span>
+                </div>
+                <div class="thinking-content markdown-body"></div>
+            `;
+            thinkingElement = thinkingBlock.querySelector('.thinking-content');
+            currentThinkingChunk = content;
+
+            document.getElementById('messages').appendChild(thinkingBlock);
+
+            if (thinkingElement) {
+                try {
+                    thinkingElement.innerHTML = marked.parse(content);
+                } catch (e) {
+                    thinkingElement.textContent = content;
+                }
+            }
+            scrollToBottom();
+        } else {
+            // 追加内容
+            currentThinkingChunk += content;
+            if (thinkingElement) {
+                try {
+                    thinkingElement.innerHTML = marked.parse(currentThinkingChunk);
+                } catch (e) {
+                    thinkingElement.textContent = currentThinkingChunk;
+                }
+            }
+            scrollToBottom();
+        }
+    } else {
+        // 处理回答消息
+        if (isFirst || !responseBlock) {
+            // 创建新的回答消息块
+            responseBlock = document.createElement('div');
+            responseBlock.className = 'message assistant response-message';
+            responseBlock.innerHTML = `
+                <div class="response-content markdown-body"></div>
+            `;
+            chunkElement = responseBlock.querySelector('.response-content');
+            currentChunk = content;
+            currentAssistantMessage = content;
+
+            document.getElementById('messages').appendChild(responseBlock);
+
+            if (chunkElement) {
+                try {
+                    chunkElement.innerHTML = marked.parse(content);
+                } catch (e) {
+                    chunkElement.textContent = content;
+                }
+            }
+            scrollToBottom();
+        } else {
+            // 追加内容
+            currentChunk += content;
+            currentAssistantMessage += content;
+            if (chunkElement) {
+                try {
+                    chunkElement.innerHTML = marked.parse(currentChunk);
+                } catch (e) {
+                    chunkElement.textContent = currentChunk;
+                }
+            }
+            scrollToBottom();
         }
     }
 }
@@ -1050,6 +1205,50 @@ function copyMessage(btn) {
         }, 1500);
     }).catch(err => {
         console.error('Failed to copy:', err);
+        showToast('Copy failed', false);
+    });
+}
+
+// 复制思考消息内容
+function copyThinkingMessage(btn) {
+    const messageDiv = btn.closest('.message');
+    const contentDiv = messageDiv.querySelector('.thinking-content');
+    const textToCopy = contentDiv ? contentDiv.innerText : '';
+
+    navigator.clipboard.writeText(textToCopy).then(() => {
+        const copyText = btn.querySelector('.copy-text');
+        const originalText = copyText.textContent;
+        copyText.textContent = 'Copied!';
+        btn.classList.add('copied');
+
+        setTimeout(() => {
+            copyText.textContent = originalText;
+            btn.classList.remove('copied');
+        }, 1500);
+    }).catch(err => {
+        console.error('Failed to copy thinking:', err);
+        showToast('Copy failed', false);
+    });
+}
+
+// 复制回答消息内容
+function copyResponseMessage(btn) {
+    const messageDiv = btn.closest('.message');
+    const contentDiv = messageDiv.querySelector('.response-content');
+    const textToCopy = contentDiv ? contentDiv.innerText : '';
+
+    navigator.clipboard.writeText(textToCopy).then(() => {
+        const copyText = btn.querySelector('.copy-text');
+        const originalText = copyText.textContent;
+        copyText.textContent = 'Copied!';
+        btn.classList.add('copied');
+
+        setTimeout(() => {
+            copyText.textContent = originalText;
+            btn.classList.remove('copied');
+        }, 1500);
+    }).catch(err => {
+        console.error('Failed to copy response:', err);
         showToast('Copy failed', false);
     });
 }

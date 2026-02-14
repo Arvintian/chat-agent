@@ -113,11 +113,12 @@ func (s *WSSession) SendMessage(msgType string, content interface{}) {
 	}
 }
 
-func (s *WSSession) SendChunk(content string, isFirst, isLast bool) {
+func (s *WSSession) SendChunk(content string, isFirst, isLast bool, contentType string) {
 	s.SendMessage("chunk", map[string]interface{}{
-		"content": content,
-		"first":   isFirst,
-		"last":    isLast,
+		"content":      content,
+		"first":        isFirst,
+		"last":         isLast,
+		"content_type": contentType,
 	})
 }
 
@@ -178,8 +179,8 @@ func NewWSChatHandler(session *WSSession) *WSChatHandler {
 	return &WSChatHandler{session: session}
 }
 
-func (h *WSChatHandler) SendChunk(content string, first, last bool) {
-	h.session.SendChunk(content, first, last)
+func (h *WSChatHandler) SendChunk(content string, first, last bool, contentType string) {
+	h.session.SendChunk(content, first, last, contentType)
 }
 
 func (h *WSChatHandler) SendToolCall(name string, arguments string, id string, streaming bool) {

@@ -151,6 +151,63 @@ body {
     font-weight: 500;
 }
 
+/* Thinking message styles */
+.thinking-message {
+    background-color: #fafafa;
+    border-left: 3px solid #9c27b0;
+}
+
+.thinking-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #e0e0e0;
+    color: #7b1fa2;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.thinking-icon {
+    font-size: 14px;
+}
+
+.thinking-title {
+    color: #7b1fa2;
+}
+
+.thinking-content {
+    color: #666;
+    font-size: 13px;
+}
+
+.thinking-content p {
+    margin: 6px 0;
+}
+
+.thinking-label {
+    font-size: 12px;
+    color: #7b1fa2;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+/* Response message styles */
+.response-message {
+    background-color: #f5f5f5;
+    border-left: 3px solid #4caf50;
+}
+
+/* Message divider between thinking and response */
+.message-divider {
+    height: 1px;
+    background: linear-gradient(90deg, transparent, #e0e0e0, transparent);
+    margin: 12px 0;
+}
+
 /* Message footer styles */
 .message-footer {
     display: flex;
