@@ -334,7 +334,7 @@ function displayStoredMessage(content, type) {
     div.className = 'message ' + type;
 
     const contentDiv = document.createElement('div');
-    contentDiv.className = 'message-content';
+    contentDiv.className = 'message-content' + (type === 'assistant' ? ' markdown-body' : '');
 
     if (type === 'assistant') {
         try {
@@ -817,7 +817,7 @@ function addMessage(text, type) {
     div.className = 'message ' + type;
 
     const contentDiv = document.createElement('div');
-    contentDiv.className = 'message-content';
+    contentDiv.className = 'message-content' + (type === 'assistant' ? ' markdown-body' : '');
 
     if (type === 'assistant') {
         try {
