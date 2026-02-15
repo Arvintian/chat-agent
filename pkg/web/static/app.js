@@ -993,13 +993,21 @@ function displayToolCall(name, args, index, streaming) {
             }
         }
 
-        // Update args (accumulate streaming updates)
-        // Always update argsText and display when we receive args
-        if (args !== undefined && args !== null && streaming === true) {
-            toolCall.argsText = args;
-            if (toolCall.argsElement) {
-                toolCall.argsElement.textContent = args;
+        // Handle streaming updates - the backend sends accumulated arguments
+        // For streaming mode, we receive incremental updates that build up the complete args
+        if (streaming === true && args !== undefined && args !== null) {
+            // Check if this is incremental content (not a complete replacement)
+            // If new args starts with current argsText, it's incremental - append only the new part
+            if (args.startsWith(toolCall.argsText)) {
+                toolCall.argsText = args;
+            } else {
+                // Args doesn't contain current text, append incrementally
+                toolCall.argsText += args;
             }
+            if (toolCall.argsElement) {
+                toolCall.argsElement.textContent = toolCall.argsText;
+            }
+
         }
 
         // If streaming=false, mark as complete and add visual indicator

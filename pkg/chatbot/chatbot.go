@@ -482,10 +482,13 @@ func (cb *ChatBot) StreamChatWithHandler(ctx context.Context, userInput string) 
 									},
 								},
 							})
-							// Send update with current accumulated arguments (streaming)
+
 							m, _ := schema.ConcatMessages(toolMap[*index])
 							if len(m.ToolCalls) > 0 {
-								cb.handler.SendToolCall(m.ToolCalls[0].Function.Name, m.ToolCalls[0].Function.Arguments, m.ToolCalls[0].ID, true)
+								// Send update with current accumulated arguments (streaming)
+								//cb.handler.SendToolCall(m.ToolCalls[0].Function.Name, m.ToolCalls[0].Function.Arguments, m.ToolCalls[0].ID, true)
+								// Send current arguments (streaming)
+								cb.handler.SendToolCall(m.ToolCalls[0].Function.Name, tc.Function.Arguments, m.ToolCalls[0].ID, true)
 							}
 						}
 					}
