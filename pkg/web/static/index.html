@@ -38,10 +38,8 @@
                     <span class="modal-close" onclick="hideClearModal()">×</span>
                 </div>
                 <div class="modal-body">
-                    <p>Are you sure you want to clear the conversation for:</p>
-                    <p id="clear-chat-name" style="font-weight: bold; margin: 10px 0; color: #667eea;"></p>
-                    <p style="color: #666; font-size: 13px;">⚠️ This action cannot be undone. All messages will be
-                        permanently deleted.</p>
+                    <p>Are you sure you want to clear the conversation context for: <span id="clear-chat-name"
+                            style="font-weight: bold; margin: 10px 0; color: #667eea;"></span></p>
                     <div class="clear-option">
                         <label for="clear-all-records">
                             <input type="checkbox" id="clear-all-records">
@@ -74,7 +72,8 @@
                         <button class="btn-approve-all" onclick="approveAllAndSubmit()">✅ Approve All</button>
                         <button class="btn-deny-all" onclick="denyAllAndSubmit()">❌ Deny All</button>
                     </div>
-                    <button class="btn-confirm" id="btn-submit-approval" onclick="submitApprovals()" disabled>Submit Decision</button>
+                    <button class="btn-confirm" id="btn-submit-approval" onclick="submitApprovals()" disabled>Submit
+                        Decision</button>
                 </div>
             </div>
         </div>

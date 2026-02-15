@@ -301,7 +301,6 @@ pre.code-block:hover .code-copy-btn {
     gap: 10px;
     padding: 15px;
     background: white;
-    border-top: 1px solid #eee;
     flex-shrink: 0;
 }
 
@@ -1317,6 +1316,14 @@ pre.code-block:hover .code-copy-btn {
     #send-btn {
         padding: 8px 12px;
         font-size: 12px;
+    }
+
+    #send-btn.stopping {
+        background-color: #f44336;
+    }
+
+    #send-btn.stopping:hover {
+        background-color: #d32f2f;
     }
 
     .message-content {

@@ -361,6 +361,8 @@ function displayStoredThinkingAndResponse(thinkingContent, responseContent) {
             </div>
         `;
         const thinkingDiv = div.querySelector('.thinking-content');
+        // Store original markdown content for copying
+        thinkingDiv.dataset.originalContent = thinkingContent.trim();
         try {
             thinkingDiv.innerHTML = marked.parse(thinkingContent.trim());
         } catch (e) {
@@ -388,6 +390,8 @@ function displayStoredThinkingAndResponse(thinkingContent, responseContent) {
             </div>
         `;
         const responseDiv = div.querySelector('.response-content');
+        // Store original markdown content for copying
+        responseDiv.dataset.originalContent = responseContent.trim();
         try {
             responseDiv.innerHTML = marked.parse(responseContent.trim());
         } catch (e) {
@@ -409,6 +413,8 @@ function displayStoredMessage(content, type) {
     contentDiv.className = 'message-content' + (type === 'assistant' ? ' markdown-body' : '');
 
     if (type === 'assistant') {
+        // Store original markdown content for copying
+        contentDiv.dataset.originalContent = content;
         try {
             contentDiv.innerHTML = marked.parse(content);
         } catch (e) {
@@ -899,6 +905,8 @@ function addMessage(text, type) {
     contentDiv.className = 'message-content' + (type === 'assistant' ? ' markdown-body' : '');
 
     if (type === 'assistant') {
+        // Store original markdown content for copying
+        contentDiv.dataset.originalContent = text;
         try {
             contentDiv.innerHTML = marked.parse(text);
         } catch (e) {
@@ -1117,6 +1125,8 @@ function displayChunk(content, isFirst, isLast, contentType = 'response') {
             `;
             thinkingElement = thinkingBlock.querySelector('.thinking-content');
             currentThinkingChunk = content;
+            // Store original markdown content for copying
+            thinkingElement.dataset.originalContent = content;
 
             document.getElementById('messages').appendChild(thinkingBlock);
 
@@ -1131,6 +1141,8 @@ function displayChunk(content, isFirst, isLast, contentType = 'response') {
         } else {
             // 追加内容
             currentThinkingChunk += content;
+            // Update stored original content
+            thinkingElement.dataset.originalContent = currentThinkingChunk;
             if (thinkingElement) {
                 try {
                     thinkingElement.innerHTML = marked.parse(currentThinkingChunk);
@@ -1152,6 +1164,8 @@ function displayChunk(content, isFirst, isLast, contentType = 'response') {
             chunkElement = responseBlock.querySelector('.response-content');
             currentChunk = content;
             currentAssistantMessage = content;
+            // Store original markdown content for copying
+            chunkElement.dataset.originalContent = content;
 
             document.getElementById('messages').appendChild(responseBlock);
 
@@ -1167,6 +1181,8 @@ function displayChunk(content, isFirst, isLast, contentType = 'response') {
             // 追加内容
             currentChunk += content;
             currentAssistantMessage += content;
+            // Update stored original content
+            chunkElement.dataset.originalContent = currentChunk;
             if (chunkElement) {
                 try {
                     chunkElement.innerHTML = marked.parse(currentChunk);
@@ -1190,7 +1206,8 @@ function scrollToBottom() {
 function copyMessage(btn) {
     const messageDiv = btn.closest('.message');
     const contentDiv = messageDiv.querySelector('.message-content');
-    const textToCopy = contentDiv.innerText;
+    // 使用 data 属性存储的原始 markdown 内容，而不是 innerText（渲染后的文本）
+    const textToCopy = contentDiv.dataset.originalContent || contentDiv.innerText;
 
     navigator.clipboard.writeText(textToCopy).then(() => {
         // 显示成功状态
@@ -1213,7 +1230,8 @@ function copyMessage(btn) {
 function copyThinkingMessage(btn) {
     const messageDiv = btn.closest('.message');
     const contentDiv = messageDiv.querySelector('.thinking-content');
-    const textToCopy = contentDiv ? contentDiv.innerText : '';
+    // 使用 data 属性存储的原始 markdown 内容
+    const textToCopy = contentDiv ? (contentDiv.dataset.originalContent || contentDiv.innerText) : '';
 
     navigator.clipboard.writeText(textToCopy).then(() => {
         const copyText = btn.querySelector('.copy-text');
@@ -1235,7 +1253,8 @@ function copyThinkingMessage(btn) {
 function copyResponseMessage(btn) {
     const messageDiv = btn.closest('.message');
     const contentDiv = messageDiv.querySelector('.response-content');
-    const textToCopy = contentDiv ? contentDiv.innerText : '';
+    // 使用 data 属性存储的原始 markdown 内容
+    const textToCopy = contentDiv ? (contentDiv.dataset.originalContent || contentDiv.innerText) : '';
 
     navigator.clipboard.writeText(textToCopy).then(() => {
         const copyText = btn.querySelector('.copy-text');
