@@ -200,7 +200,6 @@ body {
 /* Response message styles */
 .response-message {
     background-color: #f5f5f5;
-    border-left: 3px solid #4caf50;
 }
 
 /* Message divider between thinking and response */

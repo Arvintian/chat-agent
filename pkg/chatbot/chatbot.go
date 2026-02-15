@@ -550,7 +550,7 @@ func (cb *ChatBot) StreamChatWithHandler(ctx context.Context, userInput string) 
 		}
 	}
 
-	cb.handler.SendComplete(response.String())
+	cb.handler.SendComplete("")
 	cb.manager.AddMessage(schema.AssistantMessage(response.String(), nil))
 	return nil
 }

@@ -2,10 +2,13 @@ package cmd
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,10 +18,69 @@ import (
 	"github.com/Arvintian/chat-agent/pkg/mcp"
 	"github.com/Arvintian/chat-agent/pkg/utils"
 	"github.com/Arvintian/chat-agent/pkg/web"
+	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 
 	"github.com/spf13/cobra"
 )
+
+// BasicAuthMiddleware creates a middleware for HTTP Basic Authentication
+func BasicAuthMiddleware(user, pass string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Skip auth if credentials are not configured
+			if user == "" && pass == "" {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			authHeader := r.Header.Get("Authorization")
+			if authHeader == "" {
+				w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
+				w.WriteHeader(http.StatusUnauthorized)
+				w.Write([]byte("401 Unauthorized"))
+				return
+			}
+
+			// Extract credentials from Authorization header
+			parts := strings.SplitN(authHeader, " ", 2)
+			if len(parts) != 2 || strings.ToLower(parts[0]) != "basic" {
+				w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
+				w.WriteHeader(http.StatusUnauthorized)
+				w.Write([]byte("401 Unauthorized"))
+				return
+			}
+
+			decoded, err := base64.StdEncoding.DecodeString(parts[1])
+			if err != nil {
+				w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
+				w.WriteHeader(http.StatusUnauthorized)
+				w.Write([]byte("401 Unauthorized"))
+				return
+			}
+
+			credentialParts := strings.SplitN(string(decoded), ":", 2)
+			if len(credentialParts) != 2 {
+				w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
+				w.WriteHeader(http.StatusUnauthorized)
+				w.Write([]byte("401 Unauthorized"))
+				return
+			}
+
+			receivedUser := credentialParts[0]
+			receivedPass := credentialParts[1]
+
+			if receivedUser != user || receivedPass != pass {
+				w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
+				w.WriteHeader(http.StatusUnauthorized)
+				w.Write([]byte("401 Unauthorized"))
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
 
 // serveCmd represents the serve command
 var serveCmd = &cobra.Command{
@@ -46,20 +108,26 @@ Example:
 		port, _ := cmd.Flags().GetInt("port")
 		host, _ := cmd.Flags().GetString("host")
 		welcome, _ := cmd.Flags().GetString("welcome")
+		basicAuthUser, _ := cmd.Flags().GetString("basic-auth-user")
+		basicAuthPass, _ := cmd.Flags().GetString("basic-auth-pass")
 
 		// Create WebSocket handler
 		wsHandler := NewWebSocketHandler(cfg, cleanupRegistry)
 
-		// Setup HTTP routes
-		http.Handle("/ws", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			wsHandler.HandleWebSocket(w, r)
-		}))
-		http.Handle("/health", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Write([]byte("OK"))
-		}))
-		// Serve static files from embedded file system
-		http.Handle("/", http.FileServer(web.GetFS()))
-		http.HandleFunc("/chats", func(w http.ResponseWriter, r *http.Request) {
+		// Create basic auth middleware
+		authMiddleware := BasicAuthMiddleware(basicAuthUser, basicAuthPass)
+
+		// Create router
+		router := mux.NewRouter()
+
+		// Apply auth middleware to all routes
+		router.Use(authMiddleware)
+
+		// WebSocket endpoint (auth required)
+		router.HandleFunc("/ws", wsHandler.HandleWebSocket)
+
+		// API endpoints - register BEFORE static files so they take precedence
+		router.HandleFunc("/chats", func(w http.ResponseWriter, r *http.Request) {
 			// List available chats
 			chats := make([]string, 0, len(cfg.Chats))
 			defaultChat := ""
@@ -69,13 +137,15 @@ Example:
 					defaultChat = name
 				}
 			}
+			sort.Strings(chats)
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"chats":        chats,
 				"default_chat": defaultChat,
 			})
 		})
-		http.HandleFunc("/config", func(w http.ResponseWriter, r *http.Request) {
+
+		router.HandleFunc("/config", func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			// Use --welcome as title, fallback to default
 			title := welcome
@@ -89,12 +159,15 @@ Example:
 			})
 		})
 
+		// Serve static files from embedded file system - catch-all, registered last
+		router.PathPrefix("/").Handler(http.FileServer(web.GetFS()))
+
 		addr := fmt.Sprintf("%s:%d", host, port)
 		log.Printf("Starting chat-agent web server on %s", addr)
 		log.Printf("WebSocket endpoint: ws://%s/ws", addr)
 		log.Printf("HTTP endpoint: http://%s/", addr)
 
-		return http.ListenAndServe(addr, nil)
+		return http.ListenAndServe(addr, router)
 	},
 }
 
@@ -398,6 +471,8 @@ func init() {
 	// Add serve command
 	serveCmd.Flags().StringP("host", "", "0.0.0.0", "Host to listen on")
 	serveCmd.Flags().IntP("port", "", 8080, "Port to listen on")
+	serveCmd.Flags().StringP("basic-auth-user", "", "", "Basic auth username (enables authentication if set)")
+	serveCmd.Flags().StringP("basic-auth-pass", "", "", "Basic auth password")
 
 	RootCmd.AddCommand(serveCmd)
 }
