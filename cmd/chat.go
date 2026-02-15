@@ -10,8 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
-	"text/template"
-	"time"
 
 	"github.com/Arvintian/chat-agent/pkg/chatbot"
 	"github.com/Arvintian/chat-agent/pkg/config"
@@ -32,7 +30,6 @@ var (
 var (
 	availableChats  map[string]config.Chat
 	currentChatName string
-	renderedPrompt  string
 )
 
 type MultilineState int
@@ -98,7 +95,6 @@ var RootCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		renderedPrompt, _ = renderSystemPrompt(session.Preset.System)
 
 		// init readline
 		placeholder := "Send a message (/h for help)"
@@ -216,7 +212,6 @@ var RootCmd = &cobra.Command{
 					} else {
 						session = newSession
 						currentChatName = targetName
-						renderedPrompt, _ = renderSystemPrompt(session.Preset.System)
 						cb = chatbot.NewChatBot(context.WithValue(cmd.Context(), "debug", debug), session.Agent, session.Manager, scanner)
 						fmt.Printf("Switched to chat: %s\n", targetName)
 					}
@@ -235,8 +230,6 @@ var RootCmd = &cobra.Command{
 					fmt.Println()
 				case "/tools", "/l":
 					printTools(session.Tools)
-				case "/sys", "/system":
-					printSystemPrompt(renderedPrompt)
 				case "/chat":
 					printChats()
 				case "/quit", "/exit", "/bye", "/q":
@@ -260,7 +253,6 @@ func printHelp() {
 	fmt.Println("  /history or /i   - Get conversation history")
 	fmt.Println("  /clear   or /c   - Clear conversation context")
 	fmt.Println("  /tools   or /l   - List the loaded tools")
-	fmt.Println("  /sys             - Show current system prompt")
 	fmt.Println("  /chat            - List available chats")
 	fmt.Println("  /s <name>        - Switch to another chat directly")
 	fmt.Println("  /t <cmd>         - Execute local command")
@@ -299,85 +291,6 @@ func printChats() {
 			fmt.Printf("    Model: %s\n", preset.Model)
 		}
 	}
-}
-
-// printSystemPrompt prints the current system prompt
-func printSystemPrompt(systemPrompt string) {
-	if systemPrompt == "" {
-		fmt.Println("No system prompt configured.")
-		return
-	}
-
-	fmt.Println("Current System Prompt:")
-	fmt.Println("======================")
-	fmt.Println(systemPrompt)
-	fmt.Println("======================")
-}
-
-// renderSystemPrompt renders system prompt using Go template with built-in variables
-func renderSystemPrompt(systemPrompt string) (string, error) {
-	if systemPrompt == "" {
-		return "", nil
-	}
-
-	// Create template with built-in functions
-	tmpl, err := template.New("systemPrompt").Funcs(template.FuncMap{
-		"env": os.Getenv, // Allow accessing environment variables
-	}).Parse(systemPrompt)
-	if err != nil {
-		return "", fmt.Errorf("failed to parse system prompt template: %w", err)
-	}
-
-	// Prepare template data with built-in variables
-	data := struct {
-		Cwd  string
-		Date string
-		Now  time.Time
-		User string
-		Home string
-	}{
-		Cwd:  getCurrentWorkingDir(),
-		Date: time.Now().Format("2006-01-02"),
-		Now:  time.Now(),
-		User: getUserName(),
-		Home: getHomeDir(),
-	}
-
-	// Execute template
-	var buf strings.Builder
-	if err := tmpl.Execute(&buf, data); err != nil {
-		return "", fmt.Errorf("failed to execute system prompt template: %w", err)
-	}
-
-	return buf.String(), nil
-}
-
-// getCurrentWorkingDir returns the current working directory
-func getCurrentWorkingDir() string {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "."
-	}
-	return cwd
-}
-
-// getUserName returns the current user name
-func getUserName() string {
-	if user, err := os.UserHomeDir(); err == nil {
-		// Extract username from home directory path
-		if parts := strings.Split(user, "/"); len(parts) > 2 {
-			return parts[len(parts)-1]
-		}
-	}
-	return "user"
-}
-
-// getHomeDir returns the user's home directory
-func getHomeDir() string {
-	if home, err := os.UserHomeDir(); err == nil {
-		return home
-	}
-	return "~"
 }
 
 func Execute() {

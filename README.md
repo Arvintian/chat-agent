@@ -78,7 +78,6 @@ When in chat mode, you can use the following commands:
 - `/history` or `/i` - Get conversation history
 - `/clear` or `/c` - Clear conversation context
 - `/tools` or `/l` - List loaded tools
-- `/sys` or `/system` - Show current system prompt
 - `/t cmd` - Execute local command (e.g., `/t ls -la`)
 - `/exit` or `/q` - Exit program
 
@@ -207,16 +206,9 @@ chats:
 - `{{.Date}}` - Today's date in YYYY-MM-DD format
 - `{{.Now}}` - Current time (time.Time object, can be formatted)
   - Example: `{{.Now.Format "2006-01-02 15:04:05"}}`
-  - Example: `{{.Now.Format "Monday, January 2, 2006"}}`
-  - Example: `{{.Now.Year}}` - Current year
-  - Example: `{{.Now.Month}}` - Current month
-  - Example: `{{.Now.Day}}` - Current day of month
 - `{{.User}}` - Current username
 - `{{.Home}}` - User's home directory
 - `{{env "VAR_NAME"}}` - Access environment variables
-  - Example: `{{env "USER"}}` - Current user
-  - Example: `{{env "HOME"}}` - Home directory
-  - Example: `{{env "PATH"}}` - System PATH
 
 ### MCP Servers
 Integrate with Model Context Protocol servers:

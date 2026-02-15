@@ -3,7 +3,10 @@ package chatbot
 import (
 	"context"
 	"fmt"
+	"os"
 	"slices"
+	"strings"
+	"text/template"
 	"time"
 
 	"github.com/Arvintian/chat-agent/pkg/config"
@@ -19,6 +22,7 @@ import (
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
+	"github.com/cloudwego/eino/schema"
 )
 
 // ChatSession represents a chat session with its configuration
@@ -164,6 +168,20 @@ func InitChatSession(ctx context.Context, cfg *config.Config, cleanupRegistry *u
 			MaxRetries:  maxRetries,
 			IsRetryAble: utils.IsRetryAble,
 		},
+		GenModelInput: func(ctx context.Context, instruction string, input *adk.AgentInput) ([]adk.Message, error) {
+			msgs := make([]adk.Message, 0, len(input.Messages)+1)
+			if instruction != "" {
+				rendered, err := renderSystemPrompt(instruction)
+				if err != nil {
+					return nil, err
+				}
+				sp := schema.SystemMessage(rendered)
+				//fmt.Println(rendered)
+				msgs = append(msgs, sp)
+			}
+			msgs = append(msgs, input.Messages...)
+			return msgs, nil
+		},
 	})
 	if err != nil {
 		return nil, err
@@ -179,4 +197,70 @@ func InitChatSession(ctx context.Context, cfg *config.Config, cleanupRegistry *u
 		Manager: manager,
 		Tools:   tools,
 	}, nil
+}
+
+// renderSystemPrompt renders system prompt using Go template with built-in variables
+func renderSystemPrompt(systemPrompt string) (string, error) {
+	if systemPrompt == "" {
+		return "", nil
+	}
+
+	// Create template with built-in functions
+	tmpl, err := template.New("systemPrompt").Funcs(template.FuncMap{
+		"env": os.Getenv, // Allow accessing environment variables
+	}).Parse(systemPrompt)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse system prompt template: %w", err)
+	}
+
+	// Prepare template data with built-in variables
+	data := struct {
+		Cwd  string
+		Date string
+		Now  time.Time
+		User string
+		Home string
+	}{
+		Cwd:  getCurrentWorkingDir(),
+		Date: time.Now().Format("2006-01-02"),
+		Now:  time.Now(),
+		User: getUserName(),
+		Home: getHomeDir(),
+	}
+
+	// Execute template
+	var buf strings.Builder
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return "", fmt.Errorf("failed to execute system prompt template: %w", err)
+	}
+
+	return buf.String(), nil
+}
+
+// getCurrentWorkingDir returns the current working directory
+func getCurrentWorkingDir() string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "."
+	}
+	return cwd
+}
+
+// getUserName returns the current user name
+func getUserName() string {
+	if user, err := os.UserHomeDir(); err == nil {
+		// Extract username from home directory path
+		if parts := strings.Split(user, "/"); len(parts) > 2 {
+			return parts[len(parts)-1]
+		}
+	}
+	return "user"
+}
+
+// getHomeDir returns the user's home directory
+func getHomeDir() string {
+	if home, err := os.UserHomeDir(); err == nil {
+		return home
+	}
+	return "~"
 }
