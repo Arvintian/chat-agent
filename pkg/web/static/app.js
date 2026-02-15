@@ -528,30 +528,37 @@ function handleMessage(msg) {
             );
             break;
         case 'complete':
-            // 重新启用输入框
-            const input = document.getElementById('message-input');
-            if (input) input.disabled = false;
-            if (input) input.focus();
-            isGenerating = false;
-            updateSendButton();
+            // 只有在生成中才重置状态（避免重复处理）
+            if (isGenerating) {
+                // 重新启用输入框
+                const input = document.getElementById('message-input');
+                if (input) input.disabled = false;
+                if (input) input.focus();
+                isGenerating = false;
+                updateSendButton();
+            }
             //setStatus('Response completed', false);
             break;
         case 'error':
             setStatus(msg.payload.error, true);
-            // 重新启用输入框
-            const inputErr = document.getElementById('message-input');
-            if (inputErr) inputErr.disabled = false;
-            isGenerating = false;
-            updateSendButton();
-            if (inputErr) inputErr.focus();
+            // 只有在生成中才重置状态
+            if (isGenerating) {
+                const inputErr = document.getElementById('message-input');
+                if (inputErr) inputErr.disabled = false;
+                isGenerating = false;
+                updateSendButton();
+                if (inputErr) inputErr.focus();
+            }
             break;
         case 'stopped':
-            // 流已停止
-            isGenerating = false;
-            updateSendButton();
-            const inputStopped = document.getElementById('message-input');
-            if (inputStopped) inputStopped.disabled = false;
-            if (inputStopped) inputStopped.focus();
+            // 只有在生成中才重置状态
+            if (isGenerating) {
+                isGenerating = false;
+                updateSendButton();
+                const inputStopped = document.getElementById('message-input');
+                if (inputStopped) inputStopped.disabled = false;
+                if (inputStopped) inputStopped.focus();
+            }
             break;
         case 'cleared':
             setStatus(msg.payload.message, false);
@@ -1089,13 +1096,6 @@ function displayChunk(content, isFirst, isLast, contentType = 'response') {
         currentContentType = '';
         chunkElement = null;
         thinkingElement = null;
-
-        // 重新启用输入框
-        const input = document.getElementById('message-input');
-        if (input) input.disabled = false;
-        if (input) input.focus();
-        isGenerating = false;
-        updateSendButton();
 
         scrollToBottom();
         return;
