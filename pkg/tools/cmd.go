@@ -29,9 +29,11 @@ func getCommandTools(ctx context.Context, params map[string]interface{}) ([]tool
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = DEFAULT_CMD_TIMEOUT
 	}
+
+	tm := NewBackgroundTaskManager()
+
 	if v, ok := ctx.Value("cleanup").(*utils.CleanupRegistry); ok {
 		v.Register(func() {
-			tm := GetTaskManager()
 			for _, task := range tm.ListTasks() {
 				if task.Status == TaskStatusRunning {
 					tm.KillTask(task.ID)
@@ -40,16 +42,21 @@ func getCommandTools(ctx context.Context, params map[string]interface{}) ([]tool
 		})
 	}
 	cmdTool := RunTerminalCommandTool{
-		WorkingDir: cfg.WorkingDir,
-		Timeout:    time.Duration(cfg.Timeout) * time.Second,
+		WorkingDir:  cfg.WorkingDir,
+		Timeout:     time.Duration(cfg.Timeout) * time.Second,
+		TaskManager: tm,
 	}
-	return []tool.BaseTool{&cmdTool}, nil
+	cmdBgTool := RunBackgroundCommandTool{
+		TaskManager: tm,
+	}
+	return []tool.BaseTool{&cmdTool, &cmdBgTool}, nil
 }
 
 type RunTerminalCommandTool struct {
 	WorkingDir      string        `json:"workDir"`
 	Timeout         time.Duration `json:"timeout"`
 	AllowedCommands []string
+	TaskManager     *BackgroundTaskManager
 }
 
 type RunTerminalCommandArgs struct {
@@ -181,7 +188,7 @@ func (t *RunTerminalCommandTool) InvokableRun(ctx context.Context, argumentsInJS
 }
 
 func (t *RunTerminalCommandTool) runInBackground(command, workdir string) (string, error) {
-	task, err := GetTaskManager().StartTask(command, workdir)
+	task, err := t.TaskManager.StartTask(command, workdir)
 	if err != nil {
 		return "", fmt.Errorf("failed to start background task: %w", err)
 	}

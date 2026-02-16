@@ -14,13 +14,25 @@ import (
 )
 
 func getSmartCommandTools(ctx context.Context, params map[string]interface{}) ([]tool.BaseTool, error) {
-	cmdTool, err := getCommandTools(ctx, params)
+	tools, err := getCommandTools(ctx, params)
 	if err != nil {
 		return nil, err
 	}
-	innerCmdTool := cmdTool[0].(*RunTerminalCommandTool)
-	smartCmdTool := NewSmartCmdTool(innerCmdTool)
-	return []tool.BaseTool{smartCmdTool}, nil
+	var cmdTool *RunTerminalCommandTool
+	var cmdBgTool *RunBackgroundCommandTool
+	for _, t := range tools {
+		if ct, ok := t.(*RunTerminalCommandTool); ok {
+			cmdTool = ct
+		}
+		if bg, ok := t.(*RunBackgroundCommandTool); ok {
+			cmdBgTool = bg
+		}
+	}
+	if cmdTool == nil {
+		return nil, fmt.Errorf("cmd tool not found")
+	}
+	smartCmdTool := NewSmartCmdTool(cmdTool)
+	return []tool.BaseTool{smartCmdTool, cmdBgTool}, nil
 }
 
 // SmartCmdTool wraps cmd tool with intelligent permission control

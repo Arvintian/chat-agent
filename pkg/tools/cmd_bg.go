@@ -10,11 +10,8 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
-func getBackgroundCommandTools(ctx context.Context, params map[string]interface{}) ([]tool.BaseTool, error) {
-	return []tool.BaseTool{&RunBackgroundCommandTool{}}, nil
-}
-
 type RunBackgroundCommandTool struct {
+	TaskManager *BackgroundTaskManager
 }
 
 type RunBackgroundCommandArgs struct {
@@ -57,7 +54,7 @@ func (t *RunBackgroundCommandTool) InvokableRun(ctx context.Context, argumentsIn
 
 	switch args.Action {
 	case "list", "ls":
-		tasks := GetTaskManager().ListTasks()
+		tasks := t.TaskManager.ListTasks()
 		if len(tasks) == 0 {
 			return "No background tasks", nil
 		}
@@ -104,11 +101,11 @@ func (t *RunBackgroundCommandTool) InvokableRun(ctx context.Context, argumentsIn
 		if args.TaskID == "" {
 			return "", fmt.Errorf("task_id is required for remove action")
 		}
-		task, ok := GetTaskManager().GetTask(args.TaskID)
+		task, ok := t.TaskManager.GetTask(args.TaskID)
 		if !ok {
 			return "", fmt.Errorf("task not found: %s", args.TaskID)
 		}
-		if err := GetTaskManager().RemoveTask(args.TaskID); err != nil {
+		if err := t.TaskManager.RemoveTask(args.TaskID); err != nil {
 			return "", fmt.Errorf("failed to remove task: %w", err)
 		}
 		if task.Status == TaskStatusRunning {
@@ -124,7 +121,7 @@ func (t *RunBackgroundCommandTool) InvokableRun(ctx context.Context, argumentsIn
 var _ tool.InvokableTool = (*RunBackgroundCommandTool)(nil)
 
 func (t *RunBackgroundCommandTool) formatTaskDetails(taskID string) (string, error) {
-	task, ok := GetTaskManager().GetTask(taskID)
+	task, ok := t.TaskManager.GetTask(taskID)
 	if !ok {
 		return "", fmt.Errorf("task not found: %s", taskID)
 	}
@@ -149,7 +146,7 @@ func (t *RunBackgroundCommandTool) formatTaskDetails(taskID string) (string, err
 }
 
 func (t *RunBackgroundCommandTool) formatTaskOutput(taskID string) (string, error) {
-	task, ok := GetTaskManager().GetTask(taskID)
+	task, ok := t.TaskManager.GetTask(taskID)
 	if !ok {
 		return "", fmt.Errorf("task not found: %s", taskID)
 	}

@@ -14,14 +14,14 @@ import (
 
 type GetToolsFunc func(params map[string]interface{}) ([]tool.BaseTool, error)
 
+var ExemptAutoApprovalTools = []string{"cmd_bg", "smart_cmd"}
+
 func GetBuiltinTools(ctx context.Context, category string, params map[string]interface{}) ([]tool.BaseTool, error) {
 	switch category {
 	case "filesystem":
 		return getFileSystemTools(ctx, params)
 	case "cmd":
 		return getCommandTools(ctx, params)
-	case "cmd_bg":
-		return getBackgroundCommandTools(ctx, params)
 	case "smart_cmd":
 		return getSmartCommandTools(ctx, params)
 	}

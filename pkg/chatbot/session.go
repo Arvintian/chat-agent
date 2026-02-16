@@ -31,15 +31,15 @@ type cleanupRegistry = utils.CleanupRegistry
 
 // ChatSession represents a chat session with its configuration
 type ChatSession struct {
-	Name             string
-	Preset           config.Chat
-	Agent            *adk.ChatModelAgent
-	Manager          *manager.Manager
-	Tools            []tool.BaseTool
-	MCPClient        *mcp.Client
-	cleanupRegistry  *cleanupRegistry
-	closed           bool
-	mu               sync.Mutex
+	Name            string
+	Preset          config.Chat
+	Agent           *adk.ChatModelAgent
+	Manager         *manager.Manager
+	Tools           []tool.BaseTool
+	MCPClient       *mcp.Client
+	cleanupRegistry *cleanupRegistry
+	closed          bool
+	mu              sync.Mutex
 }
 
 // InitChatSession initializes a new chat session with the given chat name
@@ -72,7 +72,10 @@ func InitChatSession(ctx context.Context, cfg *config.Config, chatName string, d
 		if err != nil {
 			return nil, err
 		}
-		if toolCfg.AutoApproval {
+		// Check if tool category is exempt from approval (defined in pkg/tools)
+		if slices.Contains(builtintools.ExemptAutoApprovalTools, toolCfg.Category) {
+			tools = append(tools, builtinToolList...)
+		} else if toolCfg.AutoApproval {
 			tools = append(tools, builtinToolList...)
 		} else {
 			for _, item := range builtinToolList {
@@ -86,15 +89,6 @@ func InitChatSession(ctx context.Context, cfg *config.Config, chatName string, d
 					tools = append(tools, mcp.InvokableApprovableTool{InvokableTool: item.(tool.InvokableTool)})
 				}
 			}
-		}
-
-		// Auto-add cmd_bg tool when cmd tool is enabled (without approval control)
-		if toolCfg.Category == "cmd" || toolCfg.Category == "smart_cmd" {
-			bgToolList, err := builtintools.GetBuiltinTools(context.WithValue(ctx, "cleanup", cleanupRegistry), "cmd_bg", nil)
-			if err != nil {
-				return nil, err
-			}
-			tools = append(tools, bgToolList...)
 		}
 	}
 

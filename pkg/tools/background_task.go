@@ -55,13 +55,10 @@ var (
 	taskManagerOnce   sync.Once
 )
 
-func GetTaskManager() *BackgroundTaskManager {
-	taskManagerOnce.Do(func() {
-		globalTaskManager = &BackgroundTaskManager{
-			tasks: make(map[string]*BackgroundTask),
-		}
-	})
-	return globalTaskManager
+func NewBackgroundTaskManager() *BackgroundTaskManager {
+	return &BackgroundTaskManager{
+		tasks: make(map[string]*BackgroundTask),
+	}
 }
 
 func (tm *BackgroundTaskManager) generateID() string {
