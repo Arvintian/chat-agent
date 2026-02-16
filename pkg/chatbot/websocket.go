@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/Arvintian/chat-agent/pkg/config"
-	"github.com/Arvintian/chat-agent/pkg/utils"
 
 	"github.com/gorilla/websocket"
 )
@@ -33,7 +32,6 @@ type ApprovalRequest struct {
 type WSSession struct {
 	conn        *websocket.Conn
 	cfg         *config.Config
-	cleanupReg  *utils.CleanupRegistry
 	SessionID   string
 	ChatName    string
 	ChatSession *ChatSession
@@ -51,11 +49,10 @@ type WSSession struct {
 	isCancelled  bool
 }
 
-func NewWSSession(conn *websocket.Conn, sessionID string, cfg *config.Config, cleanupReg *utils.CleanupRegistry) *WSSession {
+func NewWSSession(conn *websocket.Conn, sessionID string, cfg *config.Config) *WSSession {
 	session := &WSSession{
 		conn:            conn,
 		cfg:             cfg,
-		cleanupReg:      cleanupReg,
 		SessionID:       sessionID,
 		ChatName:        "",
 		ChatSession:     nil,

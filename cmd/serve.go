@@ -16,7 +16,6 @@ import (
 	"github.com/Arvintian/chat-agent/pkg/config"
 	"github.com/Arvintian/chat-agent/pkg/logger"
 	"github.com/Arvintian/chat-agent/pkg/mcp"
-	"github.com/Arvintian/chat-agent/pkg/utils"
 	"github.com/Arvintian/chat-agent/pkg/web"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
@@ -96,9 +95,6 @@ Example:
 		if err := logger.Init(); err != nil {
 			return err
 		}
-		cleanupRegistry := utils.NewCleanupRegistry()
-		defer cleanupRegistry.Execute()
-
 		// Load configuration file
 		cfg, err := config.LoadConfig(configPath)
 		if err != nil {
@@ -112,7 +108,7 @@ Example:
 		basicAuthPass, _ := cmd.Flags().GetString("basic-auth-pass")
 
 		// Create WebSocket handler
-		wsHandler := NewWebSocketHandler(cfg, cleanupRegistry)
+		wsHandler := NewWebSocketHandler(cfg)
 
 		// Create basic auth middleware
 		authMiddleware := BasicAuthMiddleware(basicAuthUser, basicAuthPass)
@@ -239,15 +235,13 @@ func (sm *SessionManager) RemoveSession(sessionID string) {
 // WebSocketHandler handles WebSocket connections
 type WebSocketHandler struct {
 	sessionManager *SessionManager
-	cleanupReg     *utils.CleanupRegistry
 	cfg            *config.Config
 }
 
 // NewWebSocketHandler creates a new WebSocket handler
-func NewWebSocketHandler(cfg *config.Config, cleanupReg *utils.CleanupRegistry) *WebSocketHandler {
+func NewWebSocketHandler(cfg *config.Config) *WebSocketHandler {
 	return &WebSocketHandler{
 		sessionManager: NewSessionManager(cfg),
-		cleanupReg:     cleanupReg,
 		cfg:            cfg,
 	}
 }
@@ -265,7 +259,7 @@ func (h *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Reques
 	sessionID := fmt.Sprintf("session-%d", time.Now().UnixNano())
 	log.Printf("WebSocket connection: %s", sessionID)
 
-	session := chatbot.NewWSSession(conn, sessionID, h.cfg, h.cleanupReg)
+	session := chatbot.NewWSSession(conn, sessionID, h.cfg)
 	h.sessionManager.AddSession(sessionID, &SessionInfo{
 		ID:        sessionID,
 		CreatedAt: time.Now(),
@@ -293,6 +287,9 @@ func (h *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Reques
 
 	// Cleanup chat session
 	if session.ChatSession != nil {
+		if err := session.ChatSession.Close(); err != nil {
+			log.Printf("Error closing chat session: %v", err)
+		}
 		session.ChatSession = nil
 	}
 
@@ -345,12 +342,15 @@ func (h *WebSocketHandler) handleSelectChat(session *chatbot.WSSession, msg *cha
 
 	// If a different chat session exists, cleanup first
 	if session.ChatSession != nil {
+		if err := session.ChatSession.Close(); err != nil {
+			log.Printf("Error closing previous chat session: %v", err)
+		}
 		session.ChatSession = nil
 	}
 
 	// Initialize chat session
 	ctx := context.Background()
-	chatSession, err := chatbot.InitChatSession(ctx, h.cfg, h.cleanupReg, req.ChatName, false)
+	chatSession, err := chatbot.InitChatSession(ctx, h.cfg, req.ChatName, false)
 	if err != nil {
 		session.SendError(fmt.Sprintf("Failed to initialize chat session: %v", err))
 		return

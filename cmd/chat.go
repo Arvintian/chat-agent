@@ -44,12 +44,20 @@ const (
 	MultilinePrompt
 )
 
-// switchChat switches to a new chat session
-func switchChat(ctx context.Context, cfg *config.Config, cleanupRegistry *utils.CleanupRegistry, chatName string, debug bool) (*chatbot.ChatSession, error) {
+// switchChat switches to a new chat session, closing the old one if provided
+func switchChat(ctx context.Context, cfg *config.Config, chatName string, debug bool, oldSession *chatbot.ChatSession) (*chatbot.ChatSession, error) {
 	if _, ok := cfg.Chats[chatName]; !ok {
 		return nil, fmt.Errorf("chat preset does not exist: %s", chatName)
 	}
-	return chatbot.InitChatSession(ctx, cfg, cleanupRegistry, chatName, debug)
+
+	// Close old session if provided
+	if oldSession != nil {
+		if err := oldSession.Close(); err != nil {
+			fmt.Printf("Error closing previous chat session: %v\n", err)
+		}
+	}
+
+	return chatbot.InitChatSession(ctx, cfg, chatName, debug)
 }
 
 // RootCmd represents the base command when called without any subcommands
@@ -61,9 +69,6 @@ var RootCmd = &cobra.Command{
 		if err := logger.Init(); err != nil {
 			return err
 		}
-		cleanupRegistry := utils.NewCleanupRegistry()
-		defer cleanupRegistry.Execute()
-
 		// Load configuration file
 		cfg, err := config.LoadConfig(configPath)
 		if err != nil {
@@ -91,7 +96,7 @@ var RootCmd = &cobra.Command{
 		currentChatName = chatName
 
 		// Initialize chat session
-		session, err := chatbot.InitChatSession(cmd.Context(), cfg, cleanupRegistry, chatName, debug)
+		session, err := chatbot.InitChatSession(cmd.Context(), cfg, chatName, debug)
 		if err != nil {
 			return err
 		}
@@ -207,7 +212,7 @@ var RootCmd = &cobra.Command{
 					targetName := strings.TrimSpace(strings.TrimPrefix(input, "/s"))
 					if targetName == "" {
 						printChats()
-					} else if newSession, err := switchChat(cmd.Context(), cfg, cleanupRegistry, targetName, debug); err != nil {
+					} else if newSession, err := switchChat(cmd.Context(), cfg, targetName, debug, session); err != nil {
 						fmt.Printf("Error switching chat: %v\n", err)
 					} else {
 						session = newSession
@@ -234,6 +239,12 @@ var RootCmd = &cobra.Command{
 					printChats()
 				case "/quit", "/exit", "/bye", "/q":
 					os.Stdout.WriteString("bye!\n")
+					// Close the chat session before exiting
+					if session != nil {
+						if err := session.Close(); err != nil {
+							fmt.Printf("Error closing session: %v\n", err)
+						}
+					}
 					return nil
 				default:
 					err = cb.StreamChat(chatctx, input)

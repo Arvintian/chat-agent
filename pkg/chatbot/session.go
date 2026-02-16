@@ -6,6 +6,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"sync"
 	"text/template"
 	"time"
 
@@ -25,21 +26,31 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
+// cleanupRegistry is a session-level cleanup registry for managing resources
+type cleanupRegistry = utils.CleanupRegistry
+
 // ChatSession represents a chat session with its configuration
 type ChatSession struct {
-	Name    string
-	Preset  config.Chat
-	Agent   *adk.ChatModelAgent
-	Manager *manager.Manager
-	Tools   []tool.BaseTool
+	Name             string
+	Preset           config.Chat
+	Agent            *adk.ChatModelAgent
+	Manager          *manager.Manager
+	Tools            []tool.BaseTool
+	MCPClient        *mcp.Client
+	cleanupRegistry  *cleanupRegistry
+	closed           bool
+	mu               sync.Mutex
 }
 
 // InitChatSession initializes a new chat session with the given chat name
-func InitChatSession(ctx context.Context, cfg *config.Config, cleanupRegistry *utils.CleanupRegistry, chatName string, debug bool) (*ChatSession, error) {
+func InitChatSession(ctx context.Context, cfg *config.Config, chatName string, debug bool) (*ChatSession, error) {
 	preset, ok := cfg.Chats[chatName]
 	if !ok {
 		return nil, fmt.Errorf("chat preset does not exist: %s", chatName)
 	}
+
+	// Create session-level cleanup registry
+	cleanupRegistry := NewCleanupRegistry()
 
 	// chatmodel
 	providerFactory := providers.NewFactory(cfg)
@@ -123,8 +134,9 @@ func InitChatSession(ctx context.Context, cfg *config.Config, cleanupRegistry *u
 
 	// mcp client
 	toolsChan, errChan := make(chan []tool.BaseTool, 1), make(chan error, 1)
+	var mcpclient *mcp.Client
 	go func() {
-		mcpclient := mcp.NewClient(cfg)
+		mcpclient = mcp.NewClient(cfg)
 		if err := mcpclient.InitializeForChat(ctx, preset); err != nil {
 			toolsChan <- nil
 			errChan <- err
@@ -191,12 +203,49 @@ func InitChatSession(ctx context.Context, cfg *config.Config, cleanupRegistry *u
 	manager := manager.NewManager(preset.MaxMessages)
 
 	return &ChatSession{
-		Name:    chatName,
-		Preset:  preset,
-		Agent:   agent,
-		Manager: manager,
-		Tools:   tools,
+		Name:            chatName,
+		Preset:          preset,
+		Agent:           agent,
+		Manager:         manager,
+		Tools:           tools,
+		MCPClient:       mcpclient,
+		cleanupRegistry: cleanupRegistry,
 	}, nil
+}
+
+// NewCleanupRegistry creates a new cleanup registry for the session
+func NewCleanupRegistry() *cleanupRegistry {
+	return utils.NewCleanupRegistry()
+}
+
+// Close closes the chat session and releases all resources
+func (s *ChatSession) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.closed {
+		return nil
+	}
+	s.closed = true
+
+	var errs []error
+
+	// Close MCP client
+	if s.MCPClient != nil {
+		if err := s.MCPClient.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("failed to close MCP client: %w", err))
+		}
+	}
+
+	// Execute session cleanup registry
+	if s.cleanupRegistry != nil {
+		s.cleanupRegistry.Execute()
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("errors occurred while closing session: %v", errs)
+	}
+	return nil
 }
 
 // renderSystemPrompt renders system prompt using Go template with built-in variables
