@@ -95,7 +95,7 @@ Long-running tasks cannot be executed; they will timeout after %v and be killed.
 func (t *RunTerminalCommandTool) InvokableRun(ctx context.Context, argumentsInJSON string, opts ...tool.Option) (string, error) {
 	var args RunTerminalCommandArgs
 	if err := json.Unmarshal([]byte(argumentsInJSON), &args); err != nil {
-		return fmt.Sprintf("failed to parse arguments: %w", err), nil
+		return fmt.Sprintf("failed to parse arguments: %v", err), nil
 	}
 
 	if args.Command == "" {
