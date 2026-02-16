@@ -45,11 +45,11 @@ func (t *RunBackgroundCommandTool) Info(ctx context.Context) (*schema.ToolInfo, 
 func (t *RunBackgroundCommandTool) InvokableRun(ctx context.Context, argumentsInJSON string, opts ...tool.Option) (string, error) {
 	var args RunBackgroundCommandArgs
 	if err := json.Unmarshal([]byte(argumentsInJSON), &args); err != nil {
-		return "", fmt.Errorf("failed to parse arguments: %w", err)
+		return fmt.Sprintf("failed to parse arguments: %w", err), nil
 	}
 
 	if args.Action == "" {
-		return "", fmt.Errorf("action is required")
+		return fmt.Sprintf("action is required"), nil
 	}
 
 	switch args.Action {

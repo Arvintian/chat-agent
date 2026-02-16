@@ -100,6 +100,13 @@ var RootCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		defer func() {
+			if session != nil {
+				if err := session.Close(); err != nil {
+					fmt.Printf("Error closing session: %v\n", err)
+				}
+			}
+		}()
 
 		// init readline
 		placeholder := "Send a message (/h for help)"
@@ -239,12 +246,6 @@ var RootCmd = &cobra.Command{
 					printChats()
 				case "/quit", "/exit", "/bye", "/q":
 					os.Stdout.WriteString("bye!\n")
-					// Close the chat session before exiting
-					if session != nil {
-						if err := session.Close(); err != nil {
-							fmt.Printf("Error closing session: %v\n", err)
-						}
-					}
 					return nil
 				default:
 					err = cb.StreamChat(chatctx, input)

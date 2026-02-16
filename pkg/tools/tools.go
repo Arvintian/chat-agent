@@ -40,7 +40,7 @@ func (m *toolHelper) Info(ctx context.Context) (*schema.ToolInfo, error) {
 func (m *toolHelper) InvokableRun(ctx context.Context, argumentsInJSON string, opts ...tool.Option) (string, error) {
 	var args interface{}
 	if err := json.Unmarshal([]byte(argumentsInJSON), &args); err != nil {
-		return "", err
+		return fmt.Sprintf("failed to parse arguments: %w", err), nil
 	}
 	result, err := m.handler(ctx, mcp.CallToolRequest{
 		Params: mcp.CallToolParams{
@@ -49,7 +49,7 @@ func (m *toolHelper) InvokableRun(ctx context.Context, argumentsInJSON string, o
 		},
 	})
 	if err != nil {
-		return "", err
+		return fmt.Sprintf("failed to call mcp tool: %w", err), nil
 	}
 	marshaledResult, err := sonic.MarshalString(result)
 	if err != nil {

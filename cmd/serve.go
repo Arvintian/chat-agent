@@ -7,9 +7,12 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/Arvintian/chat-agent/pkg/chatbot"
@@ -95,7 +98,6 @@ Example:
 		if err := logger.Init(); err != nil {
 			return err
 		}
-		// Load configuration file
 		cfg, err := config.LoadConfig(configPath)
 		if err != nil {
 			return err
@@ -107,24 +109,15 @@ Example:
 		basicAuthUser, _ := cmd.Flags().GetString("basic-auth-user")
 		basicAuthPass, _ := cmd.Flags().GetString("basic-auth-pass")
 
-		// Create WebSocket handler
 		wsHandler := NewWebSocketHandler(cfg)
 
-		// Create basic auth middleware
 		authMiddleware := BasicAuthMiddleware(basicAuthUser, basicAuthPass)
 
-		// Create router
 		router := mux.NewRouter()
-
-		// Apply auth middleware to all routes
 		router.Use(authMiddleware)
-
-		// WebSocket endpoint (auth required)
 		router.HandleFunc("/ws", wsHandler.HandleWebSocket)
 
-		// API endpoints - register BEFORE static files so they take precedence
 		router.HandleFunc("/chats", func(w http.ResponseWriter, r *http.Request) {
-			// List available chats
 			chats := make([]string, 0, len(cfg.Chats))
 			defaultChat := ""
 			for name, chatCfg := range cfg.Chats {
@@ -143,7 +136,6 @@ Example:
 
 		router.HandleFunc("/config", func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			// Use --welcome as title, fallback to default
 			title := welcome
 			if title == "" {
 				title = "Chat-Agent"
@@ -155,7 +147,6 @@ Example:
 			})
 		})
 
-		// Serve static files from embedded file system - catch-all, registered last
 		router.PathPrefix("/").Handler(http.FileServer(web.GetFS()))
 
 		addr := fmt.Sprintf("%s:%d", host, port)
@@ -163,7 +154,33 @@ Example:
 		log.Printf("WebSocket endpoint: ws://%s/ws", addr)
 		log.Printf("HTTP endpoint: http://%s/", addr)
 
-		return http.ListenAndServe(addr, router)
+		server := &http.Server{
+			Addr:    addr,
+			Handler: router,
+		}
+
+		go func() {
+			if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				log.Printf("Server error: %v", err)
+			}
+		}()
+
+		sigChan := make(chan os.Signal, 1)
+		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+		<-sigChan
+
+		log.Printf("Shutting down server...")
+
+		wsHandler.CloseAllSessions()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := server.Shutdown(ctx); err != nil {
+			log.Printf("Server shutdown error: %v", err)
+		}
+
+		log.Printf("Server stopped")
+		return nil
 	},
 }
 
@@ -173,9 +190,10 @@ type ChatRequest struct {
 }
 
 type SessionInfo struct {
-	ID        string
-	ChatName  string
-	CreatedAt time.Time
+	ID          string
+	ChatName    string
+	ChatSession *chatbot.ChatSession
+	CreatedAt   time.Time
 }
 
 // ApprovalResponsePayload represents the approval response from the client
@@ -202,8 +220,8 @@ var upgrader = websocket.Upgrader{
 // SessionManager manages chat sessions
 type SessionManager struct {
 	sessions map[string]*SessionInfo
-	mu       sync.RWMutex
 	cfg      *config.Config
+	mu       sync.RWMutex
 }
 
 func NewSessionManager(cfg *config.Config) *SessionManager {
@@ -220,16 +238,50 @@ func (sm *SessionManager) GetSession(sessionID string) (*SessionInfo, bool) {
 	return session, ok
 }
 
-func (sm *SessionManager) AddSession(sessionID string, info *SessionInfo) {
+func (sm *SessionManager) AddSession(sessionID string, chatName string, chatSession *chatbot.ChatSession) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
-	sm.sessions[sessionID] = info
+	if sm.sessions[sessionID] == nil {
+		sm.sessions[sessionID] = &SessionInfo{
+			ID:          sessionID,
+			ChatName:    chatName,
+			ChatSession: chatSession,
+			CreatedAt:   time.Now(),
+		}
+	}
 }
 
-func (sm *SessionManager) RemoveSession(sessionID string) {
+func (sm *SessionManager) UpdateChatSession(sessionID string, chatName string, chatSession *chatbot.ChatSession) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
+	if session, ok := sm.sessions[sessionID]; ok {
+		session.ChatName = chatName
+		session.ChatSession = chatSession
+	}
+}
+
+func (sm *SessionManager) RemoveSession(sessionID string) *chatbot.ChatSession {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	session, ok := sm.sessions[sessionID]
+	if !ok {
+		return nil
+	}
 	delete(sm.sessions, sessionID)
+	return session.ChatSession
+}
+
+func (sm *SessionManager) CloseAllSessions() {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	for sessionID, session := range sm.sessions {
+		if session.ChatSession != nil {
+			if err := session.ChatSession.Close(); err != nil {
+				log.Printf("Error closing session %s: %v", sessionID, err)
+			}
+		}
+	}
+	sm.sessions = make(map[string]*SessionInfo)
 }
 
 // WebSocketHandler handles WebSocket connections
@@ -246,6 +298,10 @@ func NewWebSocketHandler(cfg *config.Config) *WebSocketHandler {
 	}
 }
 
+func (h *WebSocketHandler) CloseAllSessions() {
+	h.sessionManager.CloseAllSessions()
+}
+
 // HandleWebSocket handles a WebSocket connection
 func (h *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
@@ -260,10 +316,7 @@ func (h *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Reques
 	log.Printf("WebSocket connection: %s", sessionID)
 
 	session := chatbot.NewWSSession(conn, sessionID, h.cfg)
-	h.sessionManager.AddSession(sessionID, &SessionInfo{
-		ID:        sessionID,
-		CreatedAt: time.Now(),
-	})
+	h.sessionManager.AddSession(sessionID, "", nil)
 
 	// Handle messages
 	for {
@@ -355,6 +408,9 @@ func (h *WebSocketHandler) handleSelectChat(session *chatbot.WSSession, msg *cha
 		session.SendError(fmt.Sprintf("Failed to initialize chat session: %v", err))
 		return
 	}
+
+	// Update session info with new chat session
+	h.sessionManager.UpdateChatSession(session.SessionID, req.ChatName, chatSession)
 
 	// Initialize ChatBot for reuse
 	cb := chatbot.NewChatBot(ctx, chatSession.Agent, chatSession.Manager, nil)
