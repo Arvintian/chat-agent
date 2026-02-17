@@ -16,6 +16,10 @@ let isGenerating = false;
 // File upload state
 let pendingFiles = [];
 
+// Image preview state
+let currentPreviewImages = [];
+let currentPreviewIndex = 0;
+
 // Input history management
 const INPUT_HISTORY_KEY = 'chat_input_history';
 const MAX_HISTORY_SIZE = 50;
@@ -181,20 +185,20 @@ function getFileIcon(fileType, fileName) {
 // Handle file selection
 function handleFiles(files) {
     if (!files || files.length === 0) return;
-    
+
     Array.from(files).forEach(file => {
         // Validate file type
         if (!isFileTypeSupported(file.type, file.name)) {
             showToast('Unsupported file type: ' + file.name, true);
             return;
         }
-        
+
         // Validate file size (max 50MB)
         if (file.size > MAX_FILE_SIZE) {
             showToast('File size must be less than 50MB: ' + file.name, true);
             return;
         }
-        
+
         const reader = new FileReader();
         reader.onload = (e) => {
             pendingFiles.push({
@@ -211,7 +215,7 @@ function handleFiles(files) {
         };
         reader.readAsDataURL(file);
     });
-    
+
     // Clear the input so the same file can be selected again
     document.getElementById('file-input').value = '';
 }
@@ -219,13 +223,13 @@ function handleFiles(files) {
 // Render file previews
 function renderFilePreviews() {
     const container = document.getElementById('image-preview-container');
-    
+
     if (pendingFiles.length === 0) {
         container.style.display = 'none';
         container.innerHTML = '';
         return;
     }
-    
+
     container.style.display = 'flex';
     container.innerHTML = pendingFiles.map((file, idx) => {
         if (file.isImage) {
@@ -275,36 +279,20 @@ function clearPendingFiles() {
     renderFilePreviews();
 }
 
-// Local storage history configuration
+// Message history configuration
 const MAX_HISTORY_MESSAGES = 200;
 const HISTORY_KEY_PREFIX = 'chat_history_';
 
-// ========== Message History Storage ==========
+// ========== Message History Storage (IndexedDB) ==========
 
 // Get storage key for a specific chat
 function getHistoryKey(chatName) {
     return HISTORY_KEY_PREFIX + chatName;
 }
 
-// Save message to local storage (for current chat)
-function saveMessageToStorage(message, type, toolData = null, thinkingContent = null, images = null) {
+// Save message to IndexedDB (for current chat)
+async function saveMessageToStorage(message, type, toolData = null, thinkingContent = null, files = null) {
     if (!currentChat) return;
-
-    const key = getHistoryKey(currentChat);
-    let history = [];
-
-    try {
-        const stored = localStorage.getItem(key);
-        if (stored) {
-            history = JSON.parse(stored);
-            if (!Array.isArray(history)) {
-                history = [];
-            }
-        }
-    } catch (e) {
-        console.error('Failed to load message history:', e);
-        history = [];
-    }
 
     // Build message object
     const messageObj = {
@@ -323,15 +311,107 @@ function saveMessageToStorage(message, type, toolData = null, thinkingContent = 
         messageObj.toolData = toolData;
     }
 
-    // Include images if present
-    if (images && images.length > 0) {
-        messageObj.images = images;
+    // Include files if present
+    if (files && files.length > 0) {
+        messageObj.files = files;
     }
 
-    // Add to history
-    history.push(messageObj);
+    // Save to IndexedDB
+    try {
+        if (window.ChatDB && window.ChatDB.isSupported()) {
+            await window.ChatDB.saveMessage(currentChat, messageObj);
 
-    // Trim to max size - keep only the last 200 user, assistant, and tool_call messages
+            // Also maintain a lightweight index in localStorage for quick access
+            // This stores just metadata, not the actual files
+            await updateHistoryIndex(currentChat, messageObj);
+        } else {
+            // Fallback to localStorage if IndexedDB is not available
+            saveMessageToLocalStorageFallback(currentChat, messageObj);
+        }
+    } catch (e) {
+        console.error('Failed to save message to IndexedDB, trying fallback:', e);
+        // Fallback to localStorage on error
+        saveMessageToLocalStorageFallback(currentChat, messageObj);
+    }
+}
+
+// Update lightweight index in localStorage
+async function updateHistoryIndex(chatName, messageObj) {
+    const key = getHistoryKey(chatName);
+    let index = [];
+
+    try {
+        const stored = localStorage.getItem(key);
+        if (stored) {
+            index = JSON.parse(stored);
+            if (!Array.isArray(index)) {
+                index = [];
+            }
+        }
+    } catch (e) {
+        console.error('Failed to load history index:', e);
+        index = [];
+    }
+
+    // Add lightweight entry (without files data)
+    const indexEntry = {
+        type: messageObj.type,
+        content: messageObj.content,
+        timestamp: messageObj.timestamp,
+        hasFiles: messageObj.files && messageObj.files.length > 0,
+        hasThinking: !!messageObj.thinking,
+        hasToolData: !!messageObj.toolData
+    };
+
+    index.push(indexEntry);
+
+    // Trim to max size
+    if (index.length > MAX_HISTORY_MESSAGES) {
+        index = index.slice(-MAX_HISTORY_MESSAGES);
+    }
+
+    try {
+        localStorage.setItem(key, JSON.stringify(index));
+    } catch (e) {
+        console.error('Failed to save history index:', e);
+    }
+}
+
+// Fallback to localStorage (without files to avoid quota issues)
+function saveMessageToLocalStorageFallback(chatName, messageObj) {
+    const key = getHistoryKey(chatName);
+    let history = [];
+
+    try {
+        const stored = localStorage.getItem(key);
+        if (stored) {
+            history = JSON.parse(stored);
+            if (!Array.isArray(history)) {
+                history = [];
+            }
+        }
+    } catch (e) {
+        console.error('Failed to load message history:', e);
+        history = [];
+    }
+
+    // Create a copy without files for localStorage fallback
+    const messageObjNoFiles = { ...messageObj };
+    if (messageObjNoFiles.files) {
+        // Store only metadata, not the actual image data
+        messageObjNoFiles.files = messageObj.files.map(img => ({
+            name: img.name,
+            type: img.type,
+            size: img.size,
+            isImage: img.isImage,
+            // Mark as unavailable in fallback mode
+            unavailable: true
+        }));
+    }
+
+    history.push(messageObjNoFiles);
+
+    // Trim to max size
     let count = 0;
     const typesToKeep = ['user', 'assistant', 'tool_call'];
     for (const msg of history) {
@@ -340,12 +420,10 @@ function saveMessageToStorage(message, type, toolData = null, thinkingContent = 
         }
     }
 
-    // If over limit, trim from the beginning
     if (count > MAX_HISTORY_MESSAGES) {
         let removed = 0;
         const typesToTrim = ['user', 'assistant', 'tool_call'];
         while (removed < count - MAX_HISTORY_MESSAGES) {
-            // Find first message to trim
             const idx = history.findIndex(msg => typesToTrim.includes(msg.type));
             if (idx >= 0) {
                 history.splice(idx, 1);
@@ -356,16 +434,36 @@ function saveMessageToStorage(message, type, toolData = null, thinkingContent = 
         }
     }
 
-    // Save to localStorage
     try {
         localStorage.setItem(key, JSON.stringify(history));
     } catch (e) {
-        console.error('Failed to save message history:', e);
+        console.error('Failed to save message history to localStorage:', e);
     }
 }
 
-// Load message history from local storage (for current chat)
-function loadMessageHistoryFromStorage() {
+// Load message history from IndexedDB (for current chat)
+async function loadMessageHistoryFromStorage() {
+    if (!currentChat) return [];
+
+    try {
+        // Try IndexedDB first
+        if (window.ChatDB && window.ChatDB.isSupported()) {
+            const messages = await window.ChatDB.loadMessages(currentChat);
+            if (messages && messages.length > 0) {
+                return messages;
+            }
+        }
+
+        // Fallback to localStorage
+        return loadMessageHistoryFromLocalStorageFallback();
+    } catch (e) {
+        console.error('Failed to load message history from IndexedDB:', e);
+        return loadMessageHistoryFromLocalStorageFallback();
+    }
+}
+
+// Fallback to localStorage
+function loadMessageHistoryFromLocalStorageFallback() {
     if (!currentChat) return [];
 
     const key = getHistoryKey(currentChat);
@@ -378,25 +476,46 @@ function loadMessageHistoryFromStorage() {
             }
         }
     } catch (e) {
-        console.error('Failed to load message history:', e);
+        console.error('Failed to load message history from localStorage:', e);
     }
     return [];
 }
 
 // Clear message history for current chat
-function clearMessageHistory() {
+async function clearMessageHistory() {
     if (!currentChat) return;
 
     const key = getHistoryKey(currentChat);
+
+    try {
+        // Clear from IndexedDB
+        if (window.ChatDB && window.ChatDB.isSupported()) {
+            await window.ChatDB.deleteMessages(currentChat);
+        }
+    } catch (e) {
+        console.error('Failed to clear message history from IndexedDB:', e);
+    }
+
+    // Always clear from localStorage (index and fallback data)
     try {
         localStorage.removeItem(key);
     } catch (e) {
-        console.error('Failed to clear message history:', e);
+        console.error('Failed to clear message history from localStorage:', e);
     }
 }
 
 // Clear all chat histories
-function clearAllChatHistories() {
+async function clearAllChatHistories() {
+    // Clear from IndexedDB
+    try {
+        if (window.ChatDB && window.ChatDB.isSupported()) {
+            await window.ChatDB.deleteAll();
+        }
+    } catch (e) {
+        console.error('Failed to clear all histories from IndexedDB:', e);
+    }
+
+    // Clear from localStorage
     const prefix = HISTORY_KEY_PREFIX;
     const keysToDelete = [];
 
@@ -461,7 +580,7 @@ async function init() {
     }
 }
 
-function startChat() {
+async function startChat() {
     const chatName = document.getElementById('chat-select').value;
     if (!chatName) {
         alert('Please select a chat');
@@ -473,21 +592,27 @@ function startChat() {
     document.getElementById('chat-panel').style.display = 'flex';
     document.getElementById('agent-header').textContent = chatName;
 
-    // Load message history from local storage
-    loadMessageHistory();
+    // Load message history from storage (IndexedDB or localStorage)
+    await loadMessageHistory();
 
     connectWebSocket();
 }
 
-// Load and display message history from local storage
-function loadMessageHistory() {
-    const history = loadMessageHistoryFromStorage();
+// Load and display message history from storage
+async function loadMessageHistory() {
+    const history = await loadMessageHistoryFromStorage();
 
-    history.forEach(msg => {
+    history.forEach((msg, msgIndex) => {
         if (msg.type === 'user') {
-            // Check if message has images
-            if (msg.images && msg.images.length > 0) {
-                displayUserMessageWithFiles(msg.content || '', msg.images);
+            // Check if message has files
+            if (msg.files && msg.files.length > 0) {
+                // Skip messages marked as unavailable (fallback mode)
+                const hasUnavailableFiles = msg.files.some(img => img.unavailable);
+                if (hasUnavailableFiles) {
+                    displayStoredMessage(msg.content || '📎 Image(s) attached (not available in this session)', 'user');
+                } else {
+                    displayUserMessageWithFiles(msg.content || '', msg.files, msgIndex);
+                }
             } else {
                 displayStoredMessage(msg.content, 'user');
             }
@@ -1023,12 +1148,12 @@ function sendMessage() {
     }
 
     const message = input.value.trim();
-    
+
     // Allow sending files without text
     if ((!message || message.trim() === '') && pendingFiles.length === 0) {
         return;
     }
-    
+
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
     // Save to input history (only if there's text)
@@ -1040,7 +1165,7 @@ function sendMessage() {
     const payload = {
         message: message || ''
     };
-    
+
     // Include files if any
     if (pendingFiles.length > 0) {
         payload.files = pendingFiles.map(file => ({
@@ -1053,13 +1178,14 @@ function sendMessage() {
 
     // Display user message with files
     displayUserMessageWithFiles(message, pendingFiles);
-    
+
     // Save to local storage history (include files)
     const filesToSave = pendingFiles.length > 0 ? pendingFiles.map(file => ({
         url: file.url,
         type: file.type,
         name: file.name,
-        size: file.size
+        size: file.size,
+        isImage: file.isImage || (file.type && file.type.startsWith('image/'))
     })) : null;
     saveMessageToStorage(message, 'user', null, null, filesToSave);
 
@@ -1095,27 +1221,35 @@ function updateSendButton() {
     }
 }
 
-// Display user message with files/images
-function displayUserMessageWithFiles(text, files) {
+// Display user message with files/files
+function displayUserMessageWithFiles(text, files, msgIndex = -1) {
     const div = document.createElement('div');
     div.className = 'message user';
+    div.dataset.msgIndex = msgIndex;
 
     const contentDiv = document.createElement('div');
     contentDiv.className = 'message-content';
-    
+
     let html = '';
-    
+
     // Add text if present
     if (text && text.trim()) {
         html += `<div style="white-space: pre-wrap;">${escapeHtml(text)}</div>`;
     }
-    
-    // Add files/images if present
+
+    // Add files/files if present
     if (files && files.length > 0) {
         html += '<div class="user-files" style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px;">';
-        files.forEach(file => {
+        files.forEach((file, idx) => {
             if (file.isImage || (file.type && file.type.startsWith('image/'))) {
-                html += `<img src="${file.url}" alt="${file.name}" style="max-width: 200px; max-height: 200px; border-radius: 8px; object-fit: cover;" />`;
+                // For new messages (msgIndex < 0), use showImagePreview with files array and index
+                if (msgIndex < 0) {
+                    // Store files in a data attribute and pass index
+                    const filesJson = encodeURIComponent(JSON.stringify(files));
+                    html += `<img src="${file.url}" alt="${file.name}" style="max-width: 200px; max-height: 200px; border-radius: 8px; object-fit: cover; cursor: zoom-in;" onclick="showImagePreviewWithIndex('${filesJson}', ${idx})" />`;
+                } else {
+                    html += `<img src="${file.url}" alt="${file.name}" style="max-width: 200px; max-height: 200px; border-radius: 8px; object-fit: cover; cursor: zoom-in;" onclick="showImagePreviewFromHistory(${msgIndex}, ${idx}); return false;" />`;
+                }
             } else {
                 const icon = getFileIcon(file.type, file.name);
                 const sizeStr = formatFileSize(file.size);
@@ -1130,7 +1264,7 @@ function displayUserMessageWithFiles(text, files) {
         });
         html += '</div>';
     }
-    
+
     contentDiv.innerHTML = html;
     div.appendChild(contentDiv);
     document.getElementById('messages').appendChild(div);
@@ -1650,7 +1784,7 @@ function hideClearModal() {
     document.getElementById('clear-modal').style.display = 'none';
 }
 
-function confirmClear() {
+async function confirmClear() {
     const clearAllRecords = document.getElementById('clear-all-records').checked;
 
     // 发送 clear 消息到服务器（服务端不再携带 context）
@@ -1665,8 +1799,8 @@ function confirmClear() {
         if (messagesContainer) {
             messagesContainer.innerHTML = '';
         }
-        // 清除 local storage 历史记录
-        clearMessageHistory();
+        // 清除历史记录（IndexedDB + localStorage）
+        await clearMessageHistory();
     }
     // 不勾选时：只发送 clear 消息，不清空展示，不删记录
 
@@ -1793,6 +1927,174 @@ if (messageInput) {
         // Small delay to allow keyboard to start appearing
         setTimeout(scrollToBottom, 300);
     });
+
+    // Handle paste event for image upload from clipboard
+    messageInput.addEventListener('paste', function (e) {
+        const items = e.clipboardData?.items;
+        if (!items) return;
+
+        // Find image items in clipboard
+        const imageItems = Array.from(items).filter(item => item.type.startsWith('image/'));
+
+        if (imageItems.length > 0) {
+            e.preventDefault();
+
+            // Process each image
+            imageItems.forEach(item => {
+                const file = item.getAsFile();
+                if (file) {
+                    handleFiles([file]);
+                }
+            });
+
+            showToast(`Pasted ${imageItems.length} image(s) from clipboard`, false);
+        }
+    });
 }
+
+// ========== Image Preview Functions ==========
+
+// Show image preview modal from history message
+async function showImagePreviewFromHistory(msgIndex, imgIndex) {
+    if (msgIndex < 0 || !currentChat) return;
+
+    const history = await loadMessageHistoryFromStorage();
+    const msg = history[msgIndex];
+
+    if (!msg || !msg.files || msg.files.length === 0) return;
+
+    // Check if files are unavailable (fallback mode)
+    if (msg.files.some(img => img.unavailable)) {
+        showToast('Images are not available in this session', true);
+        return;
+    }
+
+    // Collect all files from this message
+    const allImages = msg.files.filter(img => img.isImage || (img.type && img.type.startsWith('image/')));
+    currentPreviewImages = allImages.map(img => img.url);
+
+    if (currentPreviewImages.length === 0) return;
+
+    // Find the actual index in the filtered files array
+    const originalImg = msg.files[imgIndex];
+    currentPreviewIndex = allImages.findIndex(img => img.url === originalImg.url);
+    if (currentPreviewIndex < 0) currentPreviewIndex = 0;
+
+    const modal = document.getElementById('image-preview-modal');
+    const imgElement = document.getElementById('image-preview-full');
+    const counterElement = document.getElementById('image-preview-counter');
+
+    // Set the image source
+    imgElement.src = currentPreviewImages[currentPreviewIndex];
+
+    // Update counter
+    if (currentPreviewImages.length > 1) {
+        counterElement.textContent = `${currentPreviewIndex + 1} / ${currentPreviewImages.length}`;
+        counterElement.style.display = 'block';
+    } else {
+        counterElement.textContent = '';
+        counterElement.style.display = 'none';
+    }
+
+    // Show modal
+    modal.style.display = 'flex';
+    document.body.style.overflow = 'hidden'; // Prevent background scrolling
+}
+
+// Show image preview modal for newly sent messages
+function showImagePreviewWithIndex(filesJson, index) {
+    const modal = document.getElementById('image-preview-modal');
+    const imgElement = document.getElementById('image-preview-full');
+    const counterElement = document.getElementById('image-preview-counter');
+
+    // Parse the files from JSON
+    let files;
+    try {
+        files = JSON.parse(decodeURIComponent(filesJson));
+    } catch (e) {
+        console.error('Failed to parse files:', e);
+        return;
+    }
+
+    // Collect all image URLs from the files array
+    currentPreviewImages = files
+        .filter(file => file.isImage || (file.type && file.type.startsWith('image/')))
+        .map(file => file.url);
+
+    if (currentPreviewImages.length === 0) return;
+
+    currentPreviewIndex = index;
+
+    // Set the image source
+    imgElement.src = currentPreviewImages[currentPreviewIndex];
+
+    // Update counter
+    if (currentPreviewImages.length > 1) {
+        counterElement.textContent = `${currentPreviewIndex + 1} / ${currentPreviewImages.length}`;
+        counterElement.style.display = 'block';
+    } else {
+        counterElement.textContent = '';
+        counterElement.style.display = 'none';
+    }
+
+    // Show modal
+    modal.style.display = 'flex';
+    document.body.style.overflow = 'hidden'; // Prevent background scrolling
+}
+
+// Hide image preview modal
+function hideImagePreview() {
+    const modal = document.getElementById('image-preview-modal');
+    modal.style.display = 'none';
+    document.body.style.overflow = ''; // Restore scrolling
+
+    // Clear image source after a delay to avoid flickering
+    setTimeout(() => {
+        document.getElementById('image-preview-full').src = '';
+    }, 200);
+}
+
+// Navigate through preview files
+function navigatePreview(direction) {
+    const newIndex = currentPreviewIndex + direction;
+
+    // Bounds check
+    if (newIndex < 0 || newIndex >= currentPreviewImages.length) {
+        return;
+    }
+
+    currentPreviewIndex = newIndex;
+    const imgElement = document.getElementById('image-preview-full');
+    const counterElement = document.getElementById('image-preview-counter');
+
+    // Animate image transition
+    imgElement.style.opacity = '0';
+    imgElement.style.transform = 'scale(0.95)';
+
+    setTimeout(() => {
+        imgElement.src = currentPreviewImages[currentPreviewIndex];
+        imgElement.style.opacity = '1';
+        imgElement.style.transform = 'scale(1)';
+
+        // Update counter
+        if (currentPreviewImages.length > 1) {
+            counterElement.textContent = `${currentPreviewIndex + 1} / ${currentPreviewImages.length}`;
+        }
+    }, 150);
+}
+
+// Add keyboard navigation for image preview
+document.addEventListener('keydown', function (e) {
+    const modal = document.getElementById('image-preview-modal');
+    if (modal.style.display === 'flex') {
+        if (e.key === 'Escape') {
+            hideImagePreview();
+        } else if (e.key === 'ArrowLeft') {
+            navigatePreview(-1);
+        } else if (e.key === 'ArrowRight') {
+            navigatePreview(1);
+        }
+    }
+});
 
 init();

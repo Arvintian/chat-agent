@@ -49,7 +49,20 @@
                 </div>
                 <div class="modal-footer">
                     <button class="btn-cancel" onclick="hideClearModal()">Cancel</button>
-                    <button class="btn-confirm" onclick="confirmClear()">Clear</button>
+                    <button class="btn-confirm" onclick="confirmClear(); return false;">Clear</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Image Preview Modal -->
+        <div id="image-preview-modal" class="modal" style="display: none;" onclick="hideImagePreview()">
+            <div class="image-preview-modal-content" onclick="event.stopPropagation();">
+                <span class="image-preview-close" onclick="hideImagePreview()">&times;</span>
+                <img id="image-preview-full" src="" alt="Preview" />
+                <div class="image-preview-nav">
+                    <button class="image-preview-nav-btn" onclick="navigatePreview(-1)">&#10094; Prev</button>
+                    <span id="image-preview-counter"></span>
+                    <button class="image-preview-nav-btn" onclick="navigatePreview(1)">Next &#10095;</button>
                 </div>
             </div>
         </div>
@@ -99,6 +112,7 @@
         </div>
     </div>
 
+    <script src="indexeddb.js"></script>
     <script src="app.js"></script>
 </body>
 
