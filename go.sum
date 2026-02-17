@@ -85,8 +85,8 @@ github.com/cloudwego/eino-ext/components/model/openrouter v0.1.2 h1:zDFteouktUsG
 github.com/cloudwego/eino-ext/components/model/openrouter v0.1.2/go.mod h1:v+Xo3hEEBZ9BVGpyjmLrqiP1BCshF3wQrEsxw1SLtF4=
 github.com/cloudwego/eino-ext/components/model/qianfan v0.1.4 h1:wCl6EDT4eacyBAopQ0N6bQVwRy6wW9HNmIag9zBljkI=
 github.com/cloudwego/eino-ext/components/model/qianfan v0.1.4/go.mod h1:ShVCwEhltA7hyc4jYfxMS5TbF6N/RATlNHt/jpGgzWI=
-github.com/cloudwego/eino-ext/components/model/qwen v0.1.4 h1:w+IsHEWTHUb7KP60rUYFXeei2aH4MU9OrcuiX3aJCQk=
-github.com/cloudwego/eino-ext/components/model/qwen v0.1.4/go.mod h1:PTn/QxFqwmFW8fB4PtxjXB77uGtabOuWHahe751+Ras=
+github.com/cloudwego/eino-ext/components/model/qwen v0.1.5 h1:H0Irkydo2INyYNqjJTCRjfvycPNJMC2FcfmebfL83hM=
+github.com/cloudwego/eino-ext/components/model/qwen v0.1.5/go.mod h1:PTn/QxFqwmFW8fB4PtxjXB77uGtabOuWHahe751+Ras=
 github.com/cloudwego/eino-ext/components/tool/mcp v0.0.8 h1:/QwCVAtB61b4Q2+RUvhoy9AZNkhiThsTySIoimxiJS4=
 github.com/cloudwego/eino-ext/components/tool/mcp v0.0.8/go.mod h1:zxP8sFkADBqflNc0a4qfKdLYQ+edzHPlkOaZF0A1X7o=
 github.com/cloudwego/eino-ext/libs/acl/openai v0.1.13 h1:z0bI5TH3nE+uDQiRhxBQMvk2HswlDUM3xP38+VSgpSQ=

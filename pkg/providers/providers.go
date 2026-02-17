@@ -129,6 +129,16 @@ func (f *Factory) createArkModel(ctx context.Context, modelCfg *config.Model, pr
 		APIKey:  providerCfg.APIKey,
 	}
 
+	if modelCfg.Thinking {
+		cfg.Thinking = &ark.Thinking{
+			Type: "enabled",
+		}
+	} else {
+		cfg.Thinking = &ark.Thinking{
+			Type: "disabled",
+		}
+	}
+
 	if modelCfg.MaxTokens > 0 {
 		cfg.MaxTokens = &modelCfg.MaxTokens
 	}

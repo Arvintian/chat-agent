@@ -2,8 +2,6 @@ module github.com/Arvintian/chat-agent
 
 go 1.25.5
 
-require github.com/gorilla/websocket v1.5.3
-
 require (
 	github.com/bytedance/sonic v1.14.1
 	github.com/cloudwego/eino v0.7.32
@@ -15,12 +13,13 @@ require (
 	github.com/cloudwego/eino-ext/components/model/openai v0.1.8
 	github.com/cloudwego/eino-ext/components/model/openrouter v0.1.2
 	github.com/cloudwego/eino-ext/components/model/qianfan v0.1.4
-	github.com/cloudwego/eino-ext/components/model/qwen v0.1.4
+	github.com/cloudwego/eino-ext/components/model/qwen v0.1.5
 	github.com/cloudwego/eino-ext/components/tool/mcp v0.0.8
 	github.com/eino-contrib/jsonschema v1.0.3
 	github.com/eino-contrib/ollama v0.1.0
 	github.com/go-cmd/cmd v1.4.3
 	github.com/gorilla/mux v1.8.1
+	github.com/gorilla/websocket v1.5.3
 	github.com/hekmon/liveterm/v2 v2.5.0
 	github.com/mark3labs/mcp-filesystem-server v0.11.1
 	github.com/mark3labs/mcp-go v0.43.2

@@ -295,6 +295,12 @@ async function init() {
                 defaultSelected = true;
             }
         }
+
+        // If only one chat exists, auto-select and start chat immediately
+        if (data.chats.length === 1) {
+            select.value = data.chats[0];
+            startChat();
+        }
     } catch (e) {
         console.error('Failed to load chats:', e);
     }
