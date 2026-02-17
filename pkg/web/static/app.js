@@ -133,6 +133,16 @@ let currentApprovalId = null;
 
 // ========== File Upload Functions ==========
 
+// Convert Blob to base64 Data URL
+function blobToBase64(blob) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+    });
+}
+
 // Supported file types and their icons
 const SUPPORTED_FILE_TYPES = {
     // Images
@@ -183,38 +193,130 @@ function getFileIcon(fileType, fileName) {
 }
 
 // Handle file selection
-function handleFiles(files) {
+async function handleFiles(files) {
     if (!files || files.length === 0) return;
 
-    Array.from(files).forEach(file => {
+    // Show loading indicator if compressing images
+    let compressionStarted = false;
+
+    for (const file of Array.from(files)) {
         // Validate file type
         if (!isFileTypeSupported(file.type, file.name)) {
             showToast('Unsupported file type: ' + file.name, true);
-            return;
+            continue;
         }
 
         // Validate file size (max 50MB)
         if (file.size > MAX_FILE_SIZE) {
             showToast('File size must be less than 50MB: ' + file.name, true);
-            return;
+            continue;
         }
 
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            pendingFiles.push({
-                url: e.target.result,
-                name: file.name,
-                type: file.type,
-                size: file.size,
-                isImage: file.type.startsWith('image/')
-            });
-            renderFilePreviews();
-        };
-        reader.onerror = () => {
-            showToast('Failed to read file: ' + file.name, true);
-        };
-        reader.readAsDataURL(file);
-    });
+        // Compress images before adding to pending files
+        if (file.type.startsWith('image/')) {
+            if (!compressionStarted) {
+                setStatus('Compressing images...', false);
+                compressionStarted = true;
+            }
+
+            try {
+                // Check if compression is needed
+                const needsCompression = ImageCompressor.needsCompression(file, 500); // 500KB threshold
+
+                if (needsCompression) {
+                    // Compress the image
+                    const result = await ImageCompressor.compress(file, {
+                        maxWidth: 1920,
+                        maxHeight: 1080,
+                        quality: 0.85,
+                        maxSizeKB: 500,
+                        minQuality: 0.6,
+                        mimeType: 'image/jpeg'
+                    });
+
+                    console.log(`Image compressed: ${file.name}, ${result.ratio}% reduction (${formatFileSize(result.originalSize)} -> ${formatFileSize(result.compressedSize)})`);
+
+                    // Convert Blob to base64 for transmission
+                    const base64Url = await blobToBase64(result.blob);
+
+                    // Add compressed image to pending files
+                    pendingFiles.push({
+                        url: base64Url,
+                        name: file.name.replace(/\.(png|gif|webp|bmp)$/i, '.jpg'),
+                        type: result.mimeType,
+                        size: result.compressedSize,
+                        isImage: true,
+                        originalSize: result.originalSize,
+                        compressed: true
+                    });
+
+                    // Render previews immediately after adding compressed file
+                    renderFilePreviews();
+                } else {
+                    // Image is already small enough, no compression needed
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        pendingFiles.push({
+                            url: e.target.result,
+                            name: file.name,
+                            type: file.type,
+                            size: file.size,
+                            isImage: true,
+                            compressed: false
+                        });
+                        renderFilePreviews();
+                    };
+                    reader.onerror = () => {
+                        showToast('Failed to read file: ' + file.name, true);
+                    };
+                    reader.readAsDataURL(file);
+                    continue;
+                }
+            } catch (error) {
+                console.error('Failed to compress image:', file.name, error);
+                showToast('Failed to compress image: ' + file.name, true);
+                // Fallback to original file
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    pendingFiles.push({
+                        url: e.target.result,
+                        name: file.name,
+                        type: file.type,
+                        size: file.size,
+                        isImage: true,
+                        compressed: false,
+                        compressionError: true
+                    });
+                    renderFilePreviews();
+                };
+                reader.readAsDataURL(file);
+                continue;
+            }
+        } else {
+            // Non-image file, add directly
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                pendingFiles.push({
+                    url: e.target.result,
+                    name: file.name,
+                    type: file.type,
+                    size: file.size,
+                    isImage: false
+                });
+                renderFilePreviews();
+            };
+            reader.onerror = () => {
+                showToast('Failed to read file: ' + file.name, true);
+            };
+            reader.readAsDataURL(file);
+        }
+    }
+
+    // Render previews after processing all files
+    if (compressionStarted) {
+        renderFilePreviews();
+        closeStatus(); // Close compression status
+    }
 
     // Clear the input so the same file can be selected again
     document.getElementById('file-input').value = '';
@@ -1185,7 +1287,9 @@ function sendMessage() {
         type: file.type,
         name: file.name,
         size: file.size,
-        isImage: file.isImage || (file.type && file.type.startsWith('image/'))
+        isImage: file.isImage || (file.type && file.type.startsWith('image/')),
+        compressed: file.compressed || false,
+        originalSize: file.originalSize || file.size
     })) : null;
     saveMessageToStorage(message, 'user', null, null, filesToSave);
 
