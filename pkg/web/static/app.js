@@ -13,6 +13,9 @@ const maxReconnectAttempts = 5;
 let toastTimeout = null;
 let isGenerating = false;
 
+// File upload state
+let pendingFiles = [];
+
 // Input history management
 const INPUT_HISTORY_KEY = 'chat_input_history';
 const MAX_HISTORY_SIZE = 50;
@@ -103,7 +106,6 @@ function navigateHistory(direction) {
 
     // Apply selected history item
     input.value = inputHistory[historyIndex];
-    autoResize(input);
 }
 
 // Clear all input history
@@ -125,6 +127,154 @@ let toolCalls = {};
 let pendingApprovals = {};
 let currentApprovalId = null;
 
+// ========== File Upload Functions ==========
+
+// Supported file types and their icons
+const SUPPORTED_FILE_TYPES = {
+    // Images
+    'image/': { icon: '🖼️', category: 'image' },
+    // Videos
+    'video/': { icon: '🎬', category: 'video' },
+    // Audios
+    'audio/': { icon: '🎵', category: 'audio' },
+    // Documents
+    'application/pdf': { icon: '📄', category: 'document' },
+    'text/plain': { icon: '📝', category: 'document' },
+    'application/msword': { icon: '📘', category: 'document' },
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': { icon: '📘', category: 'document' },
+    'application/vnd.ms-excel': { icon: '📊', category: 'document' },
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': { icon: '📊', category: 'document' },
+    'application/vnd.ms-powerpoint': { icon: '📽️', category: 'document' },
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation': { icon: '📽️', category: 'document' },
+    'text/csv': { icon: '📊', category: 'document' }
+};
+
+// Maximum file size (50MB)
+const MAX_FILE_SIZE = 50 * 1024 * 1024;
+
+// Check if a file type is supported
+function isFileTypeSupported(fileType, fileName) {
+    // Check by MIME type
+    for (const typePrefix in SUPPORTED_FILE_TYPES) {
+        if (fileType.startsWith(typePrefix)) {
+            return true;
+        }
+    }
+    // Check by file extension for office documents
+    const ext = fileName.toLowerCase().split('.').pop();
+    const supportedExtensions = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'csv', 'txt'];
+    return supportedExtensions.includes(ext);
+}
+
+// Get file icon based on type
+function getFileIcon(fileType, fileName) {
+    // Check by MIME type
+    for (const typePrefix in SUPPORTED_FILE_TYPES) {
+        if (fileType.startsWith(typePrefix)) {
+            return SUPPORTED_FILE_TYPES[typePrefix].icon;
+        }
+    }
+    // Default icon
+    return '📎';
+}
+
+// Handle file selection
+function handleFiles(files) {
+    if (!files || files.length === 0) return;
+    
+    Array.from(files).forEach(file => {
+        // Validate file type
+        if (!isFileTypeSupported(file.type, file.name)) {
+            showToast('Unsupported file type: ' + file.name, true);
+            return;
+        }
+        
+        // Validate file size (max 50MB)
+        if (file.size > MAX_FILE_SIZE) {
+            showToast('File size must be less than 50MB: ' + file.name, true);
+            return;
+        }
+        
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            pendingFiles.push({
+                url: e.target.result,
+                name: file.name,
+                type: file.type,
+                size: file.size,
+                isImage: file.type.startsWith('image/')
+            });
+            renderFilePreviews();
+        };
+        reader.onerror = () => {
+            showToast('Failed to read file: ' + file.name, true);
+        };
+        reader.readAsDataURL(file);
+    });
+    
+    // Clear the input so the same file can be selected again
+    document.getElementById('file-input').value = '';
+}
+
+// Render file previews
+function renderFilePreviews() {
+    const container = document.getElementById('image-preview-container');
+    
+    if (pendingFiles.length === 0) {
+        container.style.display = 'none';
+        container.innerHTML = '';
+        return;
+    }
+    
+    container.style.display = 'flex';
+    container.innerHTML = pendingFiles.map((file, idx) => {
+        if (file.isImage) {
+            return `
+                <div class="image-preview-item">
+                    <img src="${file.url}" alt="${file.name}" />
+                    <button onclick="removeFile(${idx})" title="Remove file">×</button>
+                </div>
+            `;
+        } else {
+            const icon = getFileIcon(file.type, file.name);
+            const sizeStr = formatFileSize(file.size);
+            return `
+                <div class="image-preview-item file-preview-item">
+                    <div class="file-preview-content">
+                        <span class="file-icon">${icon}</span>
+                        <span class="file-name" title="${file.name}">${file.name}</span>
+                        <span class="file-size">${sizeStr}</span>
+                    </div>
+                    <button onclick="removeFile(${idx})" title="Remove file">×</button>
+                </div>
+            `;
+        }
+    }).join('');
+}
+
+// Format file size for display
+function formatFileSize(bytes) {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+
+// Remove a file from pending list
+function removeFile(index) {
+    if (index >= 0 && index < pendingFiles.length) {
+        pendingFiles.splice(index, 1);
+        renderFilePreviews();
+    }
+}
+
+// Clear all pending files
+function clearPendingFiles() {
+    pendingFiles = [];
+    renderFilePreviews();
+}
+
 // Local storage history configuration
 const MAX_HISTORY_MESSAGES = 200;
 const HISTORY_KEY_PREFIX = 'chat_history_';
@@ -137,7 +287,7 @@ function getHistoryKey(chatName) {
 }
 
 // Save message to local storage (for current chat)
-function saveMessageToStorage(message, type, toolData = null, thinkingContent = null) {
+function saveMessageToStorage(message, type, toolData = null, thinkingContent = null, images = null) {
     if (!currentChat) return;
 
     const key = getHistoryKey(currentChat);
@@ -171,6 +321,11 @@ function saveMessageToStorage(message, type, toolData = null, thinkingContent = 
     // Include tool call data if present
     if (toolData) {
         messageObj.toolData = toolData;
+    }
+
+    // Include images if present
+    if (images && images.length > 0) {
+        messageObj.images = images;
     }
 
     // Add to history
@@ -330,7 +485,12 @@ function loadMessageHistory() {
 
     history.forEach(msg => {
         if (msg.type === 'user') {
-            displayStoredMessage(msg.content, 'user');
+            // Check if message has images
+            if (msg.images && msg.images.length > 0) {
+                displayUserMessageWithFiles(msg.content || '', msg.images);
+            } else {
+                displayStoredMessage(msg.content, 'user');
+            }
         } else if (msg.type === 'assistant') {
             // Check if this message has separate thinking content
             if (msg.thinking && msg.thinking.trim()) {
@@ -863,27 +1023,59 @@ function sendMessage() {
     }
 
     const message = input.value.trim();
-    if (!message || !ws || ws.readyState !== WebSocket.OPEN) return;
+    
+    // Allow sending files without text
+    if ((!message || message.trim() === '') && pendingFiles.length === 0) {
+        return;
+    }
+    
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
-    // Save to input history
-    saveToHistory(message);
+    // Save to input history (only if there's text)
+    if (message && message.trim()) {
+        saveToHistory(message);
+    }
 
-    // Save to local storage history
-    saveMessageToStorage(message, 'user');
+    // Prepare message payload with optional files
+    const payload = {
+        message: message || ''
+    };
+    
+    // Include files if any
+    if (pendingFiles.length > 0) {
+        payload.files = pendingFiles.map(file => ({
+            url: file.url,
+            type: file.type,
+            name: file.name,
+            file_size: file.size
+        }));
+    }
 
-    addMessage(message, 'user');
+    // Display user message with files
+    displayUserMessageWithFiles(message, pendingFiles);
+    
+    // Save to local storage history (include files)
+    const filesToSave = pendingFiles.length > 0 ? pendingFiles.map(file => ({
+        url: file.url,
+        type: file.type,
+        name: file.name,
+        size: file.size
+    })) : null;
+    saveMessageToStorage(message, 'user', null, null, filesToSave);
+
+    // Clear input and files
     input.value = '';
-    autoResize(input);
+    clearPendingFiles();
 
     // 禁用输入框，发送按钮保持可用（用于停止）
     input.disabled = true;
     isGenerating = true;
     updateSendButton();
 
-    // 直接发送 message，后端已缓存 chat session
+    // Send message with files
     ws.send(JSON.stringify({
         type: 'chat',
-        payload: { message: message }
+        payload: payload
     }));
 }
 
@@ -901,6 +1093,48 @@ function updateSendButton() {
         sendBtn.title = 'Send message';
         sendBtn.classList.remove('stopping');
     }
+}
+
+// Display user message with files/images
+function displayUserMessageWithFiles(text, files) {
+    const div = document.createElement('div');
+    div.className = 'message user';
+
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'message-content';
+    
+    let html = '';
+    
+    // Add text if present
+    if (text && text.trim()) {
+        html += `<div style="white-space: pre-wrap;">${escapeHtml(text)}</div>`;
+    }
+    
+    // Add files/images if present
+    if (files && files.length > 0) {
+        html += '<div class="user-files" style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px;">';
+        files.forEach(file => {
+            if (file.isImage || (file.type && file.type.startsWith('image/'))) {
+                html += `<img src="${file.url}" alt="${file.name}" style="max-width: 200px; max-height: 200px; border-radius: 8px; object-fit: cover;" />`;
+            } else {
+                const icon = getFileIcon(file.type, file.name);
+                const sizeStr = formatFileSize(file.size);
+                html += `
+                    <div class="user-file-item" style="display: flex; flex-direction: column; align-items: center; padding: 10px; background: #f5f5f5; border-radius: 8px; min-width: 100px;">
+                        <span style="font-size: 32px;">${icon}</span>
+                        <span style="font-size: 11px; color: #333; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100px; margin-top: 4px;" title="${file.name}">${file.name}</span>
+                        <span style="font-size: 10px; color: #888; margin-top: 2px;">${sizeStr}</span>
+                    </div>
+                `;
+            }
+        });
+        html += '</div>';
+    }
+    
+    contentDiv.innerHTML = html;
+    div.appendChild(contentDiv);
+    document.getElementById('messages').appendChild(div);
+    scrollToBottom();
 }
 
 function addMessage(text, type) {
@@ -1439,10 +1673,7 @@ function confirmClear() {
     hideClearModal();
 }
 
-function autoResize(textarea) {
-    textarea.style.height = 'auto';
-    textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px';
-}
+// autoResize function removed - input box height is now fixed via CSS
 
 function handleKeyDown(e) {
     const input = document.getElementById('message-input');
@@ -1492,7 +1723,6 @@ function handleKeyDown(e) {
         if (historyIndex !== -1) {
             input.value = lastInputValue;
             historyIndex = -1;
-            autoResize(input);
         }
         return;
     }

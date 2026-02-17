@@ -184,9 +184,18 @@ Example:
 	},
 }
 
+// FilePayload represents a file in the chat request
+type FilePayload struct {
+	URL      string `json:"url"`
+	Type     string `json:"type"`
+	Name     string `json:"name"`
+	FileSize int64  `json:"file_size,omitempty"`
+}
+
 type ChatRequest struct {
-	ChatName string `json:"chat_name"`
-	Message  string `json:"message"`
+	ChatName string         `json:"chat_name"`
+	Message  string         `json:"message"`
+	Files    []FilePayload  `json:"files,omitempty"`
 }
 
 type SessionInfo struct {
@@ -451,8 +460,22 @@ func (h *WebSocketHandler) handleChat(session *chatbot.WSSession, msg *chatbot.W
 	ctx, cancelFunc := context.WithCancel(context.Background())
 	session.SetCancelFunc(cancelFunc)
 
-	// Use pre-initialized ChatBot to process message
-	err := session.ChatBot.StreamChatWithHandler(ctx, req.Message)
+	// Convert FilePayload to FileData
+	var fileData []chatbot.FileData
+	if len(req.Files) > 0 {
+		fileData = make([]chatbot.FileData, len(req.Files))
+		for i, file := range req.Files {
+			fileData[i] = chatbot.FileData{
+				URL:      file.URL,
+				Type:     file.Type,
+				Name:     file.Name,
+				FileSize: file.FileSize,
+			}
+		}
+	}
+
+	// Use pre-initialized ChatBot to process message with files
+	err := session.ChatBot.StreamChatWithHandler(ctx, req.Message, fileData)
 	if err != nil && !session.IsCancelled() {
 		session.SendError(err.Error())
 		return

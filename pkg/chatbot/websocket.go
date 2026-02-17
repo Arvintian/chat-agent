@@ -44,9 +44,9 @@ type WSSession struct {
 	approvalMu      sync.Mutex
 
 	// Cancel state for stopping ongoing chat
-	cancelMu     sync.Mutex
-	cancelFunc   context.CancelFunc
-	isCancelled  bool
+	cancelMu    sync.Mutex
+	cancelFunc  context.CancelFunc
+	isCancelled bool
 }
 
 func NewWSSession(conn *websocket.Conn, sessionID string, cfg *config.Config) *WSSession {
@@ -198,6 +198,7 @@ func (h *WSChatHandler) SendComplete(message string) {
 }
 
 func (h *WSChatHandler) SendError(err string) {
+	log.Printf("SendError: %v\n", err)
 	h.session.SendError(err)
 }
 

@@ -297,10 +297,102 @@ pre.code-block:hover .code-copy-btn {
 
 #input-area {
     display: flex;
+    flex-direction: column;
     gap: 10px;
     padding: 15px;
     background: white;
     flex-shrink: 0;
+    min-height: auto;
+    visibility: visible;
+    opacity: 1;
+}
+
+/* Image preview container */
+.image-preview-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px;
+    background: #f9f9f9;
+    border-radius: 8px;
+    min-height: 0;
+}
+
+.image-preview-item {
+    position: relative;
+    display: inline-block;
+    border-radius: 6px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.image-preview-item img {
+    max-width: 100px;
+    max-height: 100px;
+    display: block;
+    object-fit: cover;
+}
+
+.image-preview-item button {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.6);
+    color: white;
+    border: none;
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s;
+}
+
+.image-preview-item button:hover {
+    background: rgba(0, 0, 0, 0.8);
+}
+
+/* File preview item styles */
+.file-preview-item {
+    min-width: 120px;
+    max-width: 150px;
+}
+
+.file-preview-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 12px 8px;
+    gap: 4px;
+    background: #f5f5f5;
+    border-radius: 6px;
+    min-height: 80px;
+}
+
+.file-icon {
+    font-size: 32px;
+    line-height: 1;
+}
+
+.file-name {
+    font-size: 11px;
+    color: #333;
+    text-align: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+    padding: 0 4px;
+}
+
+.file-size {
+    font-size: 10px;
+    color: #888;
 }
 
 .input-wrapper {
@@ -308,11 +400,54 @@ pre.code-block:hover .code-copy-btn {
     flex: 1;
     gap: 10px;
     width: 100%;
+    align-items: stretch;
+}
+
+#upload-btn,
+#send-btn {
+    padding: 0;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 20px;
+    flex-shrink: 0;
+    width: 64px;
+    height: 64px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+}
+
+#upload-btn {
+    background: #f5f5f5;
+    border: 1px solid #ddd;
+}
+
+#upload-btn:hover {
+    background: #e0e0e0;
+    border-color: #ccc;
 }
 
 @media (max-width: 768px) {
     .input-wrapper {
         width: 100%;
+        align-items: stretch;
+    }
+    
+    #upload-btn,
+    #send-btn {
+        width: 44px !important;
+        height: 44px !important;
+        min-height: 44px !important;
+        max-height: 44px !important;
+        padding: 0 !important;
+    }
+    
+    #message-input {
+        min-height: 44px !important;
+        height: 44px !important;
+        max-height: 44px !important;
     }
 }
 
@@ -322,12 +457,20 @@ pre.code-block:hover .code-copy-btn {
     border: 1px solid #667eea;
     border-radius: 4px;
     font-size: 15px;
-    min-height: 60px;
-    height: 60px;
-    max-height: 120px;
+    min-height: 64px;
+    height: 64px;
+    max-height: 64px;
     resize: none;
     outline: none;
+    overflow: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
     transition: border-color 0.2s;
+    line-height: 1.5;
+}
+
+#message-input::-webkit-scrollbar {
+    display: none;
 }
 
 #message-input:focus {
@@ -335,14 +478,8 @@ pre.code-block:hover .code-copy-btn {
 }
 
 #send-btn {
-    padding: 12px 24px;
     background-color: #4CAF50;
     color: white;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 14px;
-    flex-shrink: 0;
 }
 
 #send-btn:hover {
@@ -1111,12 +1248,6 @@ pre.code-block:hover .code-copy-btn {
         font-size: 14px;
     }
 
-    #send-btn {
-        padding: 10px 16px;
-        font-size: 13px;
-        flex-shrink: 0;
-    }
-
     .login-panel h2 {
         font-size: 20px;
     }
@@ -1304,17 +1435,25 @@ pre.code-block:hover .code-copy-btn {
         gap: 6px;
     }
 
-    #message-input {
-        min-height: 44px;
-        height: 44px;
-        max-height: 100px;
-        padding: 8px 10px;
-        font-size: 14px;
+    .input-wrapper {
+        align-items: stretch;
     }
 
+    #upload-btn,
     #send-btn {
-        padding: 8px 12px;
-        font-size: 12px;
+        width: 44px !important;
+        height: 44px !important;
+        min-height: 44px !important;
+        max-height: 44px !important;
+        padding: 0 !important;
+    }
+
+    #message-input {
+        min-height: 44px !important;
+        height: 44px !important;
+        max-height: 44px !important;
+        padding: 12px 15px;
+        font-size: 15px;
     }
 
     #send-btn.stopping {
@@ -1365,5 +1504,28 @@ pre.code-block:hover .code-copy-btn {
     .btn-confirm {
         padding: 8px 14px;
         font-size: 12px;
+    }
+    
+    /* File preview adjustments for small screens */
+    .image-preview-container {
+        gap: 6px;
+        padding: 6px;
+    }
+    
+    .file-preview-item {
+        min-width: 100px;
+        max-width: 120px;
+    }
+    
+    .file-icon {
+        font-size: 24px;
+    }
+    
+    .file-name {
+        font-size: 10px;
+    }
+    
+    .file-size {
+        font-size: 9px;
     }
 }

@@ -83,9 +83,17 @@
         <div id="messages">
         </div>
         <div id="input-area">
+            <!-- Image preview container -->
+            <div id="image-preview-container" class="image-preview-container" style="display: none;"></div>
+            
             <div class="input-wrapper">
-                <textarea id="message-input" placeholder="Type your message..." onkeydown="handleKeyDown(event)"
-                    oninput="autoResize(this)"></textarea>
+                <!-- Image upload button -->
+                <button id="upload-btn" onclick="document.getElementById('file-input').click()" title="Upload file">
+                    📎
+                </button>
+                <input type="file" id="file-input" accept="image/*,video/*,audio/*,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/plain,text/csv" multiple onchange="handleFiles(this.files)" style="display: none;" />
+                
+                <textarea id="message-input" placeholder="Type your message..." onkeydown="handleKeyDown(event)"></textarea>
                 <button id="send-btn" onclick="sendMessage()" title="Send message">➤</button>
             </div>
         </div>
