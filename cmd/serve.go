@@ -199,12 +199,17 @@ type ChatRequest struct {
 	Files    []FilePayload `json:"files,omitempty"`
 }
 
-type SessionInfo struct {
-	ID          string
-	ChatName    string
+// ChatState represents the state of a single chat within a session
+type ChatState struct {
 	ChatSession *chatbot.ChatSession
 	ChatBot     *chatbot.ChatBot
-	CreatedAt   time.Time
+}
+
+type SessionInfo struct {
+	ID        string
+	ChatName  string // Current active chat
+	Chats     map[string]*ChatState // All chats in this session
+	CreatedAt time.Time
 }
 
 // ApprovalResponsePayload represents the approval response from the client
@@ -253,44 +258,92 @@ func (sm *SessionManager) AddSession(sessionID string, chatName string, chatSess
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	if sm.sessions[sessionID] == nil {
+		chats := make(map[string]*ChatState)
+		if chatName != "" && chatSession != nil {
+			chats[chatName] = &ChatState{
+				ChatSession: chatSession,
+			}
+		}
 		sm.sessions[sessionID] = &SessionInfo{
-			ID:          sessionID,
-			ChatName:    chatName,
-			ChatSession: chatSession,
-			CreatedAt:   time.Now(),
+			ID:        sessionID,
+			ChatName:  chatName,
+			Chats:     chats,
+			CreatedAt: time.Now(),
 		}
 	}
 }
 
-// UpdateChatSessionWithBot updates session with both ChatSession and ChatBot
+// UpdateChatSessionWithBot updates session with both ChatSession and ChatBot for a specific chat
 func (sm *SessionManager) UpdateChatSessionWithBot(sessionID string, chatName string, chatSession *chatbot.ChatSession, chatBot *chatbot.ChatBot) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	if session, ok := sm.sessions[sessionID]; ok {
 		session.ChatName = chatName
-		session.ChatSession = chatSession
-		session.ChatBot = chatBot
+		if session.Chats == nil {
+			session.Chats = make(map[string]*ChatState)
+		}
+		session.Chats[chatName] = &ChatState{
+			ChatSession: chatSession,
+			ChatBot:     chatBot,
+		}
+	} else {
+		// Create new session info if not exists
+		chats := make(map[string]*ChatState)
+		chats[chatName] = &ChatState{
+			ChatSession: chatSession,
+			ChatBot:     chatBot,
+		}
+		sm.sessions[sessionID] = &SessionInfo{
+			ID:        sessionID,
+			ChatName:  chatName,
+			Chats:     chats,
+			CreatedAt: time.Now(),
+		}
 	}
 }
 
-func (sm *SessionManager) RemoveSession(sessionID string) *chatbot.ChatSession {
+// GetChatState gets the chat state for a specific chat in a session
+func (sm *SessionManager) GetChatState(sessionID string, chatName string) (*ChatState, bool) {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	session, ok := sm.sessions[sessionID]
+	if !ok {
+		return nil, false
+	}
+	if session.Chats == nil {
+		return nil, false
+	}
+	state, ok := session.Chats[chatName]
+	return state, ok
+}
+
+func (sm *SessionManager) RemoveSession(sessionID string) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	session, ok := sm.sessions[sessionID]
 	if !ok {
-		return nil
+		return
+	}
+	// Close all chat sessions in this session
+	for chatName, state := range session.Chats {
+		if state.ChatSession != nil {
+			if err := state.ChatSession.Close(); err != nil {
+				log.Printf("Error closing session %s chat %s: %v", sessionID, chatName, err)
+			}
+		}
 	}
 	delete(sm.sessions, sessionID)
-	return session.ChatSession
 }
 
 func (sm *SessionManager) CloseAllSessions() {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	for sessionID, session := range sm.sessions {
-		if session.ChatSession != nil {
-			if err := session.ChatSession.Close(); err != nil {
-				log.Printf("Error closing session %s: %v", sessionID, err)
+		for chatName, state := range session.Chats {
+			if state.ChatSession != nil {
+				if err := state.ChatSession.Close(); err != nil {
+					log.Printf("Error closing session %s chat %s: %v", sessionID, chatName, err)
+				}
 			}
 		}
 	}
@@ -335,22 +388,27 @@ func (h *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Reques
 	existingSession, exists := h.sessionManager.GetSession(sessionID)
 	var session *chatbot.WSSession
 
-	if exists && existingSession.ChatSession != nil {
+	if exists && len(existingSession.Chats) > 0 {
 		// Reuse existing session - create new WSSession with same ID but new connection
 		session = chatbot.NewWSSession(conn, sessionID, h.cfg)
-		// Restore chat session and bot from existing session
+		// Restore current chat name
 		session.ChatName = existingSession.ChatName
-		session.ChatSession = existingSession.ChatSession
-		session.ChatBot = existingSession.ChatBot
-		// Reinitialize WSHandler with new connection
-		session.WSHandler = chatbot.NewWSChatHandler(session)
-		// Update ChatBot's handler to use the new WSHandler
-		if session.ChatBot != nil {
-			session.ChatBot.SetHandler(session.WSHandler)
+		
+		// Restore chat session and bot for the current chat
+		if session.ChatName != "" {
+			if chatState, ok := existingSession.Chats[session.ChatName]; ok && chatState.ChatSession != nil {
+				session.ChatSession = chatState.ChatSession
+				session.ChatBot = chatState.ChatBot
+				// Reinitialize WSHandler with new connection
+				session.WSHandler = chatbot.NewWSChatHandler(session)
+				// Update ChatBot's handler to use the new WSHandler
+				if session.ChatBot != nil {
+					session.ChatBot.SetHandler(session.WSHandler)
+				}
+				log.Printf("Reconnected to existing session %s (chat: %s)", sessionID, session.ChatName)
+			}
 		}
-		// Update session manager with restored ChatBot
-		existingSession.ChatBot = session.ChatBot
-		log.Printf("Reconnected to existing session %s (chat: %s)", sessionID, session.ChatName)
+		log.Printf("Reconnected to existing session %s with %d chats", sessionID, len(existingSession.Chats))
 	} else {
 		// Create new session
 		session = chatbot.NewWSSession(conn, sessionID, h.cfg)
@@ -429,25 +487,60 @@ func (h *WebSocketHandler) handleSelectChat(session *chatbot.WSSession, msg *cha
 		return
 	}
 
-	// If already initialized the same chat, return
-	if session.ChatName == req.ChatName && session.ChatSession != nil && session.WSHandler != nil {
+	// If already using the same chat and it's initialized, just reinitialize the WSHandler
+	if session.ChatName == req.ChatName && session.ChatSession != nil {
+		log.Printf("Session %s: Reactivating existing chat session for '%s'", session.SessionID, req.ChatName)
+		// Reinitialize WSHandler with current connection
+		session.WSHandler = chatbot.NewWSChatHandler(session)
+		if session.ChatBot != nil {
+			session.ChatBot.SetHandler(session.WSHandler)
+		}
+		// Update session manager
+		h.sessionManager.UpdateChatSessionWithBot(session.SessionID, req.ChatName, session.ChatSession, session.ChatBot)
 		session.SendMessage("chat_selected", map[string]interface{}{
-			"session_id": session.SessionID,
-			"chat_name":  req.ChatName,
-			"message":    fmt.Sprintf("Already selected chat: %s", req.ChatName),
+			"session_id":  session.SessionID,
+			"chat_name":   req.ChatName,
+			"description": chatCfg.Desc,
+			"message":     fmt.Sprintf("Reactivated chat: %s", req.ChatName),
 		})
 		return
 	}
 
-	// If a different chat session exists, cleanup first
-	if session.ChatSession != nil {
-		if err := session.ChatSession.Close(); err != nil {
-			log.Printf("Error closing previous chat session: %v", err)
-		}
+	// Switching to a different chat
+	previousChat := session.ChatName
+	if previousChat != "" {
+		log.Printf("Session %s: Switching chat from '%s' to '%s'", session.SessionID, previousChat, req.ChatName)
+		// Note: We don't close the previous chat session, just save its state
+		// The MCP client and other resources remain alive in the saved ChatState
 		session.ChatSession = nil
+		session.ChatBot = nil
+		session.WSHandler = nil
 	}
 
-	// Initialize chat session
+	// Check if this chat was previously used in this session (restore state)
+	if chatState, ok := h.sessionManager.GetChatState(session.SessionID, req.ChatName); ok && chatState.ChatSession != nil {
+		log.Printf("Session %s: Restoring existing chat session for '%s'", session.SessionID, req.ChatName)
+		// Restore the saved chat state
+		session.ChatName = req.ChatName
+		session.ChatSession = chatState.ChatSession
+		session.ChatBot = chatState.ChatBot
+		// Reinitialize WSHandler with current connection
+		session.WSHandler = chatbot.NewWSChatHandler(session)
+		if session.ChatBot != nil {
+			session.ChatBot.SetHandler(session.WSHandler)
+		}
+		// Update session manager with current active chat
+		h.sessionManager.UpdateChatSessionWithBot(session.SessionID, req.ChatName, session.ChatSession, session.ChatBot)
+		session.SendMessage("chat_selected", map[string]interface{}{
+			"session_id":  session.SessionID,
+			"chat_name":   req.ChatName,
+			"description": chatCfg.Desc,
+			"message":     fmt.Sprintf("Restored chat: %s", req.ChatName),
+		})
+		return
+	}
+
+	// Initialize new chat session
 	ctx := context.Background()
 	chatSession, err := chatbot.InitChatSession(ctx, h.cfg, req.ChatName, false)
 	if err != nil {
@@ -455,7 +548,7 @@ func (h *WebSocketHandler) handleSelectChat(session *chatbot.WSSession, msg *cha
 		return
 	}
 
-	// Initialize ChatBot for reuse
+	// Initialize ChatBot
 	cb := chatbot.NewChatBot(ctx, chatSession.Agent, chatSession.Manager, nil)
 	wsHandler := chatbot.NewWSChatHandler(session)
 	cb.SetHandler(wsHandler)
@@ -528,12 +621,12 @@ func (h *WebSocketHandler) handleChat(session *chatbot.WSSession, msg *chatbot.W
 
 // handleClear handles clear context request
 func (h *WebSocketHandler) handleClear(session *chatbot.WSSession) {
-	// Clear conversation record for the session
+	// Clear conversation record for the current chat only
 	if session.ChatSession != nil {
 		session.ChatSession.Manager.Clear()
 		session.SendMessage("cleared", map[string]interface{}{
 			"chat_name": session.ChatName,
-			"message":   "Conversation context cleared",
+			"message":   fmt.Sprintf("Conversation context cleared for chat: %s", session.ChatName),
 		})
 	} else {
 		session.SendMessage("cleared", map[string]interface{}{
