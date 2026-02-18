@@ -8,10 +8,43 @@ marked.setOptions({
 
 let ws = null;
 let currentChat = null;
+let sessionId = null;
 let reconnectAttempts = 0;
 const maxReconnectAttempts = 5;
 let toastTimeout = null;
 let isGenerating = false;
+
+// Session ID storage key
+const SESSION_ID_KEY = 'chat_agent_session_id';
+
+// Load session ID from localStorage
+function loadSessionId() {
+    try {
+        return localStorage.getItem(SESSION_ID_KEY);
+    } catch (e) {
+        console.error('Failed to load session ID:', e);
+        return null;
+    }
+}
+
+// Save session ID to localStorage
+function saveSessionId(id) {
+    try {
+        localStorage.setItem(SESSION_ID_KEY, id);
+        console.log('Session ID saved:', id);
+    } catch (e) {
+        console.error('Failed to save session ID:', e);
+    }
+}
+
+// Clear session ID from localStorage
+function clearSessionId() {
+    try {
+        localStorage.removeItem(SESSION_ID_KEY);
+    } catch (e) {
+        console.error('Failed to clear session ID:', e);
+    }
+}
 
 // File upload state
 let pendingFiles = [];
@@ -697,6 +730,11 @@ async function startChat() {
     // Load message history from storage (IndexedDB or localStorage)
     await loadMessageHistory();
 
+    // Load session ID from localStorage if not already set
+    if (!sessionId) {
+        sessionId = loadSessionId();
+    }
+
     connectWebSocket();
 }
 
@@ -869,6 +907,11 @@ function displayStoredToolCall(toolData) {
 function connectWebSocket() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     let wsUrl = protocol + '//' + window.location.host + '/ws';
+    
+    // Add session ID to URL if available
+    if (sessionId) {
+        wsUrl += '?session_id=' + encodeURIComponent(sessionId);
+    }
 
     ws = new WebSocket(wsUrl);
 
@@ -876,7 +919,7 @@ function connectWebSocket() {
         console.log('WebSocket connected');
         reconnectAttempts = 0;
         closeStatus(); // Close any existing status when connected
-        // 自动选择当前 chat
+        // Auto-select current chat
         if (currentChat) {
             ws.send(JSON.stringify({ type: 'select_chat', payload: { chat_name: currentChat } }));
         }
@@ -885,6 +928,17 @@ function connectWebSocket() {
     ws.onmessage = function (event) {
         try {
             const msg = JSON.parse(event.data);
+            
+            // Handle session_init message
+            if (msg.type === 'session_init') {
+                const newSessionId = msg.payload.session_id;
+                if (newSessionId && newSessionId !== sessionId) {
+                    sessionId = newSessionId;
+                    saveSessionId(sessionId);
+                    console.log('Received new session ID:', sessionId);
+                }
+            }
+            
             handleMessage(msg);
         } catch (e) {
             console.error('Failed to parse message:', e);

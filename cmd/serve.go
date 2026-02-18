@@ -171,7 +171,8 @@ Example:
 
 		log.Printf("Shutting down server...")
 
-		wsHandler.CloseAllSessions()
+		// Cleanup all sessions on server shutdown
+		wsHandler.sessionManager.CloseAllSessions()
 
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -193,15 +194,16 @@ type FilePayload struct {
 }
 
 type ChatRequest struct {
-	ChatName string         `json:"chat_name"`
-	Message  string         `json:"message"`
-	Files    []FilePayload  `json:"files,omitempty"`
+	ChatName string        `json:"chat_name"`
+	Message  string        `json:"message"`
+	Files    []FilePayload `json:"files,omitempty"`
 }
 
 type SessionInfo struct {
 	ID          string
 	ChatName    string
 	ChatSession *chatbot.ChatSession
+	ChatBot     *chatbot.ChatBot
 	CreatedAt   time.Time
 }
 
@@ -260,12 +262,14 @@ func (sm *SessionManager) AddSession(sessionID string, chatName string, chatSess
 	}
 }
 
-func (sm *SessionManager) UpdateChatSession(sessionID string, chatName string, chatSession *chatbot.ChatSession) {
+// UpdateChatSessionWithBot updates session with both ChatSession and ChatBot
+func (sm *SessionManager) UpdateChatSessionWithBot(sessionID string, chatName string, chatSession *chatbot.ChatSession, chatBot *chatbot.ChatBot) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	if session, ok := sm.sessions[sessionID]; ok {
 		session.ChatName = chatName
 		session.ChatSession = chatSession
+		session.ChatBot = chatBot
 	}
 }
 
@@ -320,12 +324,44 @@ func (h *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Reques
 	}
 	defer conn.Close()
 
-	// Each connection is a new session - no session persistence needed
-	sessionID := fmt.Sprintf("session-%d", time.Now().UnixNano())
+	// Get or create session ID from query parameter
+	sessionID := r.URL.Query().Get("session_id")
+	if sessionID == "" {
+		sessionID = fmt.Sprintf("session-%d", time.Now().UnixNano())
+	}
 	log.Printf("WebSocket connection: %s", sessionID)
 
-	session := chatbot.NewWSSession(conn, sessionID, h.cfg)
-	h.sessionManager.AddSession(sessionID, "", nil)
+	// Check if session already exists
+	existingSession, exists := h.sessionManager.GetSession(sessionID)
+	var session *chatbot.WSSession
+
+	if exists && existingSession.ChatSession != nil {
+		// Reuse existing session - create new WSSession with same ID but new connection
+		session = chatbot.NewWSSession(conn, sessionID, h.cfg)
+		// Restore chat session and bot from existing session
+		session.ChatName = existingSession.ChatName
+		session.ChatSession = existingSession.ChatSession
+		session.ChatBot = existingSession.ChatBot
+		// Reinitialize WSHandler with new connection
+		session.WSHandler = chatbot.NewWSChatHandler(session)
+		// Update ChatBot's handler to use the new WSHandler
+		if session.ChatBot != nil {
+			session.ChatBot.SetHandler(session.WSHandler)
+		}
+		// Update session manager with restored ChatBot
+		existingSession.ChatBot = session.ChatBot
+		log.Printf("Reconnected to existing session %s (chat: %s)", sessionID, session.ChatName)
+	} else {
+		// Create new session
+		session = chatbot.NewWSSession(conn, sessionID, h.cfg)
+		h.sessionManager.AddSession(sessionID, "", nil)
+		log.Printf("Created new session %s", sessionID)
+	}
+
+	// Send session ID to client
+	session.SendMessage("session_init", map[string]interface{}{
+		"session_id": sessionID,
+	})
 
 	// Handle messages
 	for {
@@ -347,16 +383,17 @@ func (h *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Reques
 		go h.processMessage(session, &wsMsg)
 	}
 
-	// Cleanup chat session
+	// On disconnect, do NOT remove session from manager
+	// Only cleanup the connection-related resources
 	if session.ChatSession != nil {
-		if err := session.ChatSession.Close(); err != nil {
-			log.Printf("Error closing chat session: %v", err)
-		}
-		session.ChatSession = nil
+		// Clear the WSHandler but keep ChatSession alive
+		session.WSHandler = nil
+		log.Printf("Session %s disconnected (kept in memory, chat: %s)", sessionID, session.ChatName)
+	} else {
+		// No chat session, safe to remove from manager
+		h.sessionManager.RemoveSession(sessionID)
+		log.Printf("Session %s closed (no active chat)", sessionID)
 	}
-
-	h.sessionManager.RemoveSession(sessionID)
-	log.Printf("Session %s closed", sessionID)
 }
 
 // processMessage processes a WebSocket message
@@ -418,9 +455,6 @@ func (h *WebSocketHandler) handleSelectChat(session *chatbot.WSSession, msg *cha
 		return
 	}
 
-	// Update session info with new chat session
-	h.sessionManager.UpdateChatSession(session.SessionID, req.ChatName, chatSession)
-
 	// Initialize ChatBot for reuse
 	cb := chatbot.NewChatBot(ctx, chatSession.Agent, chatSession.Manager, nil)
 	wsHandler := chatbot.NewWSChatHandler(session)
@@ -431,6 +465,9 @@ func (h *WebSocketHandler) handleSelectChat(session *chatbot.WSSession, msg *cha
 	session.ChatSession = chatSession
 	session.ChatBot = &cb
 	session.WSHandler = wsHandler
+
+	// Update session manager with chat session and bot
+	h.sessionManager.UpdateChatSessionWithBot(session.SessionID, req.ChatName, chatSession, &cb)
 
 	session.SendMessage("chat_selected", map[string]interface{}{
 		"chat_name":   req.ChatName,
