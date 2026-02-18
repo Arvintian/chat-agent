@@ -17,6 +17,12 @@ let isGenerating = false;
 // Session ID storage key
 const SESSION_ID_KEY = 'chat_agent_session_id';
 
+// Detect if device is mobile
+function isMobileDevice() {
+    return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || 
+           (window.innerWidth <= 768);
+}
+
 // Load session ID from localStorage
 function loadSessionId() {
     try {
@@ -985,8 +991,13 @@ function handleMessage(msg) {
             if (isGenerating) {
                 // 重新启用输入框
                 const input = document.getElementById('message-input');
-                if (input) input.disabled = false;
-                if (input) input.focus();
+                if (input) {
+                    input.disabled = false;
+                    // 桌面端自动聚焦输入框，移动端不聚焦（避免弹出键盘）
+                    if (!isMobileDevice()) {
+                        input.focus();
+                    }
+                }
                 isGenerating = false;
                 updateSendButton();
             }
@@ -997,10 +1008,15 @@ function handleMessage(msg) {
             // 只有在生成中才重置状态
             if (isGenerating) {
                 const inputErr = document.getElementById('message-input');
-                if (inputErr) inputErr.disabled = false;
+                if (inputErr) {
+                    inputErr.disabled = false;
+                    // 桌面端自动聚焦输入框，移动端不聚焦（避免弹出键盘）
+                    if (!isMobileDevice()) {
+                        inputErr.focus();
+                    }
+                }
                 isGenerating = false;
                 updateSendButton();
-                if (inputErr) inputErr.focus();
             }
             break;
         case 'stopped':
@@ -1009,8 +1025,13 @@ function handleMessage(msg) {
                 isGenerating = false;
                 updateSendButton();
                 const inputStopped = document.getElementById('message-input');
-                if (inputStopped) inputStopped.disabled = false;
-                if (inputStopped) inputStopped.focus();
+                if (inputStopped) {
+                    inputStopped.disabled = false;
+                    // 桌面端自动聚焦输入框，移动端不聚焦（避免弹出键盘）
+                    if (!isMobileDevice()) {
+                        inputStopped.focus();
+                    }
+                }
             }
             break;
         case 'cleared':

@@ -94,6 +94,14 @@ body {
     background-color: #f5f5f5;
     float: left;
     min-width: 80%;
+    max-width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+.assistant::-webkit-scrollbar {
+    display: none;
 }
 
 .error {
@@ -1139,6 +1147,14 @@ pre.code-block:hover .code-copy-btn {
 .message-content {
     word-wrap: break-word;
     line-height: 1.6;
+    max-width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+.message-content::-webkit-scrollbar {
+    display: none;
 }
 
 .markdown-body {
@@ -1181,6 +1197,15 @@ pre.code-block:hover .code-copy-btn {
     border-collapse: collapse;
     width: 100%;
     margin: 8px 0;
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+.markdown-body table::-webkit-scrollbar {
+    display: none;
 }
 
 .markdown-body th,
