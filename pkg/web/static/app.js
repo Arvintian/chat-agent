@@ -1,9 +1,26 @@
 // Configure marked.js
+const renderer = new marked.Renderer();
+
+// Override link renderer to open links in new window
+renderer.link = function(href, title, text) {
+    if (typeof href === 'object') {
+        // marked.js v4+ passes an object with href, title, text properties
+        const { href: url, title: linkTitle, text: linkText } = href;
+        return '<a href="' + url + '" target="_blank" rel="noopener noreferrer"' + 
+               (linkTitle ? ' title="' + linkTitle + '"' : '') + '>' + linkText + '</a>';
+    } else {
+        // Fallback for older versions
+        return '<a href="' + href + '" target="_blank" rel="noopener noreferrer"' + 
+               (title ? ' title="' + title + '"' : '') + '>' + text + '</a>';
+    }
+};
+
 marked.setOptions({
     breaks: true,
     gfm: true,
     headerIds: true,
-    langPrefix: 'language-'
+    langPrefix: 'language-',
+    renderer: renderer
 });
 
 let ws = null;
