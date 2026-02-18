@@ -235,7 +235,7 @@ var RootCmd = &cobra.Command{
 				case "/help", "/h":
 					printHelp()
 				case "/clear", "/c":
-					session.Manager.Clear()
+					session.Clear()
 					fmt.Println("The conversation context is cleared")
 				case "/summary", "/history", "/i":
 					os.Stdout.WriteString(session.Manager.GetSummary())

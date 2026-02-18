@@ -36,5 +36,4 @@ func (c *CleanupRegistry) Execute() {
 	for i := len(c.funcs) - 1; i >= 0; i-- {
 		c.funcs[i]()
 	}
-	c.funcs = nil
 }

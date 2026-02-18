@@ -242,6 +242,19 @@ func (s *ChatSession) Close() error {
 	return nil
 }
 
+// Clear clear the current context
+func (s *ChatSession) Clear() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.Manager != nil {
+		s.Manager.Clear()
+	}
+	if s.cleanupRegistry != nil {
+		s.cleanupRegistry.Execute()
+	}
+	return nil
+}
+
 // renderSystemPrompt renders system prompt using Go template with built-in variables
 func renderSystemPrompt(systemPrompt string) (string, error) {
 	if systemPrompt == "" {

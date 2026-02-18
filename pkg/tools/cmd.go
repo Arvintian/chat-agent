@@ -35,9 +35,7 @@ func getCommandTools(ctx context.Context, params map[string]interface{}) ([]tool
 	if v, ok := ctx.Value("cleanup").(*utils.CleanupRegistry); ok {
 		v.Register(func() {
 			for _, task := range tm.ListTasks() {
-				if task.Status == TaskStatusRunning {
-					tm.KillTask(task.ID)
-				}
+				tm.RemoveTask(task.ID)
 			}
 		})
 	}

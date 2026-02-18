@@ -207,7 +207,7 @@ type ChatState struct {
 
 type SessionInfo struct {
 	ID        string
-	ChatName  string // Current active chat
+	ChatName  string                // Current active chat
 	Chats     map[string]*ChatState // All chats in this session
 	CreatedAt time.Time
 }
@@ -393,7 +393,7 @@ func (h *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Reques
 		session = chatbot.NewWSSession(conn, sessionID, h.cfg)
 		// Restore current chat name
 		session.ChatName = existingSession.ChatName
-		
+
 		// Restore chat session and bot for the current chat
 		if session.ChatName != "" {
 			if chatState, ok := existingSession.Chats[session.ChatName]; ok && chatState.ChatSession != nil {
@@ -623,7 +623,7 @@ func (h *WebSocketHandler) handleChat(session *chatbot.WSSession, msg *chatbot.W
 func (h *WebSocketHandler) handleClear(session *chatbot.WSSession) {
 	// Clear conversation record for the current chat only
 	if session.ChatSession != nil {
-		session.ChatSession.Manager.Clear()
+		session.ChatSession.Clear()
 		session.SendMessage("cleared", map[string]interface{}{
 			"chat_name": session.ChatName,
 			"message":   fmt.Sprintf("Conversation context cleared for chat: %s", session.ChatName),
