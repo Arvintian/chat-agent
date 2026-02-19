@@ -1030,7 +1030,7 @@ function handleMessage(msg) {
                 isGenerating = false;
                 updateSendButton();
             }
-            smartScrollToBottom();
+            smartScrollToBottom(true);
             //setStatus('Response completed', false);
             break;
         case 'error':
@@ -1644,10 +1644,21 @@ let lastScrollTime = 0;
 const SCROLL_THROTTLE_MS = 150;
 let scrollPending = false;
 
-function smartScrollToBottom() {
+function smartScrollToBottom(force = false) {
     // Only scroll if user is not reading history or is at bottom
     if (!isUserScrolling || isAtBottom) {
         const now = Date.now();
+        if (force) {
+            requestAnimationFrame(() => {
+                const messages = document.getElementById('messages');
+                if (messages) {
+                    messages.scrollTop = messages.scrollHeight;
+                }
+                lastScrollTime = now;
+                scrollPending = false;
+            });
+            return
+        }
         if (now - lastScrollTime > SCROLL_THROTTLE_MS && !scrollPending) {
             scrollPending = true;
             requestAnimationFrame(() => {
