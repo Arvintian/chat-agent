@@ -301,6 +301,12 @@ pre.code-block:hover .code-copy-btn {
     display: block;
     padding: 12px;
     overflow-x: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+.markdown-body pre code::-webkit-scrollbar {
+    display: none;
 }
 
 #input-area {
@@ -331,7 +337,7 @@ pre.code-block:hover .code-copy-btn {
     display: inline-block;
     border-radius: 6px;
     overflow: hidden;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
 .image-preview-item img {
@@ -442,7 +448,7 @@ pre.code-block:hover .code-copy-btn {
         width: 100%;
         align-items: stretch;
     }
-    
+
     #upload-btn,
     #send-btn {
         width: 44px !important;
@@ -451,7 +457,7 @@ pre.code-block:hover .code-copy-btn {
         max-height: 44px !important;
         padding: 0 !important;
     }
-    
+
     #message-input {
         min-height: 44px !important;
         height: 44px !important;
@@ -833,6 +839,7 @@ pre.code-block:hover .code-copy-btn {
         opacity: 0;
         transform: scale(0.95);
     }
+
     to {
         opacity: 1;
         transform: scale(1);
@@ -1166,6 +1173,12 @@ pre.code-block:hover .code-copy-btn {
     padding: 12px;
     border-radius: 6px;
     overflow-x: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+.markdown-body pre::-webkit-scrollbar {
+    display: none;
 }
 
 .markdown-body code {
@@ -1592,11 +1605,11 @@ pre.code-block:hover .code-copy-btn {
     }
 
     .message-content {
-        font-size: 14px;
+        font-size: 15px;
     }
 
     .markdown-body {
-        font-size: 13px;
+        font-size: 14px;
     }
 
     .markdown-body pre {
@@ -1604,7 +1617,7 @@ pre.code-block:hover .code-copy-btn {
     }
 
     .markdown-body code {
-        font-size: 12px;
+        font-size: 13px;
     }
 
     .modal-content {
@@ -1632,50 +1645,50 @@ pre.code-block:hover .code-copy-btn {
         padding: 8px 14px;
         font-size: 12px;
     }
-    
+
     /* File preview adjustments for small screens */
     .image-preview-container {
         gap: 6px;
         padding: 6px;
     }
-    
+
     .file-preview-item {
         min-width: 100px;
         max-width: 120px;
     }
-    
+
     .file-icon {
         font-size: 24px;
     }
-    
+
     .file-name {
         font-size: 10px;
     }
-    
+
     .file-size {
         font-size: 9px;
     }
-    
+
     /* Image preview modal mobile styles */
     .image-preview-modal-content {
         max-width: 95%;
         max-height: 85vh;
     }
-    
+
     #image-preview-full {
         max-height: 75vh;
     }
-    
+
     .image-preview-close {
         top: -36px;
         font-size: 32px;
     }
-    
+
     .image-preview-nav-btn {
         padding: 8px 14px;
         font-size: 13px;
     }
-    
+
     .image-preview-nav {
         gap: 12px;
         margin-top: 12px;

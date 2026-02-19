@@ -2,16 +2,16 @@
 const renderer = new marked.Renderer();
 
 // Override link renderer to open links in new window
-renderer.link = function(href, title, text) {
+renderer.link = function (href, title, text) {
     if (typeof href === 'object') {
         // marked.js v4+ passes an object with href, title, text properties
         const { href: url, title: linkTitle, text: linkText } = href;
-        return '<a href="' + url + '" target="_blank" rel="noopener noreferrer"' + 
-               (linkTitle ? ' title="' + linkTitle + '"' : '') + '>' + linkText + '</a>';
+        return '<a href="' + url + '" target="_blank" rel="noopener noreferrer"' +
+            (linkTitle ? ' title="' + linkTitle + '"' : '') + '>' + linkText + '</a>';
     } else {
         // Fallback for older versions
-        return '<a href="' + href + '" target="_blank" rel="noopener noreferrer"' + 
-               (title ? ' title="' + title + '"' : '') + '>' + text + '</a>';
+        return '<a href="' + href + '" target="_blank" rel="noopener noreferrer"' +
+            (title ? ' title="' + title + '"' : '') + '>' + text + '</a>';
     }
 };
 
@@ -31,13 +31,19 @@ const maxReconnectAttempts = 5;
 let toastTimeout = null;
 let isGenerating = false;
 
+// Scroll behavior control
+let isUserScrolling = false;
+let isAtBottom = true;
+let scrollTimeout = null;
+const SCROLL_THRESHOLD = 50; // pixels from bottom to consider "at bottom"
+
 // Session ID storage key
 const SESSION_ID_KEY = 'chat_agent_session_id';
 
 // Detect if device is mobile
 function isMobileDevice() {
-    return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || 
-           (window.innerWidth <= 768);
+    return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+        (window.innerWidth <= 768);
 }
 
 // Load session ID from localStorage
@@ -758,6 +764,9 @@ async function startChat() {
         sessionId = loadSessionId();
     }
 
+    // Initialize scroll detection for auto-scroll behavior
+    initScrollDetection();
+
     connectWebSocket();
 }
 
@@ -790,6 +799,9 @@ async function loadMessageHistory() {
             displayStoredToolCall(msg.toolData);
         }
     });
+
+    // Scroll to bottom after loading history
+    scrollToBottom(true);
 }
 
 // Display stored thinking and response message
@@ -924,13 +936,13 @@ function displayStoredToolCall(toolData) {
     `;
 
     document.getElementById('messages').appendChild(div);
-    scrollToBottom();
+    // Don't auto-scroll when loading history
 }
 
 function connectWebSocket() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     let wsUrl = protocol + '//' + window.location.host + '/ws';
-    
+
     // Add session ID to URL if available
     if (sessionId) {
         wsUrl += '?session_id=' + encodeURIComponent(sessionId);
@@ -951,7 +963,7 @@ function connectWebSocket() {
     ws.onmessage = function (event) {
         try {
             const msg = JSON.parse(event.data);
-            
+
             // Handle session_init message
             if (msg.type === 'session_init') {
                 const newSessionId = msg.payload.session_id;
@@ -961,7 +973,7 @@ function connectWebSocket() {
                     console.log('Received new session ID:', sessionId);
                 }
             }
-            
+
             handleMessage(msg);
         } catch (e) {
             console.error('Failed to parse message:', e);
@@ -1018,6 +1030,7 @@ function handleMessage(msg) {
                 isGenerating = false;
                 updateSendButton();
             }
+            smartScrollToBottom();
             //setStatus('Response completed', false);
             break;
         case 'error':
@@ -1373,6 +1386,9 @@ function sendMessage() {
     // Display user message with files
     displayUserMessageWithFiles(message, pendingFiles);
 
+    // Force scroll to bottom when user sends a message
+    scrollToBottom(true);
+
     // Save to local storage history (include files)
     const filesToSave = pendingFiles.length > 0 ? pendingFiles.map(file => ({
         url: file.url,
@@ -1464,7 +1480,7 @@ function displayUserMessageWithFiles(text, files, msgIndex = -1) {
     contentDiv.innerHTML = html;
     div.appendChild(contentDiv);
     document.getElementById('messages').appendChild(div);
-    scrollToBottom();
+    // Don't auto-scroll here - the forced scroll in sendMessage() handles it
 }
 
 function addMessage(text, type) {
@@ -1510,7 +1526,7 @@ function addMessage(text, type) {
     // 为消息中的代码块添加复制按钮
     addCopyButtonsToCodeBlocks(div);
 
-    scrollToBottom();
+    smartScrollToBottom();
 }
 
 function displayToolCall(name, args, index, streaming) {
@@ -1551,7 +1567,7 @@ function displayToolCall(name, args, index, streaming) {
             toolCall.argsElement.textContent = args;
         }
 
-        scrollToBottom();
+        smartScrollToBottom();
     } else {
         // Update existing tool call
         if (name !== toolCall.name) {
@@ -1600,7 +1616,7 @@ function displayToolCall(name, args, index, streaming) {
             delete toolCalls[index];
         }
 
-        scrollToBottom();
+        smartScrollToBottom();
     }
 }
 
@@ -1622,6 +1638,29 @@ let currentContentType = '';
 // 存储每个消息块（thinking 和 response）
 let thinkingBlock = null;
 let responseBlock = null;
+
+// Throttle scroll during streaming to improve performance
+let lastScrollTime = 0;
+const SCROLL_THROTTLE_MS = 150;
+let scrollPending = false;
+
+function smartScrollToBottom() {
+    // Only scroll if user is not reading history or is at bottom
+    if (!isUserScrolling || isAtBottom) {
+        const now = Date.now();
+        if (now - lastScrollTime > SCROLL_THROTTLE_MS && !scrollPending) {
+            scrollPending = true;
+            requestAnimationFrame(() => {
+                const messages = document.getElementById('messages');
+                if (messages) {
+                    messages.scrollTop = messages.scrollHeight;
+                }
+                lastScrollTime = now;
+                scrollPending = false;
+            });
+        }
+    }
+}
 
 function displayChunk(content, isFirst, isLast, contentType = 'response') {
     // 检查是否是最后的 final chunk（空内容）
@@ -1683,7 +1722,9 @@ function displayChunk(content, isFirst, isLast, contentType = 'response') {
         chunkElement = null;
         thinkingElement = null;
 
-        scrollToBottom();
+        // Use smart scroll to avoid interrupting user reading
+        // The copy buttons and any subsequent tool calls will be visible if user is at bottom
+        smartScrollToBottom();
         return;
     }
 
@@ -1715,7 +1756,7 @@ function displayChunk(content, isFirst, isLast, contentType = 'response') {
                     thinkingElement.textContent = content;
                 }
             }
-            scrollToBottom();
+            smartScrollToBottom();
         } else {
             // 追加内容
             currentThinkingChunk += content;
@@ -1728,7 +1769,7 @@ function displayChunk(content, isFirst, isLast, contentType = 'response') {
                     thinkingElement.textContent = currentThinkingChunk;
                 }
             }
-            scrollToBottom();
+            smartScrollToBottom();
         }
     } else {
         // 处理回答消息
@@ -1754,7 +1795,7 @@ function displayChunk(content, isFirst, isLast, contentType = 'response') {
                     chunkElement.textContent = content;
                 }
             }
-            scrollToBottom();
+            smartScrollToBottom();
         } else {
             // 追加内容
             currentChunk += content;
@@ -1768,16 +1809,19 @@ function displayChunk(content, isFirst, isLast, contentType = 'response') {
                     chunkElement.textContent = currentChunk;
                 }
             }
-            scrollToBottom();
+            smartScrollToBottom();
         }
     }
 }
 
-function scrollToBottom() {
+function scrollToBottom(force = false) {
     const messages = document.getElementById('messages');
-    requestAnimationFrame(() => {
+    if (!messages) return;
+
+    // Force scroll (e.g., when user sends a message) or auto-scroll if not reading history
+    if (force || !isUserScrolling || isAtBottom) {
         messages.scrollTop = messages.scrollHeight;
-    });
+    }
 }
 
 // 复制整个消息内容
@@ -2090,8 +2134,8 @@ function handleViewportChange() {
             // Use setTimeout to allow keyboard animation completes
             setTimeout(() => {
                 inputArea.scrollIntoView({ behavior: 'smooth', block: 'end' });
-                // Also scroll messages to bottom
-                scrollToBottom();
+                // Also scroll messages to bottom (force scroll for keyboard)
+                scrollToBottom(true);
             }, 100);
         }
     } else if (viewportHeight > lastViewportHeight - 50) {
@@ -2116,12 +2160,66 @@ if (window.visualViewport) {
 // Also listen to window resize for keyboard show/hide
 window.addEventListener('resize', handleViewportChange);
 
+// ========== Scroll Behavior Control ==========
+
+// Initialize scroll detection after DOM is ready
+function initScrollDetection() {
+    const messagesContainer = document.getElementById('messages');
+    if (!messagesContainer) return;
+
+    // Reset scroll state when starting a new chat
+    isUserScrolling = false;
+    isAtBottom = true;
+
+    // Listen for scroll events to detect user reading behavior
+    let scrollTimer = null;
+    messagesContainer.addEventListener('scroll', () => {
+        const scrollTop = messagesContainer.scrollTop;
+        const scrollHeight = messagesContainer.scrollHeight;
+        const clientHeight = messagesContainer.clientHeight;
+
+        // Check if user is at bottom (within threshold)
+        const wasAtBottom = isAtBottom;
+        isAtBottom = (scrollHeight - scrollTop - clientHeight) <= SCROLL_THRESHOLD;
+
+        // If user scrolled up from bottom, mark as scrolling
+        if (wasAtBottom && !isAtBottom) {
+            isUserScrolling = true;
+        }
+
+        // If user scrolled back to bottom, re-enable auto-scroll
+        if (!wasAtBottom && isAtBottom) {
+            isUserScrolling = false;
+        }
+
+        // Clear existing timeout
+        if (scrollTimer) {
+            clearTimeout(scrollTimer);
+        }
+
+        // Set timeout to stabilize scrolling state
+        scrollTimer = setTimeout(() => {
+            scrollTimer = null;
+            // Re-check position after scrolling stops
+            const currentScrollTop = messagesContainer.scrollTop;
+            const currentScrollHeight = messagesContainer.scrollHeight;
+            const currentClientHeight = messagesContainer.clientHeight;
+            isAtBottom = (currentScrollHeight - currentScrollTop - currentClientHeight) <= SCROLL_THRESHOLD;
+
+            // If user is at bottom, re-enable auto-scroll
+            if (isAtBottom) {
+                isUserScrolling = false;
+            }
+        }, 150);
+    }, { passive: true });
+}
+
 // Focus input when keyboard is shown on mobile
 const messageInput = document.getElementById('message-input');
 if (messageInput) {
     messageInput.addEventListener('focus', function () {
         // Small delay to allow keyboard to start appearing
-        setTimeout(scrollToBottom, 300);
+        setTimeout(() => smartScrollToBottom(), 300);
     });
 
     // Handle paste event for image upload from clipboard
