@@ -29,6 +29,7 @@ marked.use(markedHighlight({
         return hljs.highlight(code, { language }).value;
     }
 }));
+marked.use(markedKatex({ throwOnError: false, nonStandard: true }));
 
 let ws = null;
 let currentChat = null;
