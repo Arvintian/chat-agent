@@ -5,7 +5,10 @@
     <title>Chat-Agent</title>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.11.1/build/styles/github.css">
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.11.1/build/highlight.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/lib/marked.umd.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked-highlight/lib/index.umd.js"></script>
     <link rel="stylesheet" href="styles.css">
 </head>
 
@@ -98,15 +101,18 @@
         <div id="input-area">
             <!-- Image preview container -->
             <div id="image-preview-container" class="image-preview-container" style="display: none;"></div>
-            
+
             <div class="input-wrapper">
                 <!-- Image upload button -->
                 <button id="upload-btn" onclick="document.getElementById('file-input').click()" title="Upload file">
                     📎
                 </button>
-                <input type="file" id="file-input" accept="image/*,video/*,audio/*,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/plain,text/csv" multiple onchange="handleFiles(this.files)" style="display: none;" />
-                
-                <textarea id="message-input" placeholder="Type your message..." onkeydown="handleKeyDown(event)"></textarea>
+                <input type="file" id="file-input"
+                    accept="image/*,video/*,audio/*,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/plain,text/csv"
+                    multiple onchange="handleFiles(this.files)" style="display: none;" />
+
+                <textarea id="message-input" placeholder="Type your message..."
+                    onkeydown="handleKeyDown(event)"></textarea>
                 <button id="send-btn" onclick="sendMessage()" title="Send message">➤</button>
             </div>
         </div>

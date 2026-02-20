@@ -1,4 +1,4 @@
-// Configure marked.js
+// Configure marked.js with syntax highlighting
 const renderer = new marked.Renderer();
 
 // Override link renderer to open links in new window
@@ -18,10 +18,17 @@ renderer.link = function (href, title, text) {
 marked.setOptions({
     breaks: true,
     gfm: true,
-    headerIds: true,
-    langPrefix: 'language-',
     renderer: renderer
 });
+const { markedHighlight } = globalThis.markedHighlight;
+marked.use(markedHighlight({
+    emptyLangClass: 'hljs',
+    langPrefix: 'hljs language-',
+    highlight(code, lang, info) {
+        const language = hljs.getLanguage(lang) ? lang : 'plaintext';
+        return hljs.highlight(code, { language }).value;
+    }
+}));
 
 let ws = null;
 let currentChat = null;
