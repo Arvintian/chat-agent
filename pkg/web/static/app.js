@@ -39,11 +39,7 @@ const maxReconnectAttempts = 5;
 let toastTimeout = null;
 let isGenerating = false;
 
-// Scroll behavior control
-let isUserScrolling = false;
-let isAtBottom = true;
-let scrollTimeout = null;
-const SCROLL_THRESHOLD = 50; // pixels from bottom to consider "at bottom"
+// Scroll behavior is now handled by scroll-handler.js module
 
 // Session ID storage key
 const SESSION_ID_KEY = 'chat_agent_session_id';
@@ -83,115 +79,11 @@ function clearSessionId() {
     }
 }
 
-// File upload state
-let pendingFiles = [];
+// Image preview functions are now in image-preview.js module
+// Access via window.showImagePreviewFromHistory, window.showImagePreviewWithIndex, etc.
 
-// Image preview state
-let currentPreviewImages = [];
-let currentPreviewIndex = 0;
-
-// Input history management
-const INPUT_HISTORY_KEY = 'chat_input_history';
-const MAX_HISTORY_SIZE = 50;
-let inputHistory = [];
-let historyIndex = -1;  // -1 means not browsing history, 0 is the newest entry
-let lastInputValue = '';  // Store current input before browsing history
-
-// Load input history from localStorage
-// History is stored with oldest at index 0, newest at the end
-function loadHistory() {
-    try {
-        const stored = localStorage.getItem(INPUT_HISTORY_KEY);
-        if (stored) {
-            inputHistory = JSON.parse(stored);
-            // Ensure it's an array
-            if (!Array.isArray(inputHistory)) {
-                inputHistory = [];
-            }
-        }
-    } catch (e) {
-        console.error('Failed to load input history:', e);
-        inputHistory = [];
-    }
-    historyIndex = -1;
-}
-
-// Save input to history (only non-empty, unique inputs) - newest at the end
-function saveToHistory(text) {
-    if (!text || !text.trim()) return;
-
-    const trimmed = text.trim();
-    // Remove if already exists (to move to end)
-    const existingIndex = inputHistory.indexOf(trimmed);
-    if (existingIndex !== -1) {
-        inputHistory.splice(existingIndex, 1);
-    }
-
-    // Add to end
-    inputHistory.push(trimmed);
-
-    // Limit size - remove oldest entries if exceeds max
-    if (inputHistory.length > MAX_HISTORY_SIZE) {
-        inputHistory = inputHistory.slice(-MAX_HISTORY_SIZE);
-    }
-
-    // Save to localStorage
-    try {
-        localStorage.setItem(INPUT_HISTORY_KEY, JSON.stringify(inputHistory));
-    } catch (e) {
-        console.error('Failed to save input history:', e);
-    }
-
-    historyIndex = -1;
-}
-
-// Navigate history (up = older, down = newer)
-// History is stored with oldest at index 0, newest at index length-1
-function navigateHistory(direction) {
-    if (inputHistory.length === 0) return;
-
-    const input = document.getElementById('message-input');
-    if (!input) return;
-
-    // First key press - save current input
-    if (historyIndex === -1) {
-        lastInputValue = input.value;
-        // Start from newest entry
-        historyIndex = inputHistory.length;
-    }
-
-    // Calculate new index
-    const newIndex = historyIndex + direction;
-
-    // Bounds check
-    if (newIndex < 0) {
-        // Going up beyond oldest - restore original input
-        input.value = lastInputValue;
-        historyIndex = -1;
-        return;
-    } else if (newIndex >= inputHistory.length) {
-        // Going down from beyond oldest - restore original input
-        input.value = lastInputValue;
-        historyIndex = -1;
-        return;
-    } else {
-        historyIndex = newIndex;
-    }
-
-    // Apply selected history item
-    input.value = inputHistory[historyIndex];
-}
-
-// Clear all input history
-function clearHistory() {
-    inputHistory = [];
-    historyIndex = -1;
-    try {
-        localStorage.removeItem(INPUT_HISTORY_KEY);
-    } catch (e) {
-        console.error('Failed to clear input history:', e);
-    }
-}
+// Input history management is now in input-history.js module
+// Access via window.InputHistory
 
 // Track tool calls for streaming updates
 // index -> { name, argsElement, argsText, complete }
@@ -201,515 +93,15 @@ let toolCalls = {};
 let pendingApprovals = {};
 let currentApprovalId = null;
 
-// ========== File Upload Functions ==========
+// File upload functions are now in file-upload.js module
+// Access via window.FileUploadHandler
 
-// Convert Blob to base64 Data URL
-function blobToBase64(blob) {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result);
-        reader.onerror = reject;
-        reader.readAsDataURL(blob);
-    });
-}
-
-// Supported file types and their icons
-const SUPPORTED_FILE_TYPES = {
-    // Images
-    'image/': { icon: '🖼️', category: 'image' },
-    // Videos
-    'video/': { icon: '🎬', category: 'video' },
-    // Audios
-    'audio/': { icon: '🎵', category: 'audio' },
-    // Documents
-    'application/pdf': { icon: '📄', category: 'document' },
-    'text/plain': { icon: '📝', category: 'document' },
-    'application/msword': { icon: '📘', category: 'document' },
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': { icon: '📘', category: 'document' },
-    'application/vnd.ms-excel': { icon: '📊', category: 'document' },
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': { icon: '📊', category: 'document' },
-    'application/vnd.ms-powerpoint': { icon: '📽️', category: 'document' },
-    'application/vnd.openxmlformats-officedocument.presentationml.presentation': { icon: '📽️', category: 'document' },
-    'text/csv': { icon: '📊', category: 'document' }
-};
-
-// Maximum file size (50MB)
-const MAX_FILE_SIZE = 50 * 1024 * 1024;
-
-// Check if a file type is supported
-function isFileTypeSupported(fileType, fileName) {
-    // Check by MIME type
-    for (const typePrefix in SUPPORTED_FILE_TYPES) {
-        if (fileType.startsWith(typePrefix)) {
-            return true;
-        }
-    }
-    // Check by file extension for office documents
-    const ext = fileName.toLowerCase().split('.').pop();
-    const supportedExtensions = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'csv', 'txt'];
-    return supportedExtensions.includes(ext);
-}
-
-// Get file icon based on type
-function getFileIcon(fileType, fileName) {
-    // Check by MIME type
-    for (const typePrefix in SUPPORTED_FILE_TYPES) {
-        if (fileType.startsWith(typePrefix)) {
-            return SUPPORTED_FILE_TYPES[typePrefix].icon;
-        }
-    }
-    // Default icon
-    return '📎';
-}
-
-// Handle file selection
-async function handleFiles(files) {
-    if (!files || files.length === 0) return;
-
-    // Show loading indicator if compressing images
-    let compressionStarted = false;
-
-    for (const file of Array.from(files)) {
-        // Validate file type
-        if (!isFileTypeSupported(file.type, file.name)) {
-            showToast('Unsupported file type: ' + file.name, true);
-            continue;
-        }
-
-        // Validate file size (max 50MB)
-        if (file.size > MAX_FILE_SIZE) {
-            showToast('File size must be less than 50MB: ' + file.name, true);
-            continue;
-        }
-
-        // Compress images before adding to pending files
-        if (file.type.startsWith('image/')) {
-            if (!compressionStarted) {
-                setStatus('Compressing images...', false);
-                compressionStarted = true;
-            }
-
-            try {
-                // Check if compression is needed
-                const needsCompression = ImageCompressor.needsCompression(file, 500); // 500KB threshold
-
-                if (needsCompression) {
-                    // Compress the image
-                    const result = await ImageCompressor.compress(file, {
-                        maxWidth: 1920,
-                        maxHeight: 1080,
-                        quality: 0.85,
-                        maxSizeKB: 500,
-                        minQuality: 0.6,
-                        mimeType: 'image/jpeg'
-                    });
-
-                    console.log(`Image compressed: ${file.name}, ${result.ratio}% reduction (${formatFileSize(result.originalSize)} -> ${formatFileSize(result.compressedSize)})`);
-
-                    // Convert Blob to base64 for transmission
-                    const base64Url = await blobToBase64(result.blob);
-
-                    // Add compressed image to pending files
-                    pendingFiles.push({
-                        url: base64Url,
-                        name: file.name.replace(/\.(png|gif|webp|bmp)$/i, '.jpg'),
-                        type: result.mimeType,
-                        size: result.compressedSize,
-                        isImage: true,
-                        originalSize: result.originalSize,
-                        compressed: true
-                    });
-
-                    // Render previews immediately after adding compressed file
-                    renderFilePreviews();
-                } else {
-                    // Image is already small enough, no compression needed
-                    const reader = new FileReader();
-                    reader.onload = (e) => {
-                        pendingFiles.push({
-                            url: e.target.result,
-                            name: file.name,
-                            type: file.type,
-                            size: file.size,
-                            isImage: true,
-                            compressed: false
-                        });
-                        renderFilePreviews();
-                    };
-                    reader.onerror = () => {
-                        showToast('Failed to read file: ' + file.name, true);
-                    };
-                    reader.readAsDataURL(file);
-                    continue;
-                }
-            } catch (error) {
-                console.error('Failed to compress image:', file.name, error);
-                showToast('Failed to compress image: ' + file.name, true);
-                // Fallback to original file
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    pendingFiles.push({
-                        url: e.target.result,
-                        name: file.name,
-                        type: file.type,
-                        size: file.size,
-                        isImage: true,
-                        compressed: false,
-                        compressionError: true
-                    });
-                    renderFilePreviews();
-                };
-                reader.readAsDataURL(file);
-                continue;
-            }
-        } else {
-            // Non-image file, add directly
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                pendingFiles.push({
-                    url: e.target.result,
-                    name: file.name,
-                    type: file.type,
-                    size: file.size,
-                    isImage: false
-                });
-                renderFilePreviews();
-            };
-            reader.onerror = () => {
-                showToast('Failed to read file: ' + file.name, true);
-            };
-            reader.readAsDataURL(file);
-        }
-    }
-
-    // Render previews after processing all files
-    if (compressionStarted) {
-        renderFilePreviews();
-        closeStatus(); // Close compression status
-    }
-
-    // Clear the input so the same file can be selected again
-    document.getElementById('file-input').value = '';
-}
-
-// Render file previews
-function renderFilePreviews() {
-    const container = document.getElementById('image-preview-container');
-
-    if (pendingFiles.length === 0) {
-        container.style.display = 'none';
-        container.innerHTML = '';
-        return;
-    }
-
-    container.style.display = 'flex';
-    container.innerHTML = pendingFiles.map((file, idx) => {
-        if (file.isImage) {
-            return `
-                <div class="image-preview-item">
-                    <img src="${file.url}" alt="${file.name}" />
-                    <button onclick="removeFile(${idx})" title="Remove file">×</button>
-                </div>
-            `;
-        } else {
-            const icon = getFileIcon(file.type, file.name);
-            const sizeStr = formatFileSize(file.size);
-            return `
-                <div class="image-preview-item file-preview-item">
-                    <div class="file-preview-content">
-                        <span class="file-icon">${icon}</span>
-                        <span class="file-name" title="${file.name}">${file.name}</span>
-                        <span class="file-size">${sizeStr}</span>
-                    </div>
-                    <button onclick="removeFile(${idx})" title="Remove file">×</button>
-                </div>
-            `;
-        }
-    }).join('');
-}
-
-// Format file size for display
-function formatFileSize(bytes) {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
-}
-
-// Remove a file from pending list
-function removeFile(index) {
-    if (index >= 0 && index < pendingFiles.length) {
-        pendingFiles.splice(index, 1);
-        renderFilePreviews();
-    }
-}
-
-// Clear all pending files
-function clearPendingFiles() {
-    pendingFiles = [];
-    renderFilePreviews();
-}
-
-// Message history configuration
-const MAX_HISTORY_MESSAGES = 200;
-const HISTORY_KEY_PREFIX = 'chat_history_';
-
-// ========== Message History Storage (IndexedDB) ==========
-
-// Get storage key for a specific chat
-function getHistoryKey(chatName) {
-    return HISTORY_KEY_PREFIX + chatName;
-}
-
-// Save message to IndexedDB (for current chat)
-async function saveMessageToStorage(message, type, toolData = null, thinkingContent = null, files = null) {
-    if (!currentChat) return;
-
-    // Build message object
-    const messageObj = {
-        type: type,
-        content: message,
-        timestamp: Date.now()
-    };
-
-    // Include thinking content if present
-    if (thinkingContent) {
-        messageObj.thinking = thinkingContent;
-    }
-
-    // Include tool call data if present
-    if (toolData) {
-        messageObj.toolData = toolData;
-    }
-
-    // Include files if present
-    if (files && files.length > 0) {
-        messageObj.files = files;
-    }
-
-    // Save to IndexedDB
-    try {
-        if (window.ChatDB && window.ChatDB.isSupported()) {
-            await window.ChatDB.saveMessage(currentChat, messageObj);
-
-            // Also maintain a lightweight index in localStorage for quick access
-            // This stores just metadata, not the actual files
-            await updateHistoryIndex(currentChat, messageObj);
-        } else {
-            // Fallback to localStorage if IndexedDB is not available
-            saveMessageToLocalStorageFallback(currentChat, messageObj);
-        }
-    } catch (e) {
-        console.error('Failed to save message to IndexedDB, trying fallback:', e);
-        // Fallback to localStorage on error
-        saveMessageToLocalStorageFallback(currentChat, messageObj);
-    }
-}
-
-// Update lightweight index in localStorage
-async function updateHistoryIndex(chatName, messageObj) {
-    const key = getHistoryKey(chatName);
-    let index = [];
-
-    try {
-        const stored = localStorage.getItem(key);
-        if (stored) {
-            index = JSON.parse(stored);
-            if (!Array.isArray(index)) {
-                index = [];
-            }
-        }
-    } catch (e) {
-        console.error('Failed to load history index:', e);
-        index = [];
-    }
-
-    // Add lightweight entry (without files data)
-    const indexEntry = {
-        type: messageObj.type,
-        content: messageObj.content,
-        timestamp: messageObj.timestamp,
-        hasFiles: messageObj.files && messageObj.files.length > 0,
-        hasThinking: !!messageObj.thinking,
-        hasToolData: !!messageObj.toolData
-    };
-
-    index.push(indexEntry);
-
-    // Trim to max size
-    if (index.length > MAX_HISTORY_MESSAGES) {
-        index = index.slice(-MAX_HISTORY_MESSAGES);
-    }
-
-    try {
-        localStorage.setItem(key, JSON.stringify(index));
-    } catch (e) {
-        console.error('Failed to save history index:', e);
-    }
-}
-
-// Fallback to localStorage (without files to avoid quota issues)
-function saveMessageToLocalStorageFallback(chatName, messageObj) {
-    const key = getHistoryKey(chatName);
-    let history = [];
-
-    try {
-        const stored = localStorage.getItem(key);
-        if (stored) {
-            history = JSON.parse(stored);
-            if (!Array.isArray(history)) {
-                history = [];
-            }
-        }
-    } catch (e) {
-        console.error('Failed to load message history:', e);
-        history = [];
-    }
-
-    // Create a copy without files for localStorage fallback
-    const messageObjNoFiles = { ...messageObj };
-    if (messageObjNoFiles.files) {
-        // Store only metadata, not the actual image data
-        messageObjNoFiles.files = messageObj.files.map(img => ({
-            name: img.name,
-            type: img.type,
-            size: img.size,
-            isImage: img.isImage,
-            // Mark as unavailable in fallback mode
-            unavailable: true
-        }));
-    }
-
-    history.push(messageObjNoFiles);
-
-    // Trim to max size
-    let count = 0;
-    const typesToKeep = ['user', 'assistant', 'tool_call'];
-    for (const msg of history) {
-        if (typesToKeep.includes(msg.type)) {
-            count++;
-        }
-    }
-
-    if (count > MAX_HISTORY_MESSAGES) {
-        let removed = 0;
-        const typesToTrim = ['user', 'assistant', 'tool_call'];
-        while (removed < count - MAX_HISTORY_MESSAGES) {
-            const idx = history.findIndex(msg => typesToTrim.includes(msg.type));
-            if (idx >= 0) {
-                history.splice(idx, 1);
-                removed++;
-            } else {
-                break;
-            }
-        }
-    }
-
-    try {
-        localStorage.setItem(key, JSON.stringify(history));
-    } catch (e) {
-        console.error('Failed to save message history to localStorage:', e);
-    }
-}
-
-// Load message history from IndexedDB (for current chat)
-async function loadMessageHistoryFromStorage() {
-    if (!currentChat) return [];
-
-    try {
-        // Try IndexedDB first
-        if (window.ChatDB && window.ChatDB.isSupported()) {
-            const messages = await window.ChatDB.loadMessages(currentChat);
-            if (messages && messages.length > 0) {
-                return messages;
-            }
-        }
-
-        // Fallback to localStorage
-        return loadMessageHistoryFromLocalStorageFallback();
-    } catch (e) {
-        console.error('Failed to load message history from IndexedDB:', e);
-        return loadMessageHistoryFromLocalStorageFallback();
-    }
-}
-
-// Fallback to localStorage
-function loadMessageHistoryFromLocalStorageFallback() {
-    if (!currentChat) return [];
-
-    const key = getHistoryKey(currentChat);
-    try {
-        const stored = localStorage.getItem(key);
-        if (stored) {
-            const history = JSON.parse(stored);
-            if (Array.isArray(history)) {
-                return history;
-            }
-        }
-    } catch (e) {
-        console.error('Failed to load message history from localStorage:', e);
-    }
-    return [];
-}
-
-// Clear message history for current chat
-async function clearMessageHistory() {
-    if (!currentChat) return;
-
-    const key = getHistoryKey(currentChat);
-
-    try {
-        // Clear from IndexedDB
-        if (window.ChatDB && window.ChatDB.isSupported()) {
-            await window.ChatDB.deleteMessages(currentChat);
-        }
-    } catch (e) {
-        console.error('Failed to clear message history from IndexedDB:', e);
-    }
-
-    // Always clear from localStorage (index and fallback data)
-    try {
-        localStorage.removeItem(key);
-    } catch (e) {
-        console.error('Failed to clear message history from localStorage:', e);
-    }
-}
-
-// Clear all chat histories
-async function clearAllChatHistories() {
-    // Clear from IndexedDB
-    try {
-        if (window.ChatDB && window.ChatDB.isSupported()) {
-            await window.ChatDB.deleteAll();
-        }
-    } catch (e) {
-        console.error('Failed to clear all histories from IndexedDB:', e);
-    }
-
-    // Clear from localStorage
-    const prefix = HISTORY_KEY_PREFIX;
-    const keysToDelete = [];
-
-    for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key && key.startsWith(prefix)) {
-            keysToDelete.push(key);
-        }
-    }
-
-    keysToDelete.forEach(key => {
-        try {
-            localStorage.removeItem(key);
-        } catch (e) {
-            console.error('Failed to clear history:', e);
-        }
-    });
-}
+// Message history is now handled by message-history.js module
+// Access via window.MessageHistory
 
 async function init() {
     // Load input history from localStorage
-    loadHistory();
+    window.InputHistory.loadHistory();
 
     // Load webui config from server
     try {
@@ -759,6 +151,7 @@ async function startChat() {
         return;
     }
     currentChat = chatName;
+    window.MessageHistory.setCurrentChat(chatName);
     document.getElementById('login-header').textContent = chatName;
     document.getElementById('login-panel').style.display = 'none';
     document.getElementById('chat-panel').style.display = 'flex';
@@ -780,7 +173,7 @@ async function startChat() {
 
 // Load and display message history from storage
 async function loadMessageHistory() {
-    const history = await loadMessageHistoryFromStorage();
+    const history = await window.MessageHistory.loadHistory();
 
     history.forEach((msg, msgIndex) => {
         if (msg.type === 'user') {
@@ -1365,7 +758,7 @@ function sendMessage() {
     const message = input.value.trim();
 
     // Allow sending files without text
-    if ((!message || message.trim() === '') && pendingFiles.length === 0) {
+    if ((!message || message.trim() === '') && window.FileUploadHandler.getPendingFiles().length === 0) {
         return;
     }
 
@@ -1373,7 +766,7 @@ function sendMessage() {
 
     // Save to input history (only if there's text)
     if (message && message.trim()) {
-        saveToHistory(message);
+        window.InputHistory.saveToHistory(message);
     }
 
     // Prepare message payload with optional files
@@ -1382,8 +775,8 @@ function sendMessage() {
     };
 
     // Include files if any
-    if (pendingFiles.length > 0) {
-        payload.files = pendingFiles.map(file => ({
+    if (window.FileUploadHandler.getPendingFiles().length > 0) {
+        payload.files = window.FileUploadHandler.getPendingFiles().map(file => ({
             url: file.url,
             type: file.type,
             name: file.name,
@@ -1392,13 +785,13 @@ function sendMessage() {
     }
 
     // Display user message with files
-    displayUserMessageWithFiles(message, pendingFiles);
+    displayUserMessageWithFiles(message, window.FileUploadHandler.getPendingFiles());
 
     // Force scroll to bottom when user sends a message
     scrollToBottom(true);
 
     // Save to local storage history (include files)
-    const filesToSave = pendingFiles.length > 0 ? pendingFiles.map(file => ({
+    const filesToSave = window.FileUploadHandler.getPendingFiles().length > 0 ? window.FileUploadHandler.getPendingFiles().map(file => ({
         url: file.url,
         type: file.type,
         name: file.name,
@@ -1407,11 +800,11 @@ function sendMessage() {
         compressed: file.compressed || false,
         originalSize: file.originalSize || file.size
     })) : null;
-    saveMessageToStorage(message, 'user', null, null, filesToSave);
+    window.MessageHistory.saveMessage(message, 'user', null, null, filesToSave);
 
     // Clear input and files
     input.value = '';
-    clearPendingFiles();
+    window.FileUploadHandler.clearPendingFiles();
 
     // 禁用输入框，发送按钮保持可用（用于停止）
     input.disabled = true;
@@ -1471,8 +864,8 @@ function displayUserMessageWithFiles(text, files, msgIndex = -1) {
                     html += `<img src="${file.url}" alt="${file.name}" style="max-width: 200px; max-height: 200px; border-radius: 8px; object-fit: cover; cursor: zoom-in;" onclick="showImagePreviewFromHistory(${msgIndex}, ${idx}); return false;" />`;
                 }
             } else {
-                const icon = getFileIcon(file.type, file.name);
-                const sizeStr = formatFileSize(file.size);
+                const icon = window.FileUploadHandler.getFileIcon(file.type, file.name);
+                const sizeStr = window.FileUploadHandler.formatFileSize(file.size);
                 html += `
                     <div class="user-file-item" style="display: flex; flex-direction: column; align-items: center; padding: 10px; background: #f5f5f5; border-radius: 8px; min-width: 100px;">
                         <span style="font-size: 32px;">${icon}</span>
@@ -1615,7 +1008,7 @@ function displayToolCall(name, args, index, streaming) {
             }
 
             // Save tool call to local storage
-            saveMessageToStorage(null, 'tool_call', {
+            window.MessageHistory.saveMessage(null, 'tool_call', {
                 name: name,
                 arguments: args || toolCall.argsText
             });
@@ -1647,38 +1040,9 @@ let currentContentType = '';
 let thinkingBlock = null;
 let responseBlock = null;
 
-// Throttle scroll during streaming to improve performance
-let lastScrollTime = 0;
-const SCROLL_THROTTLE_MS = 150;
-let scrollPending = false;
-
-function smartScrollToBottom(force = false) {
-    // Only scroll if user is not reading history or is at bottom
-    if (!isUserScrolling || isAtBottom) {
-        const now = Date.now();
-        if (force) {
-            requestAnimationFrame(() => {
-                const messages = document.getElementById('messages');
-                if (messages) {
-                    messages.scrollTop = messages.scrollHeight;
-                }
-                lastScrollTime = now;
-                scrollPending = false;
-            });
-            return
-        }
-        if (now - lastScrollTime > SCROLL_THROTTLE_MS && !scrollPending) {
-            scrollPending = true;
-            requestAnimationFrame(() => {
-                const messages = document.getElementById('messages');
-                if (messages) {
-                    messages.scrollTop = messages.scrollHeight;
-                }
-                lastScrollTime = now;
-                scrollPending = false;
-            });
-        }
-    }
+// Smart scroll to bottom - delegated to scroll-handler.js
+function smartScrollToBottom(force) {
+    window.ScrollHandler.smartScrollToBottom(force);
 }
 
 function displayChunk(content, isFirst, isLast, contentType = 'response') {
@@ -1727,7 +1091,7 @@ function displayChunk(content, isFirst, isLast, contentType = 'response') {
         const fullContent = (currentAssistantMessage || '').trim();
         const thinkingContent = (currentThinkingChunk || '').trim();
         if (fullContent || thinkingContent) {
-            saveMessageToStorage(fullContent, 'assistant', null, thinkingContent);
+            window.MessageHistory.saveMessage(fullContent, 'assistant', null, thinkingContent);
         }
 
         // 重置状态
@@ -1833,14 +1197,9 @@ function displayChunk(content, isFirst, isLast, contentType = 'response') {
     }
 }
 
-function scrollToBottom(force = false) {
-    const messages = document.getElementById('messages');
-    if (!messages) return;
-
-    // Force scroll (e.g., when user sends a message) or auto-scroll if not reading history
-    if (force || !isUserScrolling || isAtBottom) {
-        messages.scrollTop = messages.scrollHeight;
-    }
+// Scroll to bottom - delegated to scroll-handler.js
+function scrollToBottom(force) {
+    window.ScrollHandler.scrollToBottom(force);
 }
 
 // 复制整个消息内容
@@ -2059,7 +1418,7 @@ async function confirmClear() {
             messagesContainer.innerHTML = '';
         }
         // 清除历史记录（IndexedDB + localStorage）
-        await clearMessageHistory();
+        await window.MessageHistory.clearHistory();
     }
     // 不勾选时：只发送 clear 消息，不清空展示，不删记录
 
@@ -2084,13 +1443,13 @@ function handleKeyDown(e) {
         // Only navigate history when:
         // 1. Input is empty, OR
         // 2. Cursor is at the start and user is not selecting text
-        const isSelection = window.getSelection().toString().length > 0;
-        const hasContent = input.value.length > 0;
-        const atStart = input.selectionStart === 0;
+        var isSelection = window.getSelection().toString().length > 0;
+        var hasContent = input.value.length > 0;
+        var atStart = input.selectionStart === 0;
 
         if ((!hasContent || (atStart && !isSelection)) && !e.shiftKey) {
             e.preventDefault();
-            navigateHistory(-1);  // -1 = show older entries (decreasing index)
+            window.InputHistory.navigateHistory(-1);  // -1 = show older entries (decreasing index)
         }
         return;
     }
@@ -2100,30 +1459,30 @@ function handleKeyDown(e) {
         // Only navigate history when:
         // 1. Input is empty, OR
         // 2. Cursor is at the end and user is not selecting text
-        const isSelection = window.getSelection().toString().length > 0;
-        const hasContent = input.value.length > 0;
-        const atEnd = input.selectionEnd === input.value.length;
+        var isSelectionDown = window.getSelection().toString().length > 0;
+        var hasContentDown = input.value.length > 0;
+        var atEnd = input.selectionEnd === input.value.length;
 
-        if ((!hasContent || (atEnd && !isSelection)) && !e.shiftKey) {
+        if ((!hasContentDown || (atEnd && !isSelectionDown)) && !e.shiftKey) {
             e.preventDefault();
-            navigateHistory(1);  // 1 = show newer entries (increasing index)
+            window.InputHistory.navigateHistory(1);  // 1 = show newer entries (increasing index)
         }
         return;
     }
 
     // Escape = cancel history navigation, restore last input
     if (e.key === 'Escape') {
-        if (historyIndex !== -1) {
-            input.value = lastInputValue;
-            historyIndex = -1;
+        if (window.InputHistory.getHistoryIndex() !== -1) {
+            window.InputHistory.resetHistoryNavigation();
+            input.value = '';
         }
         return;
     }
 
     // When user starts typing, reset history navigation
     if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) {
-        if (historyIndex !== -1) {
-            historyIndex = -1;
+        if (window.InputHistory.getHistoryIndex() !== -1) {
+            window.InputHistory.resetHistoryNavigation();
         }
     }
 }
@@ -2179,58 +1538,9 @@ if (window.visualViewport) {
 // Also listen to window resize for keyboard show/hide
 window.addEventListener('resize', handleViewportChange);
 
-// ========== Scroll Behavior Control ==========
-
-// Initialize scroll detection after DOM is ready
+// Initialize scroll detection - delegated to scroll-handler.js
 function initScrollDetection() {
-    const messagesContainer = document.getElementById('messages');
-    if (!messagesContainer) return;
-
-    // Reset scroll state when starting a new chat
-    isUserScrolling = false;
-    isAtBottom = true;
-
-    // Listen for scroll events to detect user reading behavior
-    let scrollTimer = null;
-    messagesContainer.addEventListener('scroll', () => {
-        const scrollTop = messagesContainer.scrollTop;
-        const scrollHeight = messagesContainer.scrollHeight;
-        const clientHeight = messagesContainer.clientHeight;
-
-        // Check if user is at bottom (within threshold)
-        const wasAtBottom = isAtBottom;
-        isAtBottom = (scrollHeight - scrollTop - clientHeight) <= SCROLL_THRESHOLD;
-
-        // If user scrolled up from bottom, mark as scrolling
-        if (wasAtBottom && !isAtBottom) {
-            isUserScrolling = true;
-        }
-
-        // If user scrolled back to bottom, re-enable auto-scroll
-        if (!wasAtBottom && isAtBottom) {
-            isUserScrolling = false;
-        }
-
-        // Clear existing timeout
-        if (scrollTimer) {
-            clearTimeout(scrollTimer);
-        }
-
-        // Set timeout to stabilize scrolling state
-        scrollTimer = setTimeout(() => {
-            scrollTimer = null;
-            // Re-check position after scrolling stops
-            const currentScrollTop = messagesContainer.scrollTop;
-            const currentScrollHeight = messagesContainer.scrollHeight;
-            const currentClientHeight = messagesContainer.clientHeight;
-            isAtBottom = (currentScrollHeight - currentScrollTop - currentClientHeight) <= SCROLL_THRESHOLD;
-
-            // If user is at bottom, re-enable auto-scroll
-            if (isAtBottom) {
-                isUserScrolling = false;
-            }
-        }, 150);
-    }, { passive: true });
+    window.ScrollHandler.init();
 }
 
 // Focus input when keyboard is shown on mobile
@@ -2256,7 +1566,7 @@ if (messageInput) {
             imageItems.forEach(item => {
                 const file = item.getAsFile();
                 if (file) {
-                    handleFiles([file]);
+                    window.FileUploadHandler.handleFiles([file]);
                 }
             });
 
@@ -2265,149 +1575,6 @@ if (messageInput) {
     });
 }
 
-// ========== Image Preview Functions ==========
-
-// Show image preview modal from history message
-async function showImagePreviewFromHistory(msgIndex, imgIndex) {
-    if (msgIndex < 0 || !currentChat) return;
-
-    const history = await loadMessageHistoryFromStorage();
-    const msg = history[msgIndex];
-
-    if (!msg || !msg.files || msg.files.length === 0) return;
-
-    // Check if files are unavailable (fallback mode)
-    if (msg.files.some(img => img.unavailable)) {
-        showToast('Images are not available in this session', true);
-        return;
-    }
-
-    // Collect all files from this message
-    const allImages = msg.files.filter(img => img.isImage || (img.type && img.type.startsWith('image/')));
-    currentPreviewImages = allImages.map(img => img.url);
-
-    if (currentPreviewImages.length === 0) return;
-
-    // Find the actual index in the filtered files array
-    const originalImg = msg.files[imgIndex];
-    currentPreviewIndex = allImages.findIndex(img => img.url === originalImg.url);
-    if (currentPreviewIndex < 0) currentPreviewIndex = 0;
-
-    const modal = document.getElementById('image-preview-modal');
-    const imgElement = document.getElementById('image-preview-full');
-    const counterElement = document.getElementById('image-preview-counter');
-
-    // Set the image source
-    imgElement.src = currentPreviewImages[currentPreviewIndex];
-
-    // Update counter
-    if (currentPreviewImages.length > 1) {
-        counterElement.textContent = `${currentPreviewIndex + 1} / ${currentPreviewImages.length}`;
-        counterElement.style.display = 'block';
-    } else {
-        counterElement.textContent = '';
-        counterElement.style.display = 'none';
-    }
-
-    // Show modal
-    modal.style.display = 'flex';
-    document.body.style.overflow = 'hidden'; // Prevent background scrolling
-}
-
-// Show image preview modal for newly sent messages
-function showImagePreviewWithIndex(filesJson, index) {
-    const modal = document.getElementById('image-preview-modal');
-    const imgElement = document.getElementById('image-preview-full');
-    const counterElement = document.getElementById('image-preview-counter');
-
-    // Parse the files from JSON
-    let files;
-    try {
-        files = JSON.parse(decodeURIComponent(filesJson));
-    } catch (e) {
-        console.error('Failed to parse files:', e);
-        return;
-    }
-
-    // Collect all image URLs from the files array
-    currentPreviewImages = files
-        .filter(file => file.isImage || (file.type && file.type.startsWith('image/')))
-        .map(file => file.url);
-
-    if (currentPreviewImages.length === 0) return;
-
-    currentPreviewIndex = index;
-
-    // Set the image source
-    imgElement.src = currentPreviewImages[currentPreviewIndex];
-
-    // Update counter
-    if (currentPreviewImages.length > 1) {
-        counterElement.textContent = `${currentPreviewIndex + 1} / ${currentPreviewImages.length}`;
-        counterElement.style.display = 'block';
-    } else {
-        counterElement.textContent = '';
-        counterElement.style.display = 'none';
-    }
-
-    // Show modal
-    modal.style.display = 'flex';
-    document.body.style.overflow = 'hidden'; // Prevent background scrolling
-}
-
-// Hide image preview modal
-function hideImagePreview() {
-    const modal = document.getElementById('image-preview-modal');
-    modal.style.display = 'none';
-    document.body.style.overflow = ''; // Restore scrolling
-
-    // Clear image source after a delay to avoid flickering
-    setTimeout(() => {
-        document.getElementById('image-preview-full').src = '';
-    }, 200);
-}
-
-// Navigate through preview files
-function navigatePreview(direction) {
-    const newIndex = currentPreviewIndex + direction;
-
-    // Bounds check
-    if (newIndex < 0 || newIndex >= currentPreviewImages.length) {
-        return;
-    }
-
-    currentPreviewIndex = newIndex;
-    const imgElement = document.getElementById('image-preview-full');
-    const counterElement = document.getElementById('image-preview-counter');
-
-    // Animate image transition
-    imgElement.style.opacity = '0';
-    imgElement.style.transform = 'scale(0.95)';
-
-    setTimeout(() => {
-        imgElement.src = currentPreviewImages[currentPreviewIndex];
-        imgElement.style.opacity = '1';
-        imgElement.style.transform = 'scale(1)';
-
-        // Update counter
-        if (currentPreviewImages.length > 1) {
-            counterElement.textContent = `${currentPreviewIndex + 1} / ${currentPreviewImages.length}`;
-        }
-    }, 150);
-}
-
-// Add keyboard navigation for image preview
-document.addEventListener('keydown', function (e) {
-    const modal = document.getElementById('image-preview-modal');
-    if (modal.style.display === 'flex') {
-        if (e.key === 'Escape') {
-            hideImagePreview();
-        } else if (e.key === 'ArrowLeft') {
-            navigatePreview(-1);
-        } else if (e.key === 'ArrowRight') {
-            navigatePreview(1);
-        }
-    }
-});
+// Image preview functions have been moved to image-preview.js module
 
 init();
