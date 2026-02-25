@@ -20,16 +20,31 @@ type Config struct {
 }
 
 type Chat struct {
-	Desc          string   `yaml:"desc"`
-	System        string   `yaml:"system"`
-	Model         string   `yaml:"model"`
-	MaxMessages   int      `yaml:"maxMessages"`
-	MaxIterations int      `yaml:"maxIterations"`
-	MaxRetries    int      `yaml:"maxRetries"`
-	MCPServers    []string `yaml:"mcp_servers,omitempty"`
-	Skill         *Skill   `yaml:"skill,omitempty"`
-	Tools         []string `yaml:"tools,omitempty"`
-	Default       bool     `yaml:"default"`
+	Desc          string        `yaml:"desc"`
+	System        string        `yaml:"system"`
+	Model         string        `yaml:"model"`
+	MaxMessages   int           `yaml:"maxMessages"`
+	MaxIterations int           `yaml:"maxIterations"`
+	MaxRetries    int           `yaml:"maxRetries"`
+	MCPServers    []string      `yaml:"mcp_servers,omitempty"`
+	Skill         *Skill        `yaml:"skill,omitempty"`
+	Tools         []string      `yaml:"tools,omitempty"`
+	Default       bool          `yaml:"default"`
+	Hooks         *SessionHooks `yaml:"hooks,omitempty"`
+}
+
+// SessionHooks represents session-related hooks configuration
+type SessionHooks struct {
+	Keep          *SessionHookConfig `yaml:"keep,omitempty"`
+	GenModelInput *SessionHookConfig `yaml:"genmodelinput,omitempty"`
+}
+
+// SessionHookConfig represents the configuration for a single hook
+type SessionHookConfig struct {
+	Enabled    bool     `yaml:"enabled"`
+	ScriptPath string   `yaml:"script_path"`
+	Args       []string `yaml:"args,omitempty"`
+	Timeout    int      `yaml:"timeout,omitempty"` // in seconds, default is 30
 }
 
 type Skill struct {

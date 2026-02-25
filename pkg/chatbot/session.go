@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/Arvintian/chat-agent/pkg/config"
+	"github.com/Arvintian/chat-agent/pkg/hook"
+	"github.com/Arvintian/chat-agent/pkg/logger"
 	"github.com/Arvintian/chat-agent/pkg/manager"
 	"github.com/Arvintian/chat-agent/pkg/mcp"
 	"github.com/Arvintian/chat-agent/pkg/providers"
@@ -31,6 +33,7 @@ type cleanupRegistry = utils.CleanupRegistry
 
 // ChatSession represents a chat session with its configuration
 type ChatSession struct {
+	ID              string
 	Name            string
 	Preset          config.Chat
 	Agent           *adk.ChatModelAgent
@@ -38,12 +41,13 @@ type ChatSession struct {
 	Tools           []tool.BaseTool
 	MCPClient       *mcp.Client
 	cleanupRegistry *cleanupRegistry
+	hookManager     *hook.HookManager
 	closed          bool
 	mu              sync.Mutex
 }
 
-// InitChatSession initializes a new chat session with the given chat name
-func InitChatSession(ctx context.Context, cfg *config.Config, chatName string, debug bool) (*ChatSession, error) {
+// InitChatSession initializes a new chat session with the given chat name and session ID
+func InitChatSession(ctx context.Context, cfg *config.Config, chatName string, sessionID string, debug bool) (*ChatSession, error) {
 	preset, ok := cfg.Chats[chatName]
 	if !ok {
 		return nil, fmt.Errorf("chat preset does not exist: %s", chatName)
@@ -150,6 +154,11 @@ func InitChatSession(ctx context.Context, cfg *config.Config, chatName string, d
 		tools = append(tools, mcptools...)
 	}
 
+	var hookMgr *hook.HookManager
+	if preset.Hooks != nil {
+		hookMgr = hook.NewHookManager(preset.Hooks)
+	}
+
 	// init agent
 	maxIterations := 20
 	if preset.MaxIterations > 0 {
@@ -182,10 +191,20 @@ func InitChatSession(ctx context.Context, cfg *config.Config, chatName string, d
 					return nil, err
 				}
 				sp := schema.SystemMessage(rendered)
-				//fmt.Println(rendered)
 				msgs = append(msgs, sp)
 			}
 			msgs = append(msgs, input.Messages...)
+
+			if hookMgr != nil {
+				resultMessages, err := hookMgr.OnGenModelInput(ctx, sessionID, chatName, msgs)
+				if err != nil {
+					logger.Warn("chatbot", fmt.Sprintf("GenModelInput hook execution failed: %v, using original messages", err))
+				} else {
+					// Use transformed messages from hook
+					msgs = resultMessages
+				}
+			}
+
 			return msgs, nil
 		},
 	})
@@ -197,6 +216,7 @@ func InitChatSession(ctx context.Context, cfg *config.Config, chatName string, d
 	manager := manager.NewManager(preset.MaxMessages)
 
 	return &ChatSession{
+		ID:              sessionID,
 		Name:            chatName,
 		Preset:          preset,
 		Agent:           agent,
@@ -204,6 +224,7 @@ func InitChatSession(ctx context.Context, cfg *config.Config, chatName string, d
 		Tools:           tools,
 		MCPClient:       mcpclient,
 		cleanupRegistry: cleanupRegistry,
+		hookManager:     hookMgr,
 	}, nil
 }
 
@@ -246,13 +267,54 @@ func (s *ChatSession) Close() error {
 func (s *ChatSession) Clear() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	if s.Manager != nil {
 		s.Manager.Clear()
 	}
 	if s.cleanupRegistry != nil {
 		s.cleanupRegistry.Execute()
 	}
+
 	return nil
+}
+
+func (s *ChatSession) OnKeep() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Collect messages before clearing for hook
+	var messages []*schema.Message
+	if s.Manager != nil {
+		messages = s.Manager.GetMessages()
+	}
+
+	// Execute session clear hook with message history
+	if s.hookManager != nil {
+		if err := s.hookManager.OnSessionKeep(context.Background(), s.ID, s.Name, messages); err != nil {
+			// Log error but don't fail the clear operation
+			logger.Warn("chatbot", fmt.Sprintf("Session clear hook failed: %v", err))
+		}
+	}
+
+	return nil
+}
+
+// OnGenModelInput executes the genmodelinput hook if configured
+// This hook is called before sending messages to the model and can modify the message list
+func (s *ChatSession) OnGenModelInput(ctx context.Context, instruction string, inputMessages []*schema.Message) ([]*schema.Message, error) {
+	if s.hookManager == nil {
+		return inputMessages, nil
+	}
+
+	// Execute hook directly with schema.Message
+	resultMessages, err := s.hookManager.OnGenModelInput(ctx, s.ID, s.Name, inputMessages)
+	if err != nil {
+		// Log error but return original messages
+		logger.Warn("chatbot", fmt.Sprintf("Genmodelinput hook failed: %v, using original messages", err))
+		return inputMessages, nil
+	}
+
+	return resultMessages, nil
 }
 
 // renderSystemPrompt renders system prompt using Go template with built-in variables

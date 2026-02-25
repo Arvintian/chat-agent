@@ -57,7 +57,7 @@ func switchChat(ctx context.Context, cfg *config.Config, chatName string, debug 
 		}
 	}
 
-	return chatbot.InitChatSession(ctx, cfg, chatName, debug)
+	return chatbot.InitChatSession(ctx, cfg, chatName, "local", debug)
 }
 
 // RootCmd represents the base command when called without any subcommands
@@ -96,7 +96,7 @@ var RootCmd = &cobra.Command{
 		currentChatName = chatName
 
 		// Initialize chat session
-		session, err := chatbot.InitChatSession(cmd.Context(), cfg, chatName, debug)
+		session, err := chatbot.InitChatSession(cmd.Context(), cfg, chatName, "local", debug)
 		if err != nil {
 			return err
 		}

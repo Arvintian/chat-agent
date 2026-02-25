@@ -542,7 +542,7 @@ func (h *WebSocketHandler) handleSelectChat(session *chatbot.WSSession, msg *cha
 
 	// Initialize new chat session
 	ctx := context.Background()
-	chatSession, err := chatbot.InitChatSession(ctx, h.cfg, req.ChatName, false)
+	chatSession, err := chatbot.InitChatSession(ctx, h.cfg, req.ChatName, session.SessionID, false)
 	if err != nil {
 		session.SendError(fmt.Sprintf("Failed to initialize chat session: %v", err))
 		return
