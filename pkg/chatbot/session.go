@@ -214,6 +214,7 @@ func InitChatSession(ctx context.Context, cfg *config.Config, chatName string, s
 
 	// init manager
 	manager := manager.NewManager(preset.MaxMessages)
+	manager.SetChatModel(model)
 
 	return &ChatSession{
 		ID:              sessionID,
@@ -310,7 +311,7 @@ func (s *ChatSession) OnGenModelInput(ctx context.Context, instruction string, i
 	resultMessages, err := s.hookManager.OnGenModelInput(ctx, s.ID, s.Name, inputMessages)
 	if err != nil {
 		// Log error but return original messages
-		logger.Warn("chatbot", fmt.Sprintf("Genmodelinput hook failed: %v, using original messages", err))
+		logger.Warn("chatbot", fmt.Sprintf("GenModelInput hook failed: %v, using original messages", err))
 		return inputMessages, nil
 	}
 

@@ -237,9 +237,14 @@ var RootCmd = &cobra.Command{
 				case "/clear", "/c":
 					session.Clear()
 					fmt.Println("The conversation context is cleared")
-				case "/summary", "/history", "/i":
+				case "/history", "/i":
 					os.Stdout.WriteString(session.Manager.GetSummary())
 					fmt.Println()
+				case "/debug-context":
+					for _, msg := range session.Manager.GetMessages() {
+						fmt.Println(msg)
+						fmt.Println("===")
+					}
 				case "/tools", "/l":
 					printTools(session.Tools)
 				case "/chat":

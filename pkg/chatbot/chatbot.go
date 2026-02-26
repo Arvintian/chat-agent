@@ -99,8 +99,10 @@ func (cb *ChatBot) SetHandler(handler Handler) {
 
 // StreamChat performs streaming chat conversation with CLI output
 func (cb *ChatBot) StreamChat(ctx context.Context, userInput string) error {
+	cb.manager.IncRound()
+
 	// Add user message to context
-	cb.manager.AddMessage(schema.UserMessage(userInput))
+	cb.manager.AddMessage(ctx, schema.UserMessage(userInput))
 
 	// Get context messages
 	messages := cb.manager.GetMessages()
@@ -175,6 +177,7 @@ func (cb *ChatBot) StreamChat(ctx context.Context, userInput string) error {
 		}
 
 		if event.Output.MessageOutput.Role == schema.Tool {
+			cb.manager.AddMessage(ctx, event.Output.MessageOutput.Message)
 			fmt.Printf("ToolCall: (%s) Completed", event.Output.MessageOutput.ToolName)
 			if !debug {
 				fmt.Print("\n---\n")
@@ -185,9 +188,10 @@ func (cb *ChatBot) StreamChat(ctx context.Context, userInput string) error {
 		}
 
 		response.Reset()
+		toolMap := map[int][]*schema.Message{}
 		if event.Output.MessageOutput.MessageStream != nil {
 			reasoning, firstword := false, false
-			toolMap, filter := map[int][]*schema.Message{}, NewStreamFilter()
+			filter := NewStreamFilter()
 			finalToolMap, toolStart, toolOutput, toolMu := map[int][]*schema.Message{}, false, strings.Builder{}, sync.Mutex{}
 			for {
 				message, err := event.Output.MessageOutput.MessageStream.Recv()
@@ -229,7 +233,7 @@ func (cb *ChatBot) StreamChat(ctx context.Context, userInput string) error {
 								{
 									ID:    tc.ID,
 									Type:  tc.Type,
-									Index: tc.Index,
+									Index: index,
 									Function: schema.FunctionCall{
 										Name:      tc.Function.Name,
 										Arguments: tc.Function.Arguments,
@@ -310,10 +314,25 @@ func (cb *ChatBot) StreamChat(ctx context.Context, userInput string) error {
 		if event.Output.MessageOutput.Role == schema.Tool {
 			fmt.Print("\n---\n")
 		}
+		if len(toolMap) > 0 {
+			toolMsg := schema.Message{
+				Role:      schema.Assistant,
+				ToolCalls: make([]schema.ToolCall, len(toolMap)),
+				Content:   response.String(),
+			}
+			for index, msgs := range toolMap {
+				m, err := schema.ConcatMessages(msgs)
+				if err != nil {
+					continue
+				}
+				toolMsg.ToolCalls[index] = m.ToolCalls[0]
+			}
+			cb.manager.AddMessage(ctx, &toolMsg)
+		}
 	}
 
 	fmt.Print("\n")
-	cb.manager.AddMessage(schema.AssistantMessage(response.String(), nil))
+	cb.manager.AddMessage(ctx, schema.AssistantMessage(response.String(), nil))
 
 	return nil
 }
@@ -324,12 +343,14 @@ func (cb *ChatBot) StreamChatWithHandler(ctx context.Context, userInput string, 
 		return fmt.Errorf("handler not set")
 	}
 
+	cb.manager.IncRound()
+
 	// Add user message to context (with files if present)
 	if len(files) > 0 {
 		// Create multimodal message with text and files
-		cb.manager.AddMessage(createMultimodalUserMessage(userInput, files))
+		cb.manager.AddMessage(ctx, createMultimodalUserMessage(userInput, files))
 	} else {
-		cb.manager.AddMessage(schema.UserMessage(userInput))
+		cb.manager.AddMessage(ctx, schema.UserMessage(userInput))
 	}
 
 	// Get context messages
@@ -413,6 +434,7 @@ func (cb *ChatBot) StreamChatWithHandler(ctx context.Context, userInput string, 
 		}
 
 		if event.Output.MessageOutput.Role == schema.Tool {
+			cb.manager.AddMessage(ctx, event.Output.MessageOutput.Message)
 			// Send completion signal for tool call using ToolCallID to find the correct index
 			cb.handler.SendToolCall(
 				event.Output.MessageOutput.ToolName,
@@ -426,9 +448,10 @@ func (cb *ChatBot) StreamChatWithHandler(ctx context.Context, userInput string, 
 		}
 
 		response.Reset()
+		toolMap := map[int][]*schema.Message{}
 		if event.Output.MessageOutput.MessageStream != nil {
 			reasoning, firstword := false, false
-			toolStart, toolMap := false, map[int][]*schema.Message{}
+			toolStart := false
 			for {
 				message, err := event.Output.MessageOutput.MessageStream.Recv()
 				if err == io.EOF {
@@ -461,7 +484,7 @@ func (cb *ChatBot) StreamChatWithHandler(ctx context.Context, userInput string, 
 									{
 										ID:    tc.ID,
 										Type:  tc.Type,
-										Index: tc.Index,
+										Index: index,
 										Function: schema.FunctionCall{
 											Name:      tc.Function.Name,
 											Arguments: tc.Function.Arguments,
@@ -479,7 +502,7 @@ func (cb *ChatBot) StreamChatWithHandler(ctx context.Context, userInput string, 
 									{
 										ID:    tc.ID,
 										Type:  tc.Type,
-										Index: tc.Index,
+										Index: index,
 										Function: schema.FunctionCall{
 											Name:      tc.Function.Name,
 											Arguments: tc.Function.Arguments,
@@ -556,10 +579,25 @@ func (cb *ChatBot) StreamChatWithHandler(ctx context.Context, userInput string, 
 			// Send final chunk marker
 			cb.handler.SendChunk("", false, true, "response")
 		}
+		if len(toolMap) > 0 {
+			toolMsg := schema.Message{
+				Role:      schema.Assistant,
+				ToolCalls: make([]schema.ToolCall, len(toolMap)),
+				Content:   response.String(),
+			}
+			for index, msgs := range toolMap {
+				m, err := schema.ConcatMessages(msgs)
+				if err != nil {
+					continue
+				}
+				toolMsg.ToolCalls[index] = m.ToolCalls[0]
+			}
+			cb.manager.AddMessage(ctx, &toolMsg)
+		}
 	}
 
 	cb.handler.SendComplete("")
-	cb.manager.AddMessage(schema.AssistantMessage(response.String(), nil))
+	cb.manager.AddMessage(ctx, schema.AssistantMessage(response.String(), nil))
 	return nil
 }
 
@@ -571,24 +609,4 @@ func (cb *ChatBot) GetContextSummary() string {
 // ClearContext clears the context
 func (cb *ChatBot) ClearContext() {
 	cb.manager.Clear()
-}
-
-// GetContextSize gets the context size
-func (cb *ChatBot) GetContextSize() int {
-	return cb.manager.GetContextSize()
-}
-
-// SetMaxContextSize sets maximum context size
-func (cb *ChatBot) SetMaxContextSize(maxMessages int) {
-	cb.manager.SetMaxMessages(maxMessages)
-}
-
-// GetLastUserMessage gets the last user message
-func (cb *ChatBot) GetLastUserMessage() *schema.Message {
-	return cb.manager.GetLastUserMessage()
-}
-
-// GetLastAssistantMessage gets the last assistant message
-func (cb *ChatBot) GetLastAssistantMessage() *schema.Message {
-	return cb.manager.GetLastAssistantMessage()
 }
