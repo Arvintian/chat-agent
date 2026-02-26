@@ -78,8 +78,92 @@ func (m *Manager) IncRound() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	// Validate and clean up mismatched tool messages and toolcalls in current round
+	if len(m.messages) > 0 {
+		currentRound := m.messages[m.round]
+		validMessages := m.validateAndCleanRound(currentRound)
+		m.messages[m.round] = validMessages
+	}
+
 	m.messages = append(m.messages, make([]*schema.Message, 0))
 	m.round = len(m.messages) - 1
+}
+
+// validateAndCleanRound validates that tool messages and toolcalls are paired correctly
+// Returns cleaned message slice with mismatched messages removed
+func (m *Manager) validateAndCleanRound(messages []*schema.Message) []*schema.Message {
+	// Collect all toolcall IDs from assistant messages
+	toolcallIDs := make(map[string]bool)
+	for _, msg := range messages {
+		if msg.Role == schema.Assistant && len(msg.ToolCalls) > 0 {
+			for _, tc := range msg.ToolCalls {
+				if tc.ID != "" {
+					toolcallIDs[tc.ID] = true
+				}
+			}
+		}
+	}
+
+	// Collect all tool response messages with their ToolCallID
+	toolResponses := make(map[string]*schema.Message)
+	for _, msg := range messages {
+		if msg.Role == schema.Tool && msg.ToolCallID != "" {
+			toolResponses[msg.ToolCallID] = msg
+		}
+	}
+
+	// Identify mismatched toolcalls (no corresponding tool response)
+	unmatchedToolcalls := make(map[string]bool)
+	for id := range toolcallIDs {
+		if _, exists := toolResponses[id]; !exists {
+			unmatchedToolcalls[id] = true
+		}
+	}
+
+	// Identify mismatched tool responses (no corresponding toolcall)
+	unmatchedToolResponses := make(map[string]bool)
+	for id := range toolResponses {
+		if _, exists := toolcallIDs[id]; !exists {
+			unmatchedToolResponses[id] = true
+		}
+	}
+
+	// If no mismatches, return original messages
+	if len(unmatchedToolcalls) == 0 && len(unmatchedToolResponses) == 0 {
+		return messages
+	}
+
+	// Filter out mismatched messages
+	validMessages := make([]*schema.Message, 0, len(messages))
+	for _, msg := range messages {
+		keep := true
+
+		if msg.Role == schema.Assistant && len(msg.ToolCalls) > 0 {
+			// Check if any toolcall in this message is unmatched
+			hasUnmatched := false
+			for _, tc := range msg.ToolCalls {
+				if unmatchedToolcalls[tc.ID] {
+					hasUnmatched = true
+					break
+				}
+			}
+			if hasUnmatched {
+				// Remove this assistant message as it contains unmatched toolcalls
+				keep = false
+			}
+		} else if msg.Role == schema.Tool && msg.ToolCallID != "" {
+			// Check if this tool response is unmatched
+			if unmatchedToolResponses[msg.ToolCallID] {
+				keep = false
+			}
+		}
+
+		if keep {
+			validMessages = append(validMessages, msg)
+		}
+	}
+
+	return validMessages
 }
 
 // trimMessages trims the message history, preserving system messages and recent messages
