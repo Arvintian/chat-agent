@@ -465,6 +465,8 @@ func (h *WebSocketHandler) processMessage(session *chatbot.WSSession, msg *chatb
 		h.handleStop(session)
 	case "clear":
 		h.handleClear(session)
+	case "keep":
+		h.handleKeep(session)
 	case "approval_response":
 		h.handleApprovalResponse(session, msg)
 	default:
@@ -631,6 +633,29 @@ func (h *WebSocketHandler) handleClear(session *chatbot.WSSession) {
 	} else {
 		session.SendMessage("cleared", map[string]interface{}{
 			"message": "No active session to clear",
+		})
+	}
+}
+
+// handleKeep handles keep session request (execute keep hook)
+func (h *WebSocketHandler) handleKeep(session *chatbot.WSSession) {
+	if session.ChatSession != nil {
+		if err := session.ChatSession.OnKeep(); err != nil {
+			log.Printf("Session %s: Keep hook failed: %v", session.SessionID, err)
+			session.SendMessage("kept", map[string]interface{}{
+				"chat_name": session.ChatName,
+				"message":   fmt.Sprintf("Keep hook executed with error: %v", err),
+			})
+		} else {
+			log.Printf("Session %s: Keep hook executed successfully", session.SessionID)
+			session.SendMessage("kept", map[string]interface{}{
+				"chat_name": session.ChatName,
+				"message":   "Session keep hook executed successfully",
+			})
+		}
+	} else {
+		session.SendMessage("kept", map[string]interface{}{
+			"message": "No active session to keep",
 		})
 	}
 }

@@ -237,6 +237,12 @@ var RootCmd = &cobra.Command{
 				case "/clear", "/c":
 					session.Clear()
 					fmt.Println("The conversation context is cleared")
+				case "/keep", "/k":
+					if err := session.OnKeep(); err != nil {
+						fmt.Printf("Error executing keep hook: %v\n", err)
+					} else {
+						fmt.Println("Session keep hook executed successfully")
+					}
 				case "/history", "/i":
 					os.Stdout.WriteString(session.Manager.GetSummary())
 					fmt.Println()
@@ -269,6 +275,7 @@ func printHelp() {
 	fmt.Println("  /help    or /h   - Show this help message")
 	fmt.Println("  /history or /i   - Get conversation history")
 	fmt.Println("  /clear   or /c   - Clear conversation context")
+	fmt.Println("  /keep    or /k   - Execute session keep hook")
 	fmt.Println("  /tools   or /l   - List the loaded tools")
 	fmt.Println("  /chat            - List available chats")
 	fmt.Println("  /s <name>        - Switch to another chat directly")

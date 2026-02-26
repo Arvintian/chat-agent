@@ -184,27 +184,29 @@ func InitChatSession(ctx context.Context, cfg *config.Config, chatName string, s
 			IsRetryAble: utils.IsRetryAble,
 		},
 		GenModelInput: func(ctx context.Context, instruction string, input *adk.AgentInput) ([]adk.Message, error) {
-			msgs := make([]adk.Message, 0, len(input.Messages)+1)
-			if instruction != "" {
-				rendered, err := renderSystemPrompt(instruction)
-				if err != nil {
-					return nil, err
-				}
-				sp := schema.SystemMessage(rendered)
-				msgs = append(msgs, sp)
-			}
-			msgs = append(msgs, input.Messages...)
-
+			var inputMessages []*schema.Message
+			var err error
+			inputMessages = input.Messages
 			if hookMgr != nil {
-				resultMessages, err := hookMgr.OnGenModelInput(ctx, sessionID, chatName, msgs)
+				inputMessages, err = hookMgr.OnGenModelInput(ctx, sessionID, chatName, input.Messages)
 				if err != nil {
 					logger.Warn("chatbot", fmt.Sprintf("GenModelInput hook execution failed: %v, using original messages", err))
-				} else {
-					// Use transformed messages from hook
-					msgs = resultMessages
 				}
 			}
-
+			msgs := make([]adk.Message, 0, len(input.Messages)+1)
+			rendered, err := renderSystemPrompt(instruction)
+			if err != nil {
+				return nil, err
+			}
+			sp := schema.SystemMessage(rendered)
+			for _, msg := range inputMessages {
+				if msg.Role == schema.System {
+					sp.Content = fmt.Sprintf("%s\n%s", sp.Content, msg.Content)
+					continue
+				}
+				msgs = append(msgs, msg)
+			}
+			msgs = append([]adk.Message{sp}, msgs...)
 			return msgs, nil
 		},
 	})

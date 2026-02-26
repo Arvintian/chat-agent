@@ -36,7 +36,7 @@ type Chat struct {
 // SessionHooks represents session-related hooks configuration
 type SessionHooks struct {
 	Keep          *SessionHookConfig `yaml:"keep,omitempty"`
-	GenModelInput *SessionHookConfig `yaml:"genmodelinput,omitempty"`
+	GenModelInput *SessionHookConfig `yaml:"genModelInput,omitempty"`
 }
 
 // SessionHookConfig represents the configuration for a single hook

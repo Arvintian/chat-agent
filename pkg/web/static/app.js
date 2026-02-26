@@ -468,6 +468,9 @@ function handleMessage(msg) {
         case 'cleared':
             setStatus(msg.payload.message, false);
             break;
+        case 'kept':
+            setStatus(msg.payload.message, false);
+            break;
         case 'approval_request':
             handleApprovalRequest(msg.payload);
             break;
@@ -1423,6 +1426,21 @@ async function confirmClear() {
     // 不勾选时：只发送 clear 消息，不清空展示，不删记录
 
     hideClearModal();
+}
+
+// Keep session - execute session keep hook
+function keepSession() {
+    if (!currentChat) {
+        showToast('Please select a chat first', true);
+        return;
+    }
+
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'keep', payload: {} }));
+        showToast('Executing keep hook...', false);
+    } else {
+        showToast('WebSocket not connected', true);
+    }
 }
 
 // autoResize function removed - input box height is now fixed via CSS
