@@ -128,6 +128,23 @@ func (m *Manager) validateAndCleanRound(messages []*schema.Message) []*schema.Me
 		}
 	}
 
+	for _, msg := range messages {
+		if msg.Role == schema.Assistant && len(msg.ToolCalls) > 0 {
+			hasUnmatched := false
+			for _, tc := range msg.ToolCalls {
+				if unmatchedToolcalls[tc.ID] {
+					hasUnmatched = true
+					break
+				}
+			}
+			if hasUnmatched {
+				for _, tc := range msg.ToolCalls {
+					unmatchedToolResponses[tc.ID] = true
+				}
+			}
+		}
+	}
+
 	// If no mismatches, return original messages
 	if len(unmatchedToolcalls) == 0 && len(unmatchedToolResponses) == 0 {
 		return messages

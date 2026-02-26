@@ -41,10 +41,11 @@ type SessionHooks struct {
 
 // SessionHookConfig represents the configuration for a single hook
 type SessionHookConfig struct {
-	Enabled    bool     `yaml:"enabled"`
-	ScriptPath string   `yaml:"script_path"`
-	Args       []string `yaml:"args,omitempty"`
-	Timeout    int      `yaml:"timeout,omitempty"` // in seconds, default is 30
+	Enabled    bool              `yaml:"enabled"`
+	ScriptPath string            `yaml:"script_path"`
+	Args       []string          `yaml:"args,omitempty"`
+	Timeout    int               `yaml:"timeout,omitempty"` // in seconds, default is 30
+	Env        map[string]string `yaml:"env,omitempty"`     // environment variables for the hook script
 }
 
 type Skill struct {

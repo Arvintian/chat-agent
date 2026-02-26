@@ -110,10 +110,19 @@ func (hm *HookManager) executeHookScript(ctx context.Context, cfg *config.Sessio
 	cmd := exec.CommandContext(ctx, scriptPath, cfg.Args...)
 
 	// Set environment variables
-	cmd.Env = append(os.Environ(),
+	envVars := append(os.Environ(),
 		fmt.Sprintf("SESSION_HOOK=true"),
 		fmt.Sprintf("HOOK_TIMEOUT=%d", timeout),
 	)
+
+	// Add custom environment variables from config
+	if cfg.Env != nil {
+		for key, value := range cfg.Env {
+			envVars = append(envVars, fmt.Sprintf("%s=%s", key, value))
+		}
+	}
+
+	cmd.Env = envVars
 
 	// Set working directory to base dir
 	cmd.Dir = hm.baseDir
@@ -137,13 +146,26 @@ func (hm *HookManager) executeHookScript(ctx context.Context, cfg *config.Sessio
 
 	// Pass JSON data via stdin
 	cmd.Stdin = bytes.NewReader(jsonData)
-	output, err := cmd.CombinedOutput()
+
+	// Capture stdout and stderr separately
+	var stdoutBuf, stderrBuf bytes.Buffer
+	cmd.Stdout = &stdoutBuf
+	cmd.Stderr = &stderrBuf
+
+	err = cmd.Run()
 	duration := time.Since(startTime)
 
 	if err != nil {
-		logError("%s: hook failed after %v: %v", logPrefix, duration, err)
+		logError("%s: hook failed after %v: %v\nstderr: %s", logPrefix, duration, err, stderrBuf.String())
 		return nil, fmt.Errorf("hook execution failed: %w", err)
 	}
+
+	// Log stderr if there is any output
+	if stderrBuf.Len() > 0 {
+		logWarn("%s: hook produced stderr output: %s", logPrefix, stderrBuf.String())
+	}
+
+	output := stdoutBuf.Bytes()
 
 	logInfo("%s: hook completed successfully in %v", logPrefix, duration)
 	return output, nil
