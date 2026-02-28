@@ -238,13 +238,35 @@ type SessionManager struct {
 	sessions map[string]*SessionInfo
 	cfg      *config.Config
 	mu       sync.RWMutex
+	// activeConnections tracks which sessions have active WebSocket connections
+	activeConnections map[string]bool
 }
 
 func NewSessionManager(cfg *config.Config) *SessionManager {
 	return &SessionManager{
-		sessions: make(map[string]*SessionInfo),
-		cfg:      cfg,
+		sessions:          make(map[string]*SessionInfo),
+		cfg:               cfg,
+		activeConnections: make(map[string]bool),
 	}
+}
+
+// tryRegisterConnection atomically checks and registers a connection.
+// Returns true if registered successfully, false if session already has an active connection.
+func (sm *SessionManager) tryRegisterConnection(sessionID string) bool {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	if sm.activeConnections[sessionID] {
+		return false
+	}
+	sm.activeConnections[sessionID] = true
+	return true
+}
+
+// unregisterConnection marks a session as no longer having an active connection.
+func (sm *SessionManager) unregisterConnection(sessionID string) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	delete(sm.activeConnections, sessionID)
 }
 
 func (sm *SessionManager) GetSession(sessionID string) (*SessionInfo, bool) {
@@ -338,6 +360,9 @@ func (sm *SessionManager) RemoveSession(sessionID string) {
 func (sm *SessionManager) CloseAllSessions() {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
+	for sessionID := range sm.sessions {
+		delete(sm.activeConnections, sessionID)
+	}
 	for sessionID, session := range sm.sessions {
 		for chatName, state := range session.Chats {
 			if state.ChatSession != nil {
@@ -384,6 +409,18 @@ func (h *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Reques
 	}
 	log.Printf("WebSocket connection: %s", sessionID)
 
+	// Check if there's already an active WebSocket connection for this session ID
+	if !h.sessionManager.tryRegisterConnection(sessionID) {
+		// Reject the connection - session is already in use
+		log.Printf("WebSocket connection rejected for session %s: another connection is already active", sessionID)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Session already in use. Please close other tabs/windows using the same session.",
+		})
+		return
+	}
+
 	// Check if session already exists
 	existingSession, exists := h.sessionManager.GetSession(sessionID)
 	var session *chatbot.WSSession
@@ -421,6 +458,20 @@ func (h *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Reques
 		"session_id": sessionID,
 	})
 
+	// Ensure cleanup on connection close
+	defer func() {
+		// Cleanup handler and logging
+		if session.ChatSession != nil {
+			session.WSHandler = nil
+			log.Printf("Session %s disconnected (kept in memory, chat: %s)", sessionID, session.ChatName)
+		} else {
+			h.sessionManager.RemoveSession(sessionID)
+			log.Printf("Session %s closed (no active chat)", sessionID)
+		}
+		// Unregister connection to allow reuse of session ID
+		h.sessionManager.unregisterConnection(sessionID)
+	}()
+
 	// Handle messages
 	for {
 		_, message, err := conn.ReadMessage()
@@ -439,18 +490,6 @@ func (h *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Reques
 		}
 
 		go h.processMessage(session, &wsMsg)
-	}
-
-	// On disconnect, do NOT remove session from manager
-	// Only cleanup the connection-related resources
-	if session.ChatSession != nil {
-		// Clear the WSHandler but keep ChatSession alive
-		session.WSHandler = nil
-		log.Printf("Session %s disconnected (kept in memory, chat: %s)", sessionID, session.ChatName)
-	} else {
-		// No chat session, safe to remove from manager
-		h.sessionManager.RemoveSession(sessionID)
-		log.Printf("Session %s closed (no active chat)", sessionID)
 	}
 }
 

@@ -42,7 +42,11 @@ type SessionHooks struct {
 // SessionHookConfig represents the configuration for a single hook
 type SessionHookConfig struct {
 	Enabled    bool              `yaml:"enabled"`
-	ScriptPath string            `yaml:"script_path"`
+	Type       string            `yaml:"type,omitempty"` // "script" or "http", default is "script"
+	ScriptPath string            `yaml:"script_path"`    // used when type is "script"
+	URL        string            `yaml:"url,omitempty"`  // used when type is "http"
+	Method     string            `yaml:"method,omitempty"` // HTTP method for http type, default is "POST"
+	Headers    map[string]string `yaml:"headers,omitempty"` // HTTP headers for http type
 	Args       []string          `yaml:"args,omitempty"`
 	Timeout    int               `yaml:"timeout,omitempty"` // in seconds, default is 30
 	Env        map[string]string `yaml:"env,omitempty"`     // environment variables for the hook script
