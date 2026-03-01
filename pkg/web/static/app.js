@@ -132,6 +132,8 @@ async function init() {
         const response = await fetch('/chats');
         const data = await response.json();
         const select = document.getElementById('chat-select');
+        // Clear existing options to prevent duplicates when re-initializing
+        select.innerHTML = '';
         let defaultSelected = false;
 
         for (const chat of data.chats) {
