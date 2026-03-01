@@ -1336,7 +1336,7 @@ pre.code-block:hover .code-copy-btn {
 /* Scroll to bottom button styles */
 .scroll-to-bottom-btn {
     position: fixed;
-    right: 20px;
+    right: calc(15% + 20px);
     bottom: 90px;
     width: 40px;
     height: 40px;
