@@ -168,7 +168,15 @@ async function startChat() {
     document.getElementById('login-header').textContent = chatName;
     document.getElementById('login-panel').style.display = 'none';
     document.getElementById('chat-panel').style.display = 'flex';
-    document.getElementById('agent-header').textContent = chatName;
+    
+    // Update agent header with chat name
+    const agentHeader = document.getElementById('agent-header');
+    const chatNameText = agentHeader.querySelector('.chat-name-text');
+    if (chatNameText) {
+        chatNameText.textContent = '💬 ' + chatName;
+    } else {
+        agentHeader.textContent = '💬 ' + chatName;
+    }
 
     // Load message history from storage (IndexedDB or localStorage)
     await loadMessageHistory();
@@ -183,7 +191,62 @@ async function startChat() {
     // Initialize scroll detection for auto-scroll behavior
     initScrollDetection();
 
-    connectWebSocket();
+    // Check if WebSocket is already connected
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        // WebSocket already connected, just send select_chat message
+        console.log('WebSocket already connected, sending select_chat for:', chatName);
+        ws.send(JSON.stringify({ type: 'select_chat', payload: { chat_name: chatName } }));
+    } else {
+        // WebSocket not connected, establish new connection
+        console.log('WebSocket not connected, establishing new connection');
+        connectWebSocket();
+    }
+}
+
+// Navigate back to chat selection page
+function backToChatSelection() {
+    // Clear current chat state (but keep session ID and WebSocket connection)
+    currentChat = null;
+
+    // Clear messages display
+    const messagesContainer = document.getElementById('messages');
+    if (messagesContainer) {
+        messagesContainer.innerHTML = '';
+    }
+
+    // Reset input area
+    const input = document.getElementById('message-input');
+    if (input) {
+        input.value = '';
+        input.disabled = false;
+    }
+
+    // Hide chat panel and show login panel
+    document.getElementById('chat-panel').style.display = 'none';
+    document.getElementById('login-panel').style.display = 'flex';
+
+    // Reset headers
+    const title = document.title.replace(/^🤖 /, '') || 'Chat-Agent';
+    document.getElementById('login-header').textContent = '🤖 ' + title;
+    
+    // Reset agent header to default
+    const agentHeader = document.getElementById('agent-header');
+    const chatNameText = agentHeader.querySelector('.chat-name-text');
+    if (chatNameText) {
+        chatNameText.textContent = '🤖 ' + title;
+    } else {
+        agentHeader.textContent = '🤖 ' + title;
+    }
+
+    // Reset clear badge
+    updateClearBadge(0);
+
+    // Reset send button
+    isGenerating = false;
+    updateSendButton();
+
+    // Re-init to reload chat list (keep WebSocket connection alive)
+    init();
 }
 
 // Load and display message history from storage

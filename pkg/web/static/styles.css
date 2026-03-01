@@ -64,6 +64,31 @@ body {
     left: 50%;
     transform: translateX(-50%);
     white-space: nowrap;
+    transition: color 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+#agent-header:hover {
+    color: #667eea;
+}
+
+.back-icon {
+    font-size: 16px;
+    opacity: 0;
+    transition: opacity 0.2s ease, transform 0.2s ease;
+    transform: translateX(-5px);
+    color: #667eea;
+}
+
+#agent-header:hover .back-icon {
+    opacity: 1;
+    transform: translateX(0);
+}
+
+.chat-name-text {
+    display: inline-block;
 }
 
 #keep-btn,

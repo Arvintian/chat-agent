@@ -30,7 +30,10 @@
         <div class="header">
             <div class="header-left">
                 <button id="keep-btn" onclick="keepSession()" title="Execute Keep Hook">💾 Keep</button>
-                <span id="agent-header">🤖 Chat-Agent</span>
+                <span id="agent-header" onclick="backToChatSelection()" style="cursor: pointer;" title="Back to chat selection">
+                    <span class="back-icon">←</span>
+                    <span class="chat-name-text">🤖 Chat-Agent</span>
+                </span>
             </div>
             <div class="header-right">
                 <button id="clear-btn" onclick="showClearModal()" title="Clear Conversation">
