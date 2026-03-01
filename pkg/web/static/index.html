@@ -102,6 +102,10 @@
         </div>
         <div id="messages">
         </div>
+        <!-- Scroll to bottom button -->
+        <button id="scroll-to-bottom-btn" class="scroll-to-bottom-btn" style="display: none;" onclick="event.stopPropagation(); var messages = document.getElementById('messages'); if(messages) { messages.scrollTop = messages.scrollHeight; if(window.ScrollHandler) { window.ScrollHandler.setUserScrolling(false); window.ScrollHandler.setIsAtBottom(true); } this.style.display = 'none'; }" title="Scroll to bottom">
+            ↓
+        </button>
         <div id="input-area">
             <!-- Image preview container -->
             <div id="image-preview-container" class="image-preview-container" style="display: none;"></div>

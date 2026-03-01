@@ -7,6 +7,9 @@
     var isAtBottom = true;
     var scrollTimeout = null;
     var SCROLL_THRESHOLD = 50; // pixels from bottom to consider "at bottom"
+    
+    // Scroll to bottom button element
+    var scrollToBottomBtn = null;
 
     // Throttle scroll during streaming to improve performance
     var lastScrollTime = 0;
@@ -18,9 +21,15 @@
         var messagesContainer = document.getElementById('messages');
         if (!messagesContainer) return;
 
+        // Get scroll to bottom button
+        scrollToBottomBtn = document.getElementById('scroll-to-bottom-btn');
+
         // Reset scroll state when starting a new chat
         isUserScrolling = false;
         isAtBottom = true;
+
+        // Hide button initially
+        updateScrollToBottomButton();
 
         // Listen for scroll events to detect user reading behavior
         var scrollTimer = null;
@@ -43,6 +52,9 @@
                 isUserScrolling = false;
             }
 
+            // Update scroll to bottom button visibility
+            updateScrollToBottomButton();
+
             // Clear existing timeout
             if (scrollTimer) {
                 clearTimeout(scrollTimer);
@@ -61,6 +73,9 @@
                 if (isAtBottom) {
                     isUserScrolling = false;
                 }
+
+                // Update scroll to bottom button visibility
+                updateScrollToBottomButton();
             }, 150);
         });
     }
@@ -128,6 +143,39 @@
     function setIsAtBottomState(state) {
         isAtBottom = state;
     }
+
+    // Update scroll to bottom button visibility
+    function updateScrollToBottomButton() {
+        if (!scrollToBottomBtn) return;
+        
+        // Show button when user is scrolling (not at bottom)
+        if (!isAtBottom) {
+            scrollToBottomBtn.classList.add('visible');
+            scrollToBottomBtn.style.display = 'flex';
+        } else {
+            scrollToBottomBtn.classList.remove('visible');
+            scrollToBottomBtn.style.display = 'none';
+        }
+    }
+
+    // Global scroll to bottom function for button click
+    window.scrollToBottom = function() {
+        var messages = document.getElementById('messages');
+        if (!messages) return;
+        
+        // Force scroll to bottom (without smooth to ensure it works)
+        messages.scrollTop = messages.scrollHeight;
+        
+        // Reset scrolling state immediately
+        isUserScrolling = false;
+        isAtBottom = true;
+        
+        // Hide button after clicking
+        if (scrollToBottomBtn) {
+            scrollToBottomBtn.classList.remove('visible');
+            scrollToBottomBtn.style.display = 'none';
+        }
+    };
 
     // Expose functions to global scope
     window.ScrollHandler = {
