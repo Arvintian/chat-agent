@@ -309,12 +309,13 @@ function displayStoredMessage(content, type) {
 
     div.appendChild(contentDiv);
 
-    // Add footer for assistant messages only
-    if (type === 'assistant') {
+    // Add footer with copy button for both user and assistant messages
+    if (type === 'assistant' || type === 'user') {
         const footer = document.createElement('div');
         footer.className = 'message-footer';
+        const copyFunction = type === 'assistant' ? 'copyMessage' : 'copyUserMessage';
         footer.innerHTML = `
-            <button class="copy-btn" onclick="copyMessage(this)" title="Copy message">
+            <button class="copy-btn" onclick="${copyFunction}(this)" title="Copy message">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
                     <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
@@ -912,6 +913,21 @@ function displayUserMessageWithFiles(text, files, msgIndex = -1) {
 
     contentDiv.innerHTML = html;
     div.appendChild(contentDiv);
+
+    // Add footer with copy button for user messages
+    const footer = document.createElement('div');
+    footer.className = 'message-footer';
+    footer.innerHTML = `
+        <button class="copy-btn" onclick="copyUserMessage(this)" title="Copy message">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>
+            <span class="copy-text">Copy</span>
+        </button>
+    `;
+    div.appendChild(footer);
+
     document.getElementById('messages').appendChild(div);
     // Don't auto-scroll here - the forced scroll in sendMessage() handles it
 }
@@ -938,12 +954,13 @@ function addMessage(text, type) {
 
     div.appendChild(contentDiv);
 
-    // 添加消息页脚复制按钮（仅 assistant 消息）
-    if (type === 'assistant') {
+    // 添加消息页脚复制按钮（assistant 和 user 消息）
+    if (type === 'assistant' || type === 'user') {
         const footer = document.createElement('div');
         footer.className = 'message-footer';
+        const copyFunction = type === 'assistant' ? 'copyMessage' : 'copyUserMessage';
         footer.innerHTML = `
-            <button class="copy-btn" onclick="copyMessage(this)" title="Copy message">
+            <button class="copy-btn" onclick="${copyFunction}(this)" title="Copy message">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
                     <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
@@ -1234,7 +1251,7 @@ function scrollToBottom(force) {
     window.ScrollHandler.scrollToBottom(force);
 }
 
-// 复制整个消息内容
+// 复制整个消息内容（assistant 消息）
 function copyMessage(btn) {
     const messageDiv = btn.closest('.message');
     const contentDiv = messageDiv.querySelector('.message-content');
@@ -1254,6 +1271,37 @@ function copyMessage(btn) {
         }, 1500);
     }).catch(err => {
         console.error('Failed to copy:', err);
+        showToast('Copy failed', false);
+    });
+}
+
+// 复制用户消息内容
+function copyUserMessage(btn) {
+    const messageDiv = btn.closest('.message');
+    const contentDiv = messageDiv.querySelector('.message-content');
+    // 用户消息包含文本和图片/文件，我们需要提取所有可复制的内容
+    let textToCopy = '';
+    
+    // 获取文本内容
+    const textDiv = contentDiv.querySelector('div[style*="white-space: pre-wrap"]');
+    if (textDiv && textDiv.textContent) {
+        textToCopy = textDiv.textContent;
+    } else {
+        textToCopy = contentDiv.innerText;
+    }
+
+    navigator.clipboard.writeText(textToCopy).then(() => {
+        const copyText = btn.querySelector('.copy-text');
+        const originalText = copyText.textContent;
+        copyText.textContent = 'Copied!';
+        btn.classList.add('copied');
+
+        setTimeout(() => {
+            copyText.textContent = originalText;
+            btn.classList.remove('copied');
+        }, 1500);
+    }).catch(err => {
+        console.error('Failed to copy user message:', err);
         showToast('Copy failed', false);
     });
 }
