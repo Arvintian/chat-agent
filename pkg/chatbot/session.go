@@ -281,6 +281,17 @@ func (s *ChatSession) Clear() error {
 	return nil
 }
 
+// GetMessageCount returns the number of messages in the session
+func (s *ChatSession) GetMessageCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.Manager == nil {
+		return 0
+	}
+	return s.Manager.GetMessageCount()
+}
+
 func (s *ChatSession) OnKeep() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -57,6 +57,9 @@ type Handler interface {
 	// targets: list of approval targets requiring user authorization
 	// Returns a map of target IDs to their approval results
 	SendApprovalRequest(targets []ApprovalTarget) (ApprovalResultMap, error)
+
+	// SendMessageCount sends the current message count to the client
+	SendMessageCount()
 }
 
 // ChatBot struct for the chatbot
@@ -352,6 +355,9 @@ func (cb *ChatBot) StreamChatWithHandler(ctx context.Context, userInput string, 
 	} else {
 		cb.manager.AddMessage(ctx, schema.UserMessage(userInput))
 	}
+	
+	// Send message count update after adding user message
+	cb.handler.SendMessageCount()
 
 	// Get context messages
 	messages := cb.manager.GetMessages()
@@ -435,6 +441,8 @@ func (cb *ChatBot) StreamChatWithHandler(ctx context.Context, userInput string, 
 
 		if event.Output.MessageOutput.Role == schema.Tool {
 			cb.manager.AddMessage(ctx, event.Output.MessageOutput.Message)
+			// Send message count update
+			cb.handler.SendMessageCount()
 			// Send completion signal for tool call using ToolCallID to find the correct index
 			cb.handler.SendToolCall(
 				event.Output.MessageOutput.ToolName,
@@ -593,11 +601,17 @@ func (cb *ChatBot) StreamChatWithHandler(ctx context.Context, userInput string, 
 				toolMsg.ToolCalls[index] = m.ToolCalls[0]
 			}
 			cb.manager.AddMessage(ctx, &toolMsg)
+			// Send message count update after adding tool call message
+			cb.handler.SendMessageCount()
 		}
 	}
 
 	cb.handler.SendComplete("")
 	cb.manager.AddMessage(ctx, schema.AssistantMessage(response.String(), nil))
+	
+	// Send message count update after assistant response is complete
+	cb.handler.SendMessageCount()
+	
 	return nil
 }
 

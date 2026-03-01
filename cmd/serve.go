@@ -538,11 +538,16 @@ func (h *WebSocketHandler) handleSelectChat(session *chatbot.WSSession, msg *cha
 		}
 		// Update session manager
 		h.sessionManager.UpdateChatSessionWithBot(session.SessionID, req.ChatName, session.ChatSession, session.ChatBot)
+		
+		// Get message count
+		msgCount := session.ChatSession.GetMessageCount()
+		
 		session.SendMessage("chat_selected", map[string]interface{}{
-			"session_id":  session.SessionID,
-			"chat_name":   req.ChatName,
-			"description": chatCfg.Desc,
-			"message":     fmt.Sprintf("Reactivated chat: %s", req.ChatName),
+			"session_id":    session.SessionID,
+			"chat_name":     req.ChatName,
+			"description":   chatCfg.Desc,
+			"message":       fmt.Sprintf("Reactivated chat: %s", req.ChatName),
+			"message_count": msgCount,
 		})
 		return
 	}
@@ -572,11 +577,16 @@ func (h *WebSocketHandler) handleSelectChat(session *chatbot.WSSession, msg *cha
 		}
 		// Update session manager with current active chat
 		h.sessionManager.UpdateChatSessionWithBot(session.SessionID, req.ChatName, session.ChatSession, session.ChatBot)
+		
+		// Get message count
+		msgCount := session.ChatSession.GetMessageCount()
+		
 		session.SendMessage("chat_selected", map[string]interface{}{
-			"session_id":  session.SessionID,
-			"chat_name":   req.ChatName,
-			"description": chatCfg.Desc,
-			"message":     fmt.Sprintf("Restored chat: %s", req.ChatName),
+			"session_id":    session.SessionID,
+			"chat_name":     req.ChatName,
+			"description":   chatCfg.Desc,
+			"message":       fmt.Sprintf("Restored chat: %s", req.ChatName),
+			"message_count": msgCount,
 		})
 		return
 	}
@@ -603,10 +613,15 @@ func (h *WebSocketHandler) handleSelectChat(session *chatbot.WSSession, msg *cha
 	// Update session manager with chat session and bot
 	h.sessionManager.UpdateChatSessionWithBot(session.SessionID, req.ChatName, chatSession, &cb)
 
+	// Get message count
+	msgCount := chatSession.GetMessageCount()
+
 	session.SendMessage("chat_selected", map[string]interface{}{
-		"chat_name":   req.ChatName,
-		"description": chatCfg.Desc,
-		"message":     fmt.Sprintf("Selected chat: %s", req.ChatName),
+		"session_id":    session.SessionID,
+		"chat_name":     req.ChatName,
+		"description":   chatCfg.Desc,
+		"message":       fmt.Sprintf("Selected chat: %s", req.ChatName),
+		"message_count": msgCount,
 	})
 }
 
@@ -665,9 +680,12 @@ func (h *WebSocketHandler) handleClear(session *chatbot.WSSession) {
 	// Clear conversation record for the current chat only
 	if session.ChatSession != nil {
 		session.ChatSession.Clear()
+		// Get updated message count (should be 0 after clear)
+		msgCount := session.ChatSession.GetMessageCount()
 		session.SendMessage("cleared", map[string]interface{}{
-			"chat_name": session.ChatName,
-			"message":   fmt.Sprintf("Conversation context cleared for chat: %s", session.ChatName),
+			"chat_name":     session.ChatName,
+			"message":       fmt.Sprintf("Conversation context cleared for chat: %s", session.ChatName),
+			"message_count": msgCount,
 		})
 	} else {
 		session.SendMessage("cleared", map[string]interface{}{

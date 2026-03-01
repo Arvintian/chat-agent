@@ -311,6 +311,22 @@ func (m *Manager) Clear() {
 	m.messages = make([][]*schema.Message, 0)
 }
 
+// GetMessageCount returns the total number of messages in the context
+func (m *Manager) GetMessageCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	count := 0
+	for _, round := range m.messages {
+		count += len(round)
+	}
+	// Also count messages in compress buffer
+	for _, round := range m.compressBuffer {
+		count += len(round)
+	}
+	return count
+}
+
 // GetSummary generates a summary of the conversation
 func (m *Manager) GetSummary() string {
 	if len(m.messages) == 0 {

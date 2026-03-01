@@ -44,6 +44,19 @@ let isGenerating = false;
 // Session ID storage key
 const SESSION_ID_KEY = 'chat_agent_session_id';
 
+// Update clear button count display
+function updateClearBadge(count) {
+    const countEl = document.getElementById('clear-count');
+    if (!countEl) return;
+
+    if (count !== undefined && count !== null && count > 0) {
+        countEl.textContent = `(${count})`;
+        countEl.style.display = 'inline';
+    } else {
+        countEl.style.display = 'none';
+    }
+}
+
 // Detect if device is mobile
 function isMobileDevice() {
     return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
@@ -159,6 +172,8 @@ async function startChat() {
 
     // Load message history from storage (IndexedDB or localStorage)
     await loadMessageHistory();
+
+    // Badge will be updated when we receive chat_selected message from server
 
     // Load session ID from localStorage if not already set
     if (!sessionId) {
@@ -404,6 +419,10 @@ function handleMessage(msg) {
             break;
         case 'chat_selected':
             setStatus(msg.payload.message, false);
+            // Update badge with message count from server
+            if (msg.payload.message_count !== undefined) {
+                updateClearBadge(msg.payload.message_count);
+            }
             break;
         case 'chunk':
             displayChunk(msg.payload.content, msg.payload.first, msg.payload.last, msg.payload.content_type);
@@ -467,6 +486,10 @@ function handleMessage(msg) {
             break;
         case 'cleared':
             setStatus(msg.payload.message, false);
+            // Update badge with message count from server (should be 0 after clear)
+            if (msg.payload.message_count !== undefined) {
+                updateClearBadge(msg.payload.message_count);
+            }
             break;
         case 'kept':
             setStatus(msg.payload.message, false);
@@ -475,7 +498,13 @@ function handleMessage(msg) {
             handleApprovalRequest(msg.payload);
             break;
         case 'thinking':
-            break
+            break;
+        case 'message_count':
+            // Update badge with message count from server
+            if (msg.payload.count !== undefined) {
+                updateClearBadge(msg.payload.count);
+            }
+            break;
         default:
             console.log('Unknown message type:', msg.type);
     }
@@ -1422,6 +1451,7 @@ async function confirmClear() {
         }
         // 清除历史记录（IndexedDB + localStorage）
         await window.MessageHistory.clearHistory();
+        // Badge will be updated when we receive cleared message from server
     }
     // 不勾选时：只发送 clear 消息，不清空展示，不删记录
 

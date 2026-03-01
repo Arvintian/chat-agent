@@ -172,6 +172,17 @@ type WSChatHandler struct {
 	session *WSSession
 }
 
+// SendMessageCount sends the current message count to the client
+func (s *WSSession) SendMessageCount() {
+	count := 0
+	if s.ChatSession != nil {
+		count = s.ChatSession.GetMessageCount()
+	}
+	s.SendMessage("message_count", map[string]int{
+		"count": count,
+	})
+}
+
 func NewWSChatHandler(session *WSSession) *WSChatHandler {
 	return &WSChatHandler{session: session}
 }
@@ -203,6 +214,12 @@ func (h *WSChatHandler) SendError(err string) {
 }
 
 // SendApprovalRequest sends an approval request to the client and waits for the result
+func (h *WSChatHandler) SendMessageCount() {
+	if h.session != nil {
+		h.session.SendMessageCount()
+	}
+}
+
 func (h *WSChatHandler) SendApprovalRequest(targets []ApprovalTarget) (ApprovalResultMap, error) {
 	session := h.session
 
