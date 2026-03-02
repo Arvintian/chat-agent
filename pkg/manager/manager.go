@@ -173,23 +173,6 @@ func (m *Manager) validateAndCleanRound(messages []*schema.Message) []*schema.Me
 		}
 	}
 
-	for _, msg := range messages {
-		if msg.Role == schema.Assistant && len(msg.ToolCalls) > 0 {
-			hasUnmatched := false
-			for _, tc := range msg.ToolCalls {
-				if unmatchedToolcalls[tc.ID] {
-					hasUnmatched = true
-					break
-				}
-			}
-			if hasUnmatched {
-				for _, tc := range msg.ToolCalls {
-					unmatchedToolResponses[tc.ID] = true
-				}
-			}
-		}
-	}
-
 	// If no mismatches, return original messages
 	if len(unmatchedToolcalls) == 0 && len(unmatchedToolResponses) == 0 {
 		return messages
@@ -201,26 +184,39 @@ func (m *Manager) validateAndCleanRound(messages []*schema.Message) []*schema.Me
 		keep := true
 
 		if msg.Role == schema.Assistant && len(msg.ToolCalls) > 0 {
-			// Check if any toolcall in this message is unmatched
-			hasUnmatched := false
+			// Filter toolcalls: only keep those that have matching tool responses
+			var matchedToolCalls []schema.ToolCall
 			for _, tc := range msg.ToolCalls {
-				if unmatchedToolcalls[tc.ID] {
-					hasUnmatched = true
-					break
+				if !unmatchedToolcalls[tc.ID] {
+					matchedToolCalls = append(matchedToolCalls, tc)
 				}
 			}
-			if hasUnmatched {
-				// Remove this assistant message as it contains unmatched toolcalls
+
+			if len(matchedToolCalls) == 0 {
+				// All toolcalls are unmatched, remove this assistant message
 				keep = false
+			} else if len(matchedToolCalls) < len(msg.ToolCalls) {
+				// Some toolcalls are unmatched, create a new message with only matched ones
+				newMsg := &schema.Message{
+					Role:      msg.Role,
+					Content:   msg.Content,
+					ToolCalls: matchedToolCalls,
+				}
+				validMessages = append(validMessages, newMsg)
+			} else {
+				// All toolcalls are matched, keep the original message
+				validMessages = append(validMessages, msg)
 			}
 		} else if msg.Role == schema.Tool && msg.ToolCallID != "" {
 			// Check if this tool response is unmatched
 			if unmatchedToolResponses[msg.ToolCallID] {
 				keep = false
 			}
-		}
-
-		if keep {
+			if keep {
+				validMessages = append(validMessages, msg)
+			}
+		} else {
+			// Non-tool messages are always kept
 			validMessages = append(validMessages, msg)
 		}
 	}
