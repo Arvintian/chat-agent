@@ -44,6 +44,29 @@ let isGenerating = false;
 // Session ID storage key
 const SESSION_ID_KEY = 'chat_agent_session_id';
 
+// Last used chat storage key
+const LAST_CHAT_KEY = 'chat_agent_last_chat';
+
+// Load last used chat from localStorage
+function loadLastChat() {
+    try {
+        return localStorage.getItem(LAST_CHAT_KEY);
+    } catch (e) {
+        console.error('Failed to load last chat:', e);
+        return null;
+    }
+}
+
+// Save last used chat to localStorage
+function saveLastChat(chatName) {
+    try {
+        localStorage.setItem(LAST_CHAT_KEY, chatName);
+        console.log('Last chat saved:', chatName);
+    } catch (e) {
+        console.error('Failed to save last chat:', e);
+    }
+}
+
 // Update clear button count display
 function updateClearBadge(count) {
     const countEl = document.getElementById('clear-count');
@@ -134,18 +157,34 @@ async function init() {
         const select = document.getElementById('chat-select');
         // Clear existing options to prevent duplicates when re-initializing
         select.innerHTML = '';
-        let defaultSelected = false;
 
+        // Get last used chat from localStorage
+        const lastUsedChat = loadLastChat();
+
+        // Determine which chat to select
+        let chatToSelect = null;
+        
+        // Priority 1: Use last used chat if it exists in the server list
+        if (lastUsedChat && data.chats.includes(lastUsedChat)) {
+            chatToSelect = lastUsedChat;
+            console.log('Will select last used chat:', chatToSelect);
+        }
+        // Priority 2: Use server default chat
+        else if (data.default_chat && data.chats.includes(data.default_chat)) {
+            chatToSelect = data.default_chat;
+            console.log('Will select server default chat:', chatToSelect);
+        }
+
+        // Build the option list
         for (const chat of data.chats) {
             const option = document.createElement('option');
             option.value = chat;
             option.textContent = chat;
             select.appendChild(option);
 
-            // Auto-select default chat if marked as default
-            if (data.default_chat && chat === data.default_chat && !defaultSelected) {
+            // Select the determined chat
+            if (chatToSelect && chat === chatToSelect) {
                 option.selected = true;
-                defaultSelected = true;
             }
         }
 
@@ -167,6 +206,10 @@ async function startChat() {
     }
     currentChat = chatName;
     window.MessageHistory.setCurrentChat(chatName);
+    
+    // Save last used chat to localStorage
+    saveLastChat(chatName);
+    
     document.getElementById('login-header').textContent = chatName;
     document.getElementById('login-panel').style.display = 'none';
     document.getElementById('chat-panel').style.display = 'flex';
