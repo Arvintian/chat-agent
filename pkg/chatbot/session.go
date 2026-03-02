@@ -215,8 +215,11 @@ func InitChatSession(ctx context.Context, cfg *config.Config, chatName string, s
 	}
 
 	// init manager
-	manager := manager.NewManager(preset.MaxMessages)
+	manager := manager.NewManager(preset.MaxMessageRounds)
 	manager.SetChatModel(model)
+	if preset.FullMessageRounds > 0 {
+		manager.SetFullMessageRounds(preset.FullMessageRounds)
+	}
 
 	return &ChatSession{
 		ID:              sessionID,
@@ -296,17 +299,17 @@ func (s *ChatSession) OnKeep() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Collect messages before clearing for hook
+	// Collect full messages before clearing for hook
 	var messages []*schema.Message
 	if s.Manager != nil {
-		messages = s.Manager.GetMessages()
+		messages = s.Manager.GetFullMessages()
 	}
 
-	// Execute session clear hook with message history
+	// Execute session keep hook with full message history
 	if s.hookManager != nil {
 		if err := s.hookManager.OnSessionKeep(context.Background(), s.ID, s.Name, messages); err != nil {
 			// Log error but don't fail the clear operation
-			logger.Warn("chatbot", fmt.Sprintf("Session clear hook failed: %v", err))
+			logger.Warn("chatbot", fmt.Sprintf("Session keep hook failed: %v", err))
 		}
 	}
 

@@ -12,16 +12,21 @@ import (
 )
 
 const (
-	DefaultMaxMessages int = 10
+	DefaultMaxMessageRound   int = 10
+	DefaultFullMessageRounds int = 1
 )
 
 // Manager manages conversation context with intelligent context management capabilities
 type Manager struct {
-	// messages stores the conversation history
+	// messages stores the conversation history (full messages, never modified)
 	messages [][]*schema.Message
 
-	// maxMessages limits the maximum number of messages in the context
-	maxMessages int
+	// maxMessageRound limits the maximum number of message rounds in the context
+	maxMessageRound int
+
+	// fullMessageRounds specifies how many recent rounds to keep full messages
+	// older rounds will be simplified (first user message + last ai response)
+	fullMessageRounds int
 
 	round int
 
@@ -36,18 +41,29 @@ type Manager struct {
 }
 
 // NewManager creates a new Manager instance
-func NewManager(maxMessages int) *Manager {
-	if maxMessages <= 0 {
-		maxMessages = DefaultMaxMessages
+func NewManager(maxMessageRound int) *Manager {
+	if maxMessageRound <= 0 {
+		maxMessageRound = DefaultMaxMessageRound
 	}
 	return &Manager{
-		messages:       make([][]*schema.Message, 0),
-		maxMessages:    maxMessages,
-		round:          0,
-		chatmodel:      nil,
-		compressing:    false,
-		compressBuffer: make([][]*schema.Message, 0),
+		messages:          make([][]*schema.Message, 0),
+		maxMessageRound:   maxMessageRound,
+		fullMessageRounds: DefaultFullMessageRounds,
+		round:             0,
+		chatmodel:         nil,
+		compressing:       false,
+		compressBuffer:    make([][]*schema.Message, 0),
 	}
+}
+
+// SetFullMessageRounds sets how many recent rounds to keep full messages
+func (m *Manager) SetFullMessageRounds(rounds int) {
+	if rounds < 1 {
+		rounds = DefaultFullMessageRounds
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.fullMessageRounds = rounds
 }
 
 // SetChatModel sets the chat model for message compression
@@ -87,6 +103,35 @@ func (m *Manager) IncRound() {
 
 	m.messages = append(m.messages, make([]*schema.Message, 0))
 	m.round = len(m.messages) - 1
+}
+
+// simplifyRound simplifies a single round to keep only first user message and last assistant message
+func (m *Manager) simplifyRound(messages []*schema.Message) []*schema.Message {
+	if len(messages) == 0 {
+		return messages
+	}
+
+	var firstUserMsg *schema.Message
+	var lastAssistantMsg *schema.Message
+
+	for _, msg := range messages {
+		if msg.Role == schema.User && firstUserMsg == nil {
+			firstUserMsg = msg
+		}
+		if msg.Role == schema.Assistant {
+			lastAssistantMsg = msg
+		}
+	}
+
+	result := make([]*schema.Message, 0)
+	if firstUserMsg != nil {
+		result = append(result, firstUserMsg)
+	}
+	if lastAssistantMsg != nil {
+		result = append(result, lastAssistantMsg)
+	}
+
+	return result
 }
 
 // validateAndCleanRound validates that tool messages and toolcalls are paired correctly
@@ -186,9 +231,9 @@ func (m *Manager) validateAndCleanRound(messages []*schema.Message) []*schema.Me
 // trimMessages trims the message history, preserving system messages and recent messages
 // When messages exceed threshold, compresses half of the window using chatmodel
 func (m *Manager) trimMessages(ctx context.Context) {
-	// Start async compression early at ~70% of maxMessages threshold
+	// Start async compression early at ~70% of maxMessageRound threshold
 	// This gives time for compression to complete before hitting the hard limit
-	asyncCompressThreshold := int(float64(m.maxMessages) * 0.7)
+	asyncCompressThreshold := int(float64(m.maxMessageRound) * 0.7)
 	if len(m.messages) >= asyncCompressThreshold && !m.compressing && m.chatmodel != nil {
 		go m.compressMessagesAsync(ctx)
 	}
@@ -219,8 +264,8 @@ func (m *Manager) compressMessagesAsync(ctx context.Context) {
 
 	// If prev compression not success
 	m.compressBuffer = append(m.compressBuffer, messagesToCompress...)
-	if len(m.compressBuffer) > m.maxMessages {
-		m.compressBuffer = m.compressBuffer[len(m.compressBuffer)-m.maxMessages:]
+	if len(m.compressBuffer) > m.maxMessageRound {
+		m.compressBuffer = m.compressBuffer[len(m.compressBuffer)-m.maxMessageRound:]
 	}
 
 	m.messages = m.messages[numToCompress:]
@@ -286,21 +331,78 @@ func (m *Manager) doCompression(ctx context.Context, messages [][]*schema.Messag
 	return summaryContent
 }
 
-// GetMessages retrieves all messages in the current context
+// getAllRounds returns all rounds including compressBuffer and messages
+func (m *Manager) getAllRounds() [][]*schema.Message {
+	allRounds := make([][]*schema.Message, 0, len(m.compressBuffer)+len(m.messages))
+	allRounds = append(allRounds, m.compressBuffer...)
+	allRounds = append(allRounds, m.messages...)
+	return allRounds
+}
+
+// GetMessages retrieves simplified messages in the current context
+// Old rounds are simplified (first user message + last assistant response)
 func (m *Manager) GetMessages() []*schema.Message {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Append normal messages
-	recentMessages := make([]*schema.Message, 0)
-	for _, round := range m.compressBuffer {
-		recentMessages = append(recentMessages, round...)
-	}
-	for _, round := range m.messages {
-		recentMessages = append(recentMessages, round...)
+	allRounds := m.getAllRounds()
+	simplifiedMessages := make([]*schema.Message, 0)
+
+	// Determine cutoff index based on total rounds
+	totalRounds := len(allRounds)
+	if totalRounds <= m.fullMessageRounds {
+		// All rounds are recent, return full messages
+		for _, round := range allRounds {
+			simplifiedMessages = append(simplifiedMessages, round...)
+		}
+		return simplifiedMessages
 	}
 
-	return recentMessages
+	cutoffIndex := totalRounds - m.fullMessageRounds
+
+	// Process each round
+	for i, round := range allRounds {
+		if len(round) == 0 {
+			continue
+		}
+
+		// Recent rounds: use full messages
+		if i >= cutoffIndex {
+			simplifiedMessages = append(simplifiedMessages, round...)
+			continue
+		}
+
+		// Old rounds: skip if already summarized
+		firstMsg := round[0]
+		if strings.HasPrefix(firstMsg.Content, "[Conversation Summary]:") {
+			simplifiedMessages = append(simplifiedMessages, round...)
+			continue
+		}
+
+		// Simplify: keep first user message and last assistant message
+		simplifiedRound := m.simplifyRound(round)
+		if len(simplifiedRound) > 0 {
+			simplifiedMessages = append(simplifiedMessages, simplifiedRound...)
+		} else {
+			simplifiedMessages = append(simplifiedMessages, round...)
+		}
+	}
+
+	return simplifiedMessages
+}
+
+// GetFullMessages retrieves all full messages in the current context
+// This includes all original messages without any simplification
+func (m *Manager) GetFullMessages() []*schema.Message {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	allRounds := m.getAllRounds()
+	fullMessages := make([]*schema.Message, 0)
+	for _, round := range allRounds {
+		fullMessages = append(fullMessages, round...)
+	}
+	return fullMessages
 }
 
 // Clear clears the context (preserves system messages)
@@ -309,6 +411,7 @@ func (m *Manager) Clear() {
 	defer m.mu.Unlock()
 	m.round = 0
 	m.messages = make([][]*schema.Message, 0)
+	m.compressBuffer = make([][]*schema.Message, 0)
 }
 
 // GetMessageCount returns the total number of messages in the context

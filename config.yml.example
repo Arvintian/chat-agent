@@ -16,7 +16,20 @@ models:
     model: deepseek-reasoner
     temperature: 0.8
 
-#Chat preset configuration
+# Chat preset configuration
+# Available fields:
+#   - model: model name to use
+#   - desc: description of the chat preset
+#   - system: system prompt for the assistant
+#   - maxMessageRounds: maximum number of message rounds to keep in context (default: 10)
+#   - fullMessageRounds: number of recent rounds to keep full messages, older rounds will be simplified (default: 1)
+#   - maxIterations: maximum iterations for tool calling (default: 20)
+#   - maxRetries: maximum retries for model generation (default: 5)
+#   - mcp_servers: list of MCP servers to use
+#   - tools: list of built-in tools to use
+#   - skill: skill configuration
+#   - hooks: session hooks configuration
+#   - default: whether this is the default chat preset
 chats:
   default:
     model: deepseek-chat
