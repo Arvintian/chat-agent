@@ -26,7 +26,16 @@ models:
 #   - maxIterations: maximum iterations for tool calling (default: 20)
 #   - maxRetries: maximum retries for model generation (default: 5)
 #   - mcp_servers: list of MCP servers to use
-#   - tools: list of built-in tools to use
+#   - tools: list of built-in tools to use (see tools section below)
+#
+# tools section configuration:
+#   Each tool can have:
+#   - category: tool category ("filesystem", "cmd", "smart_cmd")
+#   - params: parameters for the tool
+#     - workDir: working directory (required for filesystem and cmd tools)
+#     - exclude: list of tool names to exclude (optional, for filesystem category)
+#       Example filesystem tools that can be excluded: read_file, write_file, list_directory, etc.
+#   - autoApproval: whether to auto-approve tool calls (default: false)
 #   - skill: skill configuration
 #   - hooks: session hooks configuration
 #   - default: whether this is the default chat preset

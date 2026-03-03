@@ -20,12 +20,37 @@ func getFileSystemTools(ctx context.Context, params map[string]interface{}) ([]t
 	if !ok {
 		return nil, fmt.Errorf("workDir params error")
 	}
+
+	// Parse exclude list
+	var excludeList []string
+	if exclude, exists := params["exclude"]; exists {
+		switch v := exclude.(type) {
+		case []string:
+			excludeList = v
+		case []interface{}:
+			for _, item := range v {
+				if s, ok := item.(string); ok {
+					excludeList = append(excludeList, s)
+				}
+			}
+		}
+	}
+	// Create exclude map for fast lookup
+	excludeMap := make(map[string]bool)
+	for _, name := range excludeList {
+		excludeMap[name] = true
+	}
+
 	fss, err := filesystemserver.NewFilesystemServer([]string{dir})
 	if err != nil {
 		return nil, err
 	}
 	tools := []tool.BaseTool{}
 	for _, mcpTool := range fss.ListTools() {
+		// Skip excluded tools
+		if excludeMap[mcpTool.Tool.Name] {
+			continue
+		}
 		marshaledInputSchema, err := sonic.Marshal(mcpTool.Tool.InputSchema)
 		if err != nil {
 			return nil, fmt.Errorf("conv mcp tool input schema fail(marshal): %w, tool name: %s", err, mcpTool.Tool.Name)

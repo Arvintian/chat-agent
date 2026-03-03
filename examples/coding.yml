@@ -41,6 +41,7 @@ tools:
     category: filesystem
     params:
       workDir: .
+      # exclude: ["delete_file", "move_file"]  # Optional: exclude dangerous tools
     autoApproval: true
   smart-cmd:
     category: smart_cmd
