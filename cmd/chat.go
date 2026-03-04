@@ -23,7 +23,10 @@ import (
 )
 
 var (
-	configPath string
+	configPath          string
+	disableLocalCommand bool
+	startAt             string
+	once                string
 )
 
 // Global variables for chat switching functionality
@@ -127,7 +130,6 @@ var RootCmd = &cobra.Command{
 
 		// one-time task or chat
 		welcome, _ := cmd.Flags().GetString("welcome")
-		once, _ := cmd.Flags().GetString("once")
 		if once != "" {
 			err = cb.StreamChat(cmd.Context(), once)
 			if err != nil {
@@ -136,6 +138,14 @@ var RootCmd = &cobra.Command{
 			return nil
 		} else {
 			fmt.Printf("%s\n", welcome)
+		}
+
+		// start-at: execute a prompt and then continue chat
+		if startAt != "" {
+			err = cb.StreamChat(cmd.Context(), startAt)
+			if err != nil {
+				os.Stderr.WriteString("\nerror: " + err.Error() + "\n")
+			}
 		}
 
 		// chat loop
@@ -206,7 +216,7 @@ var RootCmd = &cobra.Command{
 				chatCancel = cancel
 				input := strings.TrimSpace(sb.String())
 				// exec terminal local start with /t, eg: `/t ls`
-				if strings.HasPrefix(input, "/t ") {
+				if !disableLocalCommand && strings.HasPrefix(input, "/t ") {
 					localcmd := strings.TrimSpace(strings.TrimPrefix(input, "/t"))
 					if err := utils.PopenStream(chatctx, localcmd); err != nil {
 						os.Stderr.WriteString("exec local cmd error: " + err.Error() + "\n")
@@ -279,7 +289,9 @@ func printHelp() {
 	fmt.Println("  /tools   or /l   - List the loaded tools")
 	fmt.Println("  /chat            - List available chats")
 	fmt.Println("  /s <name>        - Switch to another chat directly")
-	fmt.Println("  /t <cmd>         - Execute local command")
+	if !disableLocalCommand {
+		fmt.Println("  /t <cmd>         - Execute local command")
+	}
 	fmt.Println("  /exit    or /q   - Exit program")
 }
 
@@ -337,5 +349,7 @@ func init() {
 	RootCmd.PersistentFlags().BoolP("debug", "", false, "Enable debug mode")
 	RootCmd.Flags().StringP("chat", "c", "", "Specify chat preset name (from config file chats)")
 	RootCmd.PersistentFlags().StringP("welcome", "w", "Welcome to Chat-Agent", "Specify chat welcome message")
-	RootCmd.Flags().String("once", "", "Prompt for one-time task")
+	RootCmd.Flags().StringVarP(&once, "once", "", "", "Prompt for one-time task")
+	RootCmd.Flags().StringVarP(&startAt, "start-at", "", "", "Prompt for task and start chat")
+	RootCmd.Flags().BoolVar(&disableLocalCommand, "disable-local-command", false, "Disable exec local command")
 }
