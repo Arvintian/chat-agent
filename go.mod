@@ -3,6 +3,7 @@ module github.com/Arvintian/chat-agent
 go 1.25.5
 
 require (
+	github.com/Arvintian/readline v0.0.0-20260304114544-c7c8d2e72445
 	github.com/bytedance/sonic v1.14.1
 	github.com/cloudwego/eino v0.7.32
 	github.com/cloudwego/eino-ext/components/model/ark v0.1.64
@@ -23,7 +24,6 @@ require (
 	github.com/hekmon/liveterm/v2 v2.5.0
 	github.com/mark3labs/mcp-filesystem-server v0.11.1
 	github.com/mark3labs/mcp-go v0.43.2
-	github.com/ollama/ollama v0.13.5
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/sys v0.36.0
 	golang.org/x/term v0.32.0
@@ -95,6 +95,7 @@ require (
 	github.com/muesli/ansi v0.0.0-20230316100256-276c6243b2f6 // indirect
 	github.com/muesli/termenv v0.15.2 // indirect
 	github.com/nikolalohinski/gonja v1.5.3 // indirect
+	github.com/ollama/ollama v0.13.5 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.2 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect

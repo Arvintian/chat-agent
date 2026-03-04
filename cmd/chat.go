@@ -18,7 +18,7 @@ import (
 
 	"github.com/cloudwego/eino/components/tool"
 
-	"github.com/ollama/ollama/readline"
+	"github.com/Arvintian/readline"
 	"github.com/spf13/cobra"
 )
 
@@ -122,42 +122,46 @@ var RootCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		scanner.UnsetRawMode()
 		fmt.Print(readline.StartBracketedPaste)
 		defer fmt.Printf(readline.EndBracketedPaste)
+
+		welcome, _ := cmd.Flags().GetString("welcome")
+		fmt.Printf("%s\n", welcome)
 
 		// init chatbot
 		cb := chatbot.NewChatBot(context.WithValue(cmd.Context(), "debug", debug), session.Agent, session.Manager, scanner)
 
-		// one-time task or chat
-		welcome, _ := cmd.Flags().GetString("welcome")
-		if once != "" {
-			err = cb.StreamChat(cmd.Context(), once)
-			if err != nil {
-				os.Stderr.WriteString("\nerror: " + err.Error() + "\n")
-			}
-			return nil
-		} else {
-			fmt.Printf("%s\n", welcome)
-		}
-
-		// start-at: execute a prompt and then continue chat
-		if startAt != "" {
-			err = cb.StreamChat(cmd.Context(), startAt)
-			if err != nil {
-				os.Stderr.WriteString("\nerror: " + err.Error() + "\n")
-			}
-		}
-
-		// chat loop
+		// ignore ctrl+c and break llm generate
 		var chatCancel context.CancelFunc = func() {}
 		sigChan := make(chan os.Signal, 1)
 		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 		go func() {
 			for {
 				<-sigChan
-				chatCancel() // ignore ctrl+c and break llm generate
+				chatCancel()
 			}
 		}()
+
+		// start-at: execute a prompt and then continue chat
+		chatctx, cancel := context.WithCancel(cmd.Context())
+		chatCancel = cancel
+		if startAt != "" {
+			err = cb.StreamChat(chatctx, startAt)
+			if err != nil {
+				os.Stderr.WriteString("\nerror: " + err.Error() + "\n")
+				return nil
+			}
+		} else if once != "" {
+			// one-time task or chat
+			err = cb.StreamChat(chatctx, once)
+			if err != nil {
+				os.Stderr.WriteString("\nerror: " + err.Error() + "\n")
+			}
+			return nil
+		}
+
+		// chat loop
 		var sb strings.Builder
 		var multiline MultilineState
 		for {

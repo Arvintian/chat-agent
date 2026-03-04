@@ -14,7 +14,7 @@ import (
 	"github.com/Arvintian/chat-agent/pkg/manager"
 	"github.com/Arvintian/chat-agent/pkg/mcp"
 	"github.com/Arvintian/chat-agent/pkg/store"
-	"github.com/ollama/ollama/readline"
+	"github.com/Arvintian/readline"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
@@ -355,7 +355,7 @@ func (cb *ChatBot) StreamChatWithHandler(ctx context.Context, userInput string, 
 	} else {
 		cb.manager.AddMessage(ctx, schema.UserMessage(userInput))
 	}
-	
+
 	// Send message count update after adding user message
 	cb.handler.SendMessageCount()
 
@@ -608,10 +608,10 @@ func (cb *ChatBot) StreamChatWithHandler(ctx context.Context, userInput string, 
 
 	cb.handler.SendComplete("")
 	cb.manager.AddMessage(ctx, schema.AssistantMessage(response.String(), nil))
-	
+
 	// Send message count update after assistant response is complete
 	cb.handler.SendMessageCount()
-	
+
 	return nil
 }
 
