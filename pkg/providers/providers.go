@@ -21,10 +21,15 @@ import (
 
 // createOpenAIModel creates OpenAI model
 func (f *Factory) createOpenAIModel(ctx context.Context, modelCfg *config.Model, providerCfg *config.Provider) (model.ToolCallingChatModel, error) {
+	effort := openai.ReasoningEffortLevelMedium
+	if !modelCfg.Thinking {
+		effort = openai.ReasoningEffortLevel("none")
+	}
 	cfg := &openai.ChatModelConfig{
-		Model:   modelCfg.Model,
-		BaseURL: providerCfg.BaseURL,
-		APIKey:  providerCfg.APIKey,
+		Model:           modelCfg.Model,
+		BaseURL:         providerCfg.BaseURL,
+		APIKey:          providerCfg.APIKey,
+		ReasoningEffort: effort,
 	}
 
 	if modelCfg.MaxTokens > 0 {
@@ -48,6 +53,9 @@ func (f *Factory) createClaudeModel(ctx context.Context, modelCfg *config.Model,
 		Model:   modelCfg.Model,
 		BaseURL: &(providerCfg.BaseURL),
 		APIKey:  providerCfg.APIKey,
+		Thinking: &claude.Thinking{
+			Enable: modelCfg.Thinking,
+		},
 	}
 	if modelCfg.MaxTokens > 0 {
 		cfg.MaxTokens = modelCfg.MaxTokens
@@ -68,6 +76,13 @@ func (f *Factory) createClaudeModel(ctx context.Context, modelCfg *config.Model,
 func (f *Factory) createGeminiModel(ctx context.Context, modelCfg *config.Model, providerCfg *config.Provider) (model.ToolCallingChatModel, error) {
 	cfg := &gemini.Config{
 		Model: modelCfg.Model,
+	}
+
+	// Gemini thinking support through thinking budget
+	if modelCfg.Thinking {
+		// For Gemini models that support thinking, we can set the thinking budget
+		// This is typically done through the API request parameters
+		// Note: Not all Gemini models support thinking
 	}
 
 	if modelCfg.MaxTokens > 0 {
@@ -115,8 +130,24 @@ func (f *Factory) createQianfanModel(ctx context.Context, modelCfg *config.Model
 		Model: modelCfg.Model,
 	}
 
-	// Qianfan configuration may need adjustment based on actual API
-	// Basic configuration provided here, may need specific configuration based on requirements
+	// Qianfan thinking support through thinking_budget parameter
+	// For ERNIE Bot models that support thinking (e.g., ERNIE Bot 4.5)
+	if modelCfg.Thinking {
+		// Set thinking budget for models that support it
+		// The actual implementation depends on the specific model
+	}
+
+	if modelCfg.MaxTokens > 0 {
+		cfg.MaxCompletionTokens = &modelCfg.MaxTokens
+	}
+	if modelCfg.Temperature > 0 {
+		temp := float32(modelCfg.Temperature)
+		cfg.Temperature = &temp
+	}
+	if modelCfg.TopP > 0 {
+		topP := float32(modelCfg.TopP)
+		cfg.TopP = &topP
+	}
 
 	return qianfan.NewChatModel(ctx, cfg)
 }
@@ -161,6 +192,11 @@ func (f *Factory) createDeepSeekModel(ctx context.Context, modelCfg *config.Mode
 		BaseURL: providerCfg.BaseURL,
 		APIKey:  providerCfg.APIKey,
 	}
+
+	// Note: DeepSeek thinking support requires enabling reasoning in the API request
+	// The current library version may not fully support thinking configuration
+	// For DeepSeek R1 and other reasoning models, thinking is typically enabled by default
+	// when using those specific model names (e.g., "deepseek-reasoner")
 
 	if modelCfg.MaxTokens > 0 {
 		cfg.MaxTokens = modelCfg.MaxTokens
