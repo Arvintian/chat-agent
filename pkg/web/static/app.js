@@ -1590,6 +1590,22 @@ function hideClearModal() {
     document.getElementById('clear-modal').style.display = 'none';
 }
 
+// Quick clear context without modal (Ctrl+K shortcut) - only clears server context, keeps local data
+async function quickClearContext() {
+    if (!currentChat) {
+        showToast('Please select a chat first', true);
+        return;
+    }
+
+    // Send clear message to server (only clears conversation context)
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'clear', payload: {} }));
+        showToast('Conversation context cleared (local data preserved)', false);
+    } else {
+        showToast('WebSocket not connected', true);
+    }
+}
+
 async function confirmClear() {
     const clearAllRecords = document.getElementById('clear-all-records').checked;
 
@@ -1634,6 +1650,13 @@ function keepSession() {
 function handleKeyDown(e) {
     const input = document.getElementById('message-input');
     if (!input) return;
+
+    // Ctrl+K = clear conversation context (without deleting local data)
+    if (e.ctrlKey && e.key === 'k') {
+        e.preventDefault();
+        quickClearContext();
+        return;
+    }
 
     // Enter without shift = send
     if (e.key === 'Enter' && !e.shiftKey) {
