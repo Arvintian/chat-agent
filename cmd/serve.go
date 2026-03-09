@@ -599,8 +599,8 @@ func (h *WebSocketHandler) handleSelectChat(session *chatbot.WSSession, msg *cha
 		return
 	}
 
-	// Initialize ChatBot
-	cb := chatbot.NewChatBot(ctx, chatSession.Agent, chatSession.Manager, nil)
+	// Initialize ChatBot with persistence store
+	cb := chatbot.NewChatBot(ctx, chatSession.Agent, chatSession.Manager, nil, chatSession.PersistenceStore())
 	wsHandler := chatbot.NewWSChatHandler(session)
 	cb.SetHandler(wsHandler)
 

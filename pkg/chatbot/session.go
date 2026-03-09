@@ -20,6 +20,7 @@ import (
 	skillmw "github.com/Arvintian/chat-agent/pkg/skills/middleware"
 	skilltools "github.com/Arvintian/chat-agent/pkg/skills/tools"
 	builtintools "github.com/Arvintian/chat-agent/pkg/tools"
+	"github.com/Arvintian/chat-agent/pkg/store"
 	"github.com/Arvintian/chat-agent/pkg/utils"
 
 	"github.com/cloudwego/eino/adk"
@@ -40,6 +41,7 @@ type ChatSession struct {
 	Manager         *manager.Manager
 	Tools           []tool.BaseTool
 	MCPClient       *mcp.Client
+	persistence     *store.PersistenceStore
 	cleanupRegistry *cleanupRegistry
 	hookManager     *hook.HookManager
 	closed          bool
@@ -55,6 +57,16 @@ func InitChatSession(ctx context.Context, cfg *config.Config, chatName string, s
 
 	// Create session-level cleanup registry
 	cleanupRegistry := NewCleanupRegistry()
+
+	// Combine chatName and sessionID to create a unique key for persistence
+	// This ensures different chat presets have separate persistence files even with the same sessionID
+	persistenceKey := fmt.Sprintf("%s_%s", chatName, sessionID)
+	
+	// Initialize persistence store
+	persistence, err := store.NewPersistenceStore(persistenceKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize persistence store: %w", err)
+	}
 
 	// chatmodel
 	providerFactory := providers.NewFactory(cfg)
@@ -221,7 +233,24 @@ func InitChatSession(ctx context.Context, cfg *config.Config, chatName string, s
 		manager.SetFullMessageRounds(preset.FullMessageRounds)
 	}
 
-	return &ChatSession{
+	// Set persistence callback for auto-saving messages
+	manager.SetPersistenceCallback(func(messages []*schema.Message) error {
+		return persistence.SaveMessages(messages)
+	})
+
+	// Load persisted messages if any
+	persistedMessages, err := persistence.LoadMessages()
+	if err != nil {
+		logger.Warn("chatbot", fmt.Sprintf("Failed to load persisted messages: %v", err))
+	} else if len(persistedMessages) > 0 {
+		// Restore messages from persistence
+		for _, msg := range persistedMessages {
+			manager.AddMessage(ctx, msg)
+		}
+		logger.Info("chatbot", fmt.Sprintf("Loaded %d messages from persistence for session %s", len(persistedMessages), sessionID))
+	}
+
+	session := &ChatSession{
 		ID:              sessionID,
 		Name:            chatName,
 		Preset:          preset,
@@ -229,9 +258,12 @@ func InitChatSession(ctx context.Context, cfg *config.Config, chatName string, s
 		Manager:         manager,
 		Tools:           tools,
 		MCPClient:       mcpclient,
+		persistence:     persistence,
 		cleanupRegistry: cleanupRegistry,
 		hookManager:     hookMgr,
-	}, nil
+	}
+
+	return session, nil
 }
 
 // NewCleanupRegistry creates a new cleanup registry for the session
@@ -250,6 +282,23 @@ func (s *ChatSession) Close() error {
 	s.closed = true
 
 	var errs []error
+
+	// Save messages before closing
+	if s.persistence != nil && s.Manager != nil {
+		messages := s.Manager.GetFullMessages()
+		if err := s.persistence.SaveMessages(messages); err != nil {
+			errs = append(errs, fmt.Errorf("failed to save messages: %w", err))
+		} else {
+			logger.Info("chatbot", fmt.Sprintf("Saved %d messages to persistence for session %s", len(messages), s.ID))
+		}
+	}
+
+	// Close persistence store
+	if s.persistence != nil {
+		if err := s.persistence.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("failed to close persistence: %w", err))
+		}
+	}
 
 	// Close MCP client
 	if s.MCPClient != nil {
@@ -274,9 +323,20 @@ func (s *ChatSession) Clear() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Clear in-memory messages
 	if s.Manager != nil {
 		s.Manager.Clear()
 	}
+
+	// Clear persisted messages
+	if s.persistence != nil {
+		if err := s.persistence.Clear(); err != nil {
+			logger.Warn("chatbot", fmt.Sprintf("Failed to clear persistence: %v", err))
+		} else {
+			logger.Info("chatbot", fmt.Sprintf("Cleared persistence for session %s", s.ID))
+		}
+	}
+
 	if s.cleanupRegistry != nil {
 		s.cleanupRegistry.Execute()
 	}
@@ -293,6 +353,13 @@ func (s *ChatSession) GetMessageCount() int {
 		return 0
 	}
 	return s.Manager.GetMessageCount()
+}
+
+// PersistenceStore returns the persistence store for this session
+func (s *ChatSession) PersistenceStore() *store.PersistenceStore {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.persistence
 }
 
 func (s *ChatSession) OnKeep() error {

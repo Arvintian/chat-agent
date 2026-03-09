@@ -17,6 +17,7 @@ import (
 	"github.com/Arvintian/readline"
 
 	"github.com/cloudwego/eino/adk"
+	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
 	"github.com/hekmon/liveterm/v2"
 )
@@ -81,13 +82,20 @@ type ChatBot struct {
 	handler Handler
 }
 
-func NewChatBot(ctx context.Context, agent *adk.ChatModelAgent, manager *manager.Manager, scanner *readline.Instance) ChatBot {
+func NewChatBot(ctx context.Context, agent *adk.ChatModelAgent, manager *manager.Manager, scanner *readline.Instance, persistence *store.PersistenceStore) ChatBot {
+	var checkPointStore compose.CheckPointStore
+	if persistence != nil {
+		checkPointStore = store.NewHybridCheckPointStore(persistence)
+	} else {
+		checkPointStore = store.NewInMemoryStore()
+	}
+
 	return ChatBot{
 		ctx: ctx,
 		runner: adk.NewRunner(ctx, adk.RunnerConfig{
 			Agent:           agent,
 			EnableStreaming: true,
-			CheckPointStore: store.NewInMemoryStore(),
+			CheckPointStore: checkPointStore,
 		}),
 		agent:   agent,
 		manager: manager,

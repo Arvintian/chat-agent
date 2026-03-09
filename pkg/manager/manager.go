@@ -11,6 +11,9 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
+// PersistenceCallback is a callback function for message persistence
+type PersistenceCallback func([]*schema.Message) error
+
 const (
 	DefaultMaxMessageRound   int = 10
 	DefaultFullMessageRounds int = 1
@@ -38,6 +41,9 @@ type Manager struct {
 	// compression related fields
 	compressing    bool                // indicates if compression is in progress
 	compressBuffer [][]*schema.Message // buffer for original messages waiting to be compressed
+
+	// persistence callback for auto-saving messages
+	persistenceCallback PersistenceCallback
 }
 
 // NewManager creates a new Manager instance
@@ -53,7 +59,15 @@ func NewManager(maxMessageRound int) *Manager {
 		chatmodel:         nil,
 		compressing:       false,
 		compressBuffer:    make([][]*schema.Message, 0),
+		persistenceCallback: nil,
 	}
+}
+
+// SetPersistenceCallback sets the callback for auto-saving messages
+func (m *Manager) SetPersistenceCallback(cb PersistenceCallback) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.persistenceCallback = cb
 }
 
 // SetFullMessageRounds sets how many recent rounds to keep full messages
@@ -76,7 +90,6 @@ func (m *Manager) SetChatModel(chatmodel model.ToolCallingChatModel) {
 // AddMessage adds a message to the context
 func (m *Manager) AddMessage(ctx context.Context, message *schema.Message) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	// Ensure we have at least one round
 	if len(m.messages) == 0 {
@@ -88,6 +101,28 @@ func (m *Manager) AddMessage(ctx context.Context, message *schema.Message) {
 
 	// If the number of rounds exceeds the limit, trim messages
 	m.trimMessages(ctx)
+
+	// Get full messages for persistence while holding the lock
+	// Copy data here, call persistence callback after releasing lock
+	var fullMessages []*schema.Message
+	var persistenceCB PersistenceCallback
+	if m.persistenceCallback != nil {
+		persistenceCB = m.persistenceCallback
+		allRounds := m.getAllRounds()
+		fullMessages = make([]*schema.Message, 0)
+		for _, round := range allRounds {
+			fullMessages = append(fullMessages, round...)
+		}
+	}
+
+	m.mu.Unlock()
+
+	// Auto-save messages to persistence if callback is set (outside lock to avoid deadlock)
+	if persistenceCB != nil && len(fullMessages) > 0 {
+		if err := persistenceCB(fullMessages); err != nil {
+			logger.Warn("manager", fmt.Sprintf("Failed to auto-save messages: %v", err))
+		}
+	}
 }
 
 func (m *Manager) IncRound() {

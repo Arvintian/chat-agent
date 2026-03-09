@@ -48,7 +48,7 @@ const (
 )
 
 // switchChat switches to a new chat session, closing the old one if provided
-func switchChat(ctx context.Context, cfg *config.Config, chatName string, debug bool, oldSession *chatbot.ChatSession) (*chatbot.ChatSession, error) {
+func switchChat(ctx context.Context, cfg *config.Config, chatName string, debug bool, oldSession *chatbot.ChatSession, sessionID string) (*chatbot.ChatSession, error) {
 	if _, ok := cfg.Chats[chatName]; !ok {
 		return nil, fmt.Errorf("chat preset does not exist: %s", chatName)
 	}
@@ -60,7 +60,7 @@ func switchChat(ctx context.Context, cfg *config.Config, chatName string, debug 
 		}
 	}
 
-	return chatbot.InitChatSession(ctx, cfg, chatName, "local", debug)
+	return chatbot.InitChatSession(ctx, cfg, chatName, sessionID, debug)
 }
 
 // RootCmd represents the base command when called without any subcommands
@@ -98,8 +98,18 @@ var RootCmd = &cobra.Command{
 		}
 		currentChatName = chatName
 
+		// Generate session ID based on current working directory for CLI mode
+		cwd, err := os.Getwd()
+		if err != nil {
+			cwd = "."
+		}
+		sessionID := filepath.Base(cwd)
+		if sessionID == "" || sessionID == "/" {
+			sessionID = "cli-root"
+		}
+
 		// Initialize chat session
-		session, err := chatbot.InitChatSession(cmd.Context(), cfg, chatName, "local", debug)
+		session, err := chatbot.InitChatSession(cmd.Context(), cfg, chatName, sessionID, debug)
 		if err != nil {
 			return err
 		}
@@ -129,8 +139,15 @@ var RootCmd = &cobra.Command{
 		welcome, _ := cmd.Flags().GetString("welcome")
 		fmt.Printf("%s\n", welcome)
 
-		// init chatbot
-		cb := chatbot.NewChatBot(context.WithValue(cmd.Context(), "debug", debug), session.Agent, session.Manager, scanner)
+		// Display loaded context info if any
+		msgCount := session.GetMessageCount()
+		if msgCount > 0 {
+			fmt.Printf("[Context restored from previous session: %d messages]\n", msgCount)
+		}
+
+		// init chatbot with persistence store
+		persistenceStore := session.PersistenceStore()
+		cb := chatbot.NewChatBot(context.WithValue(cmd.Context(), "debug", debug), session.Agent, session.Manager, scanner, persistenceStore)
 
 		// ignore ctrl+c and break llm generate
 		var chatCancel context.CancelFunc = func() {}
@@ -233,12 +250,13 @@ var RootCmd = &cobra.Command{
 					targetName := strings.TrimSpace(strings.TrimPrefix(input, "/s"))
 					if targetName == "" {
 						printChats()
-					} else if newSession, err := switchChat(cmd.Context(), cfg, targetName, debug, session); err != nil {
+					} else if newSession, err := switchChat(cmd.Context(), cfg, targetName, debug, session, sessionID); err != nil {
 						fmt.Printf("Error switching chat: %v\n", err)
 					} else {
 						session = newSession
 						currentChatName = targetName
-						cb = chatbot.NewChatBot(context.WithValue(cmd.Context(), "debug", debug), session.Agent, session.Manager, scanner)
+						persistenceStore := session.PersistenceStore()
+						cb = chatbot.NewChatBot(context.WithValue(cmd.Context(), "debug", debug), session.Agent, session.Manager, scanner, persistenceStore)
 						fmt.Printf("Switched to chat: %s\n", targetName)
 					}
 					sb.Reset()
