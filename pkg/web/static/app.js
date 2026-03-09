@@ -1651,8 +1651,8 @@ function handleKeyDown(e) {
     const input = document.getElementById('message-input');
     if (!input) return;
 
-    // Ctrl+K = clear conversation context (without deleting local data)
-    if (e.ctrlKey && e.key === 'k') {
+    // Ctrl+K / Cmd+K = clear conversation context (without deleting local data)
+    if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
         e.preventDefault();
         quickClearContext();
         return;
