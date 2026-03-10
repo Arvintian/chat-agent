@@ -11,8 +11,13 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
-// PersistenceCallback is a callback function for message persistence
-type PersistenceCallback func([]*schema.Message) error
+// PersistenceCallback is a callback function for single message persistence
+// Each time a new message is added, this callback is invoked with that single message
+type PersistenceCallback func(*schema.Message) error
+
+// CompressionCompleteCallback is a callback function that is called after compression completes
+// This allows the caller to persist the modified messages (full overwrite mode)
+type CompressionCompleteCallback func([]*schema.Message) error
 
 const (
 	DefaultMaxMessageRound   int = 10
@@ -44,6 +49,9 @@ type Manager struct {
 
 	// persistence callback for auto-saving messages
 	persistenceCallback PersistenceCallback
+
+	// compression complete callback for persisting modified messages after compression
+	compressionCompleteCallback CompressionCompleteCallback
 }
 
 // NewManager creates a new Manager instance
@@ -70,6 +78,13 @@ func (m *Manager) SetPersistenceCallback(cb PersistenceCallback) {
 	m.persistenceCallback = cb
 }
 
+// SetCompressionCompleteCallback sets the callback that is called after compression completes
+func (m *Manager) SetCompressionCompleteCallback(cb CompressionCompleteCallback) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.compressionCompleteCallback = cb
+}
+
 // SetFullMessageRounds sets how many recent rounds to keep full messages
 func (m *Manager) SetFullMessageRounds(rounds int) {
 	if rounds < 1 {
@@ -90,6 +105,7 @@ func (m *Manager) SetChatModel(chatmodel model.ToolCallingChatModel) {
 // AddMessage adds a message to the context
 func (m *Manager) AddMessage(ctx context.Context, message *schema.Message) {
 	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	// Ensure we have at least one round
 	if len(m.messages) == 0 {
@@ -102,25 +118,10 @@ func (m *Manager) AddMessage(ctx context.Context, message *schema.Message) {
 	// If the number of rounds exceeds the limit, trim messages
 	m.trimMessages(ctx)
 
-	// Get full messages for persistence while holding the lock
-	// Copy data here, call persistence callback after releasing lock
-	var fullMessages []*schema.Message
-	var persistenceCB PersistenceCallback
+	// Auto-save single message to persistence if callback is set (inside lock)
 	if m.persistenceCallback != nil {
-		persistenceCB = m.persistenceCallback
-		allRounds := m.getAllRounds()
-		fullMessages = make([]*schema.Message, 0)
-		for _, round := range allRounds {
-			fullMessages = append(fullMessages, round...)
-		}
-	}
-
-	m.mu.Unlock()
-
-	// Auto-save messages to persistence if callback is set (outside lock to avoid deadlock)
-	if persistenceCB != nil && len(fullMessages) > 0 {
-		if err := persistenceCB(fullMessages); err != nil {
-			logger.Warn("manager", fmt.Sprintf("Failed to auto-save messages: %v", err))
+		if err := m.persistenceCallback(message); err != nil {
+			logger.Warn("manager", fmt.Sprintf("Failed to auto-save message: %v", err))
 		}
 	}
 }
@@ -317,7 +318,11 @@ func (m *Manager) compressMessagesAsync(ctx context.Context) {
 
 	// Mark compression as complete
 	m.mu.Lock()
-	m.compressing = false
+	defer func() {
+		m.compressing = false
+		m.mu.Unlock()
+	}()
+
 	if summary != "" {
 		summaryMessage := schema.AssistantMessage(fmt.Sprintf("[Conversation Summary]: %s", summary), nil)
 		if len(m.messages) > 0 && len(m.messages[0]) > 0 && strings.HasPrefix(m.messages[0][0].Content, "[Conversation Summary]:") {
@@ -326,8 +331,20 @@ func (m *Manager) compressMessagesAsync(ctx context.Context) {
 		m.messages = append([][]*schema.Message{{summaryMessage}}, m.messages...)
 		m.round = len(m.messages) - 1
 		m.compressBuffer = make([][]*schema.Message, 0)
+
+		// Flatten m.messages to []*schema.Message for persistence (m.compressBuffer is already cleared)
+		allMessages := make([]*schema.Message, 0)
+		for _, round := range m.messages {
+			allMessages = append(allMessages, round...)
+		}
+
+		// Persist modified messages after compression
+		if m.compressionCompleteCallback != nil {
+			if err := m.compressionCompleteCallback(allMessages); err != nil {
+				logger.Warn("manager", fmt.Sprintf("Failed to persist messages after compression: %v", err))
+			}
+		}
 	}
-	m.mu.Unlock()
 }
 
 // doCompression performs the actual compression logic
