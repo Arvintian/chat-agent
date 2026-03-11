@@ -27,6 +27,7 @@ models:
 #   - maxRetries: maximum retries for model generation (default: 5)
 #   - mcp_servers: list of MCP servers to use
 #   - tools: list of built-in tools to use (see tools section below)
+#   - persistence: whether to persist conversation context (default: false)
 #
 # tools section configuration:
 #   Each tool can have:
@@ -44,6 +45,19 @@ chats:
     model: deepseek-chat
     desc: "A friendly assistant"
     system: "You are a helpful search assistant."
+    # persistence: false  # Default: disabled, set to true to enable context persistence
+  
+  temp-chat:
+    model: deepseek-chat
+    desc: "Temporary chat without persistence"
+    system: "You are a helpful search assistant."
+    # persistence: false  # Explicitly disabled (same as default)
+  
+  persistent-chat:
+    model: deepseek-chat
+    desc: "Chat with history persistence enabled"
+    system: "You are a helpful assistant with memory."
+    persistence: true  # Enable persistence for this chat
   default-mcp:
     model: deepseek-chat
     desc: "A friendly assistant"

@@ -62,10 +62,15 @@ func InitChatSession(ctx context.Context, cfg *config.Config, chatName string, s
 	// This ensures different chat presets have separate persistence files even with the same sessionID
 	persistenceKey := fmt.Sprintf("%s_%s", chatName, sessionID)
 	
-	// Initialize persistence store
-	persistence, err := store.NewPersistenceStore(persistenceKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize persistence store: %w", err)
+	// Initialize persistence store (default is enabled if not specified)
+	var persistence *store.PersistenceStore
+	contextPersistenceEnabled := preset.Persistence // Default to true when not set
+	if contextPersistenceEnabled {
+		var err error
+		persistence, err = store.NewPersistenceStore(persistenceKey)
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize persistence store: %w", err)
+		}
 	}
 
 	// chatmodel
@@ -233,47 +238,54 @@ func InitChatSession(ctx context.Context, cfg *config.Config, chatName string, s
 		manager.SetFullMessageRounds(preset.FullMessageRounds)
 	}
 
-	// Define persistence callback for later use
-	persistenceCallback := func(msg *schema.Message) error {
-		return persistence.SaveMessage(msg)
-	}
-
-	// Set compression complete callback for full overwrite when compression completes
-	compressionCompleteCallback := func(messages []*schema.Message) error {
-		return persistence.SaveMessagesOverwrite(messages)
-	}
-
-	// Load persisted messages if any (without triggering persistence callback)
-	persistedMessages, err := persistence.LoadMessages()
-	var loadedMessageCount int
-	if err != nil {
-		logger.Warn("chatbot", fmt.Sprintf("Failed to load persisted messages: %v", err))
-	} else if len(persistedMessages) > 0 {
-		// Temporarily set callback to nil to avoid re-saving loaded messages
-		manager.SetPersistenceCallback(nil)
-		
-		// Restore messages from persistence and reconstruct rounds based on user messages
-		// Each user message indicates a new round, so we need to call IncRound before adding it
-		for i, msg := range persistedMessages {
-			// If this is a user message and not the first message, increment round
-			if msg.Role == schema.User && i > 0 {
-				manager.IncRound()
-			}
-			manager.AddMessage(ctx, msg)
+	// Only setup persistence callbacks and load messages if persistence is enabled
+	if contextPersistenceEnabled {
+		// Define persistence callback for later use
+		persistenceCallback := func(msg *schema.Message) error {
+			return persistence.SaveMessage(msg)
 		}
-		loadedMessageCount = len(persistedMessages)
-		
-		// Re-enable persistence callback after loading
-		manager.SetPersistenceCallback(persistenceCallback)
-		
-		logger.Info("chatbot", fmt.Sprintf("Loaded %d messages from persistence for session %s", loadedMessageCount, sessionID))
-	} else {
-		// No persisted messages, just enable the callback for future messages
-		manager.SetPersistenceCallback(persistenceCallback)
-	}
 
-	// Set compression complete callback after initialization
-	manager.SetCompressionCompleteCallback(compressionCompleteCallback)
+		// Set compression complete callback for full overwrite when compression completes
+		compressionCompleteCallback := func(messages []*schema.Message) error {
+			return persistence.SaveMessagesOverwrite(messages)
+		}
+
+		// Load persisted messages if any (without triggering persistence callback)
+		persistedMessages, err := persistence.LoadMessages()
+		var loadedMessageCount int
+		if err != nil {
+			logger.Warn("chatbot", fmt.Sprintf("Failed to load persisted messages: %v", err))
+		} else if len(persistedMessages) > 0 {
+			// Temporarily set callback to nil to avoid re-saving loaded messages
+			manager.SetPersistenceCallback(nil)
+			
+			// Restore messages from persistence and reconstruct rounds based on user messages
+			// Each user message indicates a new round, so we need to call IncRound before adding it
+			for i, msg := range persistedMessages {
+				// If this is a user message and not the first message, increment round
+				if msg.Role == schema.User && i > 0 {
+					manager.IncRound()
+				}
+				manager.AddMessage(ctx, msg)
+			}
+			loadedMessageCount = len(persistedMessages)
+			
+			// Re-enable persistence callback after loading
+			manager.SetPersistenceCallback(persistenceCallback)
+			
+			logger.Info("chatbot", fmt.Sprintf("Loaded %d messages from persistence for session %s", loadedMessageCount, sessionID))
+		} else {
+			// No persisted messages, just enable the callback for future messages
+			manager.SetPersistenceCallback(persistenceCallback)
+		}
+
+		// Set compression complete callback after initialization
+		manager.SetCompressionCompleteCallback(compressionCompleteCallback)
+	} else {
+		// Persistence is disabled, set nil callbacks
+		manager.SetPersistenceCallback(nil)
+		manager.SetCompressionCompleteCallback(nil)
+	}
 
 	session := &ChatSession{
 		ID:              sessionID,
