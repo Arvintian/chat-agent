@@ -60,13 +60,13 @@ func NewManager(maxMessageRound int) *Manager {
 		maxMessageRound = DefaultMaxMessageRound
 	}
 	return &Manager{
-		messages:          make([][]*schema.Message, 0),
-		maxMessageRound:   maxMessageRound,
-		fullMessageRounds: DefaultFullMessageRounds,
-		round:             0,
-		chatmodel:         nil,
-		compressing:       false,
-		compressBuffer:    make([][]*schema.Message, 0),
+		messages:            make([][]*schema.Message, 0),
+		maxMessageRound:     maxMessageRound,
+		fullMessageRounds:   DefaultFullMessageRounds,
+		round:               0,
+		chatmodel:           nil,
+		compressing:         false,
+		compressBuffer:      make([][]*schema.Message, 0),
 		persistenceCallback: nil,
 	}
 }
@@ -116,7 +116,7 @@ func (m *Manager) AddMessage(ctx context.Context, message *schema.Message) {
 	m.messages[m.round] = append(m.messages[m.round], message)
 
 	// If the number of rounds exceeds the limit, trim messages
-	m.trimMessages(ctx)
+	m.trimMessages(context.Background())
 
 	// Auto-save single message to persistence if callback is set (inside lock)
 	if m.persistenceCallback != nil {
@@ -313,7 +313,7 @@ func (m *Manager) compressMessagesAsync(ctx context.Context) {
 	// Perform compression without holding the main lock
 	summary := ""
 	if len(flatMessages) > 0 {
-		summary = m.doCompression(ctx, [][]*schema.Message{flatMessages})
+		summary = m.doCompression(ctx, flatMessages)
 	}
 
 	// Mark compression as complete
@@ -324,8 +324,8 @@ func (m *Manager) compressMessagesAsync(ctx context.Context) {
 	}()
 
 	if summary != "" {
-		summaryMessage := schema.AssistantMessage(fmt.Sprintf("[Conversation Summary]: %s", summary), nil)
-		if len(m.messages) > 0 && len(m.messages[0]) > 0 && strings.HasPrefix(m.messages[0][0].Content, "[Conversation Summary]:") {
+		summaryMessage := schema.AssistantMessage(fmt.Sprintf("[Previous Conversation Summary]: %s", summary), nil)
+		if len(m.messages) > 0 && len(m.messages[0]) > 0 && strings.HasPrefix(m.messages[0][0].Content, "[Previous Conversation Summary]:") {
 			m.messages = m.messages[1:]
 		}
 		m.messages = append([][]*schema.Message{{summaryMessage}}, m.messages...)
@@ -348,22 +348,15 @@ func (m *Manager) compressMessagesAsync(ctx context.Context) {
 }
 
 // doCompression performs the actual compression logic
-func (m *Manager) doCompression(ctx context.Context, messages [][]*schema.Message) string {
-	// Flatten messages
-	flatMessages := make([]*schema.Message, 0)
-	for _, round := range messages {
-		flatMessages = append(flatMessages, round...)
-	}
-
+func (m *Manager) doCompression(ctx context.Context, flatMessages []*schema.Message) string {
 	if len(flatMessages) == 0 {
 		return ""
 	}
 
 	// Generate summary using chatmodel with inherited context
-	summaryMsgs := []*schema.Message{
-		schema.SystemMessage("You are a conversation summarizer. Summarize the following conversation concisely while preserving key information, decisions, and context. Output only the summary."),
-	}
+	summaryMsgs := []*schema.Message{}
 	summaryMsgs = append(summaryMsgs, flatMessages...)
+	summaryMsgs = append(summaryMsgs, schema.UserMessage("Summarize the following conversation concisely while preserving key information, decisions, and context. Output only the summary."))
 
 	stream, err := m.chatmodel.Generate(ctx, summaryMsgs)
 	if err != nil {
@@ -373,7 +366,7 @@ func (m *Manager) doCompression(ctx context.Context, messages [][]*schema.Messag
 
 	summaryContent := strings.TrimSpace(stream.Content)
 	if summaryContent == "" {
-		return "Previous conversation summarized."
+		return "Conversation summarized."
 	}
 
 	return summaryContent
@@ -422,7 +415,7 @@ func (m *Manager) GetMessages() []*schema.Message {
 
 		// Old rounds: skip if already summarized
 		firstMsg := round[0]
-		if strings.HasPrefix(firstMsg.Content, "[Conversation Summary]:") {
+		if strings.HasPrefix(firstMsg.Content, "[Previous Conversation Summary]:") {
 			simplifiedMessages = append(simplifiedMessages, round...)
 			continue
 		}
