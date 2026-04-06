@@ -118,15 +118,26 @@ Example:
 		router.HandleFunc("/ws", wsHandler.HandleWebSocket)
 
 		router.HandleFunc("/chats", func(w http.ResponseWriter, r *http.Request) {
-			chats := make([]string, 0, len(cfg.Chats))
+			type ChatInfo struct {
+				Name       string `json:"name"`
+				HasKeepHook bool  `json:"has_keep_hook"`
+			}
+			chats := make([]ChatInfo, 0, len(cfg.Chats))
 			defaultChat := ""
 			for name, chatCfg := range cfg.Chats {
-				chats = append(chats, name)
+				hasKeepHook := chatCfg.Hooks != nil && chatCfg.Hooks.Keep != nil && chatCfg.Hooks.Keep.Enabled
+				chats = append(chats, ChatInfo{
+					Name:        name,
+					HasKeepHook: hasKeepHook,
+				})
 				if chatCfg.Default {
 					defaultChat = name
 				}
 			}
-			sort.Strings(chats)
+			// Sort by chat name
+			sort.Slice(chats, func(i, j int) bool {
+				return chats[i].Name < chats[j].Name
+			})
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"chats":        chats,
@@ -538,10 +549,10 @@ func (h *WebSocketHandler) handleSelectChat(session *chatbot.WSSession, msg *cha
 		}
 		// Update session manager
 		h.sessionManager.UpdateChatSessionWithBot(session.SessionID, req.ChatName, session.ChatSession, session.ChatBot)
-		
+
 		// Get message count
 		msgCount := session.ChatSession.GetMessageCount()
-		
+
 		session.SendMessage("chat_selected", map[string]interface{}{
 			"session_id":    session.SessionID,
 			"chat_name":     req.ChatName,
@@ -577,10 +588,10 @@ func (h *WebSocketHandler) handleSelectChat(session *chatbot.WSSession, msg *cha
 		}
 		// Update session manager with current active chat
 		h.sessionManager.UpdateChatSessionWithBot(session.SessionID, req.ChatName, session.ChatSession, session.ChatBot)
-		
+
 		// Get message count
 		msgCount := session.ChatSession.GetMessageCount()
-		
+
 		session.SendMessage("chat_selected", map[string]interface{}{
 			"session_id":    session.SessionID,
 			"chat_name":     req.ChatName,
@@ -723,11 +734,6 @@ func (h *WebSocketHandler) handleStop(session *chatbot.WSSession) {
 
 	// Set cancelled flag to stop ongoing stream
 	session.SetCancelled()
-
-	// Send stopped message to client
-	session.SendMessage("stopped", map[string]interface{}{
-		"message": "Response stopped by user",
-	})
 }
 
 // handleApprovalResponse handles approval response from the client

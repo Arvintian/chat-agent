@@ -39,6 +39,9 @@ const maxReconnectAttempts = 5;
 let toastTimeout = null;
 let isGenerating = false;
 
+// Store chat configurations (name -> { hasKeepHook: boolean })
+const chatConfigs = {};
+
 // Scroll behavior is now handled by scroll-handler.js module
 
 // Session ID storage key
@@ -158,6 +161,9 @@ async function init() {
         // Clear existing options to prevent duplicates when re-initializing
         select.innerHTML = '';
 
+        // Clear chat configs
+        Object.keys(chatConfigs).forEach(key => delete chatConfigs[key]);
+
         // Get last used chat from localStorage
         const lastUsedChat = loadLastChat();
 
@@ -165,32 +171,38 @@ async function init() {
         let chatToSelect = null;
         
         // Priority 1: Use last used chat if it exists in the server list
-        if (lastUsedChat && data.chats.includes(lastUsedChat)) {
+        if (lastUsedChat && data.chats.some(c => c.name === lastUsedChat)) {
             chatToSelect = lastUsedChat;
             console.log('Will select last used chat:', chatToSelect);
         }
         // Priority 2: Use server default chat
-        else if (data.default_chat && data.chats.includes(data.default_chat)) {
+        else if (data.default_chat && data.chats.some(c => c.name === data.default_chat)) {
             chatToSelect = data.default_chat;
             console.log('Will select server default chat:', chatToSelect);
         }
 
-        // Build the option list
-        for (const chat of data.chats) {
+        // Build the option list and store chat configs
+        for (const chatInfo of data.chats) {
+            const chatName = chatInfo.name;
             const option = document.createElement('option');
-            option.value = chat;
-            option.textContent = chat;
+            option.value = chatName;
+            option.textContent = chatName;
             select.appendChild(option);
 
+            // Store chat configuration
+            chatConfigs[chatName] = {
+                hasKeepHook: chatInfo.has_keep_hook || false
+            };
+
             // Select the determined chat
-            if (chatToSelect && chat === chatToSelect) {
+            if (chatToSelect && chatName === chatToSelect) {
                 option.selected = true;
             }
         }
 
         // If only one chat exists, auto-select and start chat immediately
         if (data.chats.length === 1) {
-            select.value = data.chats[0];
+            select.value = data.chats[0].name;
             startChat();
         }
     } catch (e) {
@@ -221,6 +233,17 @@ async function startChat() {
         chatNameText.textContent = '💬 ' + chatName;
     } else {
         agentHeader.textContent = '💬 ' + chatName;
+    }
+
+    // Show or hide keep button based on chat configuration
+    const keepBtn = document.getElementById('keep-btn');
+    if (keepBtn) {
+        const chatConfig = chatConfigs[chatName];
+        if (chatConfig && chatConfig.hasKeepHook) {
+            keepBtn.style.display = 'inline-block';
+        } else {
+            keepBtn.style.display = 'none';
+        }
     }
 
     // Load message history from storage (IndexedDB or localStorage)
@@ -289,6 +312,12 @@ function backToChatSelection() {
     // Reset send button
     isGenerating = false;
     updateSendButton();
+
+    // Hide keep button (will be shown again when selecting a chat with keep hook)
+    const keepBtn = document.getElementById('keep-btn');
+    if (keepBtn) {
+        keepBtn.style.display = 'none';
+    }
 
     // Re-init to reload chat list (keep WebSocket connection alive)
     init();
