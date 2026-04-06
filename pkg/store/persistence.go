@@ -198,6 +198,10 @@ func (s *PersistenceStore) LoadMessages() ([]*schema.Message, error) {
 
 	var messages []*schema.Message
 	scanner := bufio.NewScanner(file)
+	// Set a larger buffer to handle long messages (default is 64KB)
+	const maxCapacity = 10 * 1024 * 1024 // 10MB
+	buf := make([]byte, 0, 64*1024)      // Start with 64KB
+	scanner.Buffer(buf, maxCapacity)
 	lineNum := 0
 
 	for scanner.Scan() {
