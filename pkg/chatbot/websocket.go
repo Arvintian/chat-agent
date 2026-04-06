@@ -31,6 +31,7 @@ type ApprovalRequest struct {
 // WSSession represents a WebSocket session with its connection
 type WSSession struct {
 	conn        *websocket.Conn
+	connMu      sync.Mutex
 	cfg         *config.Config
 	SessionID   string
 	ChatName    string
@@ -102,6 +103,8 @@ func (s *WSSession) SetCancelFunc(cancelFunc context.CancelFunc) {
 }
 
 func (s *WSSession) SendMessage(msgType string, content interface{}) {
+	s.connMu.Lock()
+	defer s.connMu.Unlock()
 	data := WSMessage{Type: msgType}
 	payload, _ := json.Marshal(content)
 	data.Payload = payload
