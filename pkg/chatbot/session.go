@@ -19,8 +19,8 @@ import (
 	skillloader "github.com/Arvintian/chat-agent/pkg/skills/loader"
 	skillmw "github.com/Arvintian/chat-agent/pkg/skills/middleware"
 	skilltools "github.com/Arvintian/chat-agent/pkg/skills/tools"
-	builtintools "github.com/Arvintian/chat-agent/pkg/tools"
 	"github.com/Arvintian/chat-agent/pkg/store"
+	builtintools "github.com/Arvintian/chat-agent/pkg/tools"
 	"github.com/Arvintian/chat-agent/pkg/utils"
 
 	"github.com/cloudwego/eino/adk"
@@ -61,7 +61,7 @@ func InitChatSession(ctx context.Context, cfg *config.Config, chatName string, s
 	// Combine chatName and sessionID to create a unique key for persistence
 	// This ensures different chat presets have separate persistence files even with the same sessionID
 	persistenceKey := fmt.Sprintf("%s_%s", chatName, sessionID)
-	
+
 	// Initialize persistence store (default is enabled if not specified)
 	var persistence *store.PersistenceStore
 	contextPersistenceEnabled := preset.Persistence // Default to true when not set
@@ -176,6 +176,15 @@ func InitChatSession(ctx context.Context, cfg *config.Config, chatName string, s
 		hookMgr = hook.NewHookManager(preset.Hooks)
 	}
 
+	toolSchemas := make([]*schema.ToolInfo, 0, len(tools))
+	for _, tool := range tools {
+		schema, err := tool.Info(ctx)
+		if err != nil {
+			return nil, err
+		}
+		toolSchemas = append(toolSchemas, schema)
+	}
+
 	// init agent
 	maxIterations := 20
 	if preset.MaxIterations > 0 {
@@ -232,8 +241,16 @@ func InitChatSession(ctx context.Context, cfg *config.Config, chatName string, s
 	}
 
 	// init manager
+	contextModel, err := providerFactory.CreateChatModel(ctx, preset.Model)
+	if err != nil {
+		return nil, err
+	}
+	contextModel, err = contextModel.WithTools(toolSchemas)
+	if err != nil {
+		return nil, err
+	}
 	manager := manager.NewManager(preset.MaxMessageRounds)
-	manager.SetChatModel(model)
+	manager.SetChatModel(contextModel)
 	if preset.FullMessageRounds > 0 {
 		manager.SetFullMessageRounds(preset.FullMessageRounds)
 	}
@@ -258,7 +275,7 @@ func InitChatSession(ctx context.Context, cfg *config.Config, chatName string, s
 		} else if len(persistedMessages) > 0 {
 			// Temporarily set callback to nil to avoid re-saving loaded messages
 			manager.SetPersistenceCallback(nil)
-			
+
 			// Restore messages from persistence and reconstruct rounds based on user messages
 			// Each user message indicates a new round, so we need to call IncRound before adding it
 			for i, msg := range persistedMessages {
@@ -269,10 +286,10 @@ func InitChatSession(ctx context.Context, cfg *config.Config, chatName string, s
 				manager.AddMessage(ctx, msg)
 			}
 			loadedMessageCount = len(persistedMessages)
-			
+
 			// Re-enable persistence callback after loading
 			manager.SetPersistenceCallback(persistenceCallback)
-			
+
 			logger.Info("chatbot", fmt.Sprintf("Loaded %d messages from persistence for session %s", loadedMessageCount, sessionID))
 		} else {
 			// No persisted messages, just enable the callback for future messages
