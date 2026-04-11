@@ -119,8 +119,8 @@ Example:
 
 		router.HandleFunc("/chats", func(w http.ResponseWriter, r *http.Request) {
 			type ChatInfo struct {
-				Name       string `json:"name"`
-				HasKeepHook bool  `json:"has_keep_hook"`
+				Name        string `json:"name"`
+				HasKeepHook bool   `json:"has_keep_hook"`
 			}
 			chats := make([]ChatInfo, 0, len(cfg.Chats))
 			defaultChat := ""
@@ -675,6 +675,21 @@ func (h *WebSocketHandler) handleChat(session *chatbot.WSSession, msg *chatbot.W
 	err := session.ChatBot.StreamChatWithHandler(ctx, req.Message, fileData)
 	if err != nil && !session.IsCancelled() {
 		session.SendError(err.Error())
+		if strings.Contains(err.Error(), "failed to call mcp tool") && strings.Contains(err.Error(), "transport error") {
+			ctx := context.Background()
+			chatSession, err := chatbot.InitChatSession(ctx, h.cfg, session.ChatName, session.SessionID, false)
+			if err != nil {
+				session.SendError(fmt.Sprintf("Failed to initialize chat session: %v", err))
+				return
+			}
+			session.ChatSession.Close()
+			session.ChatSession.Manager.SetChatModel(chatSession.Manager.GetChatModel())
+			cb := chatbot.NewChatBot(ctx, chatSession.Agent, session.ChatSession.Manager, nil, chatSession.PersistenceStore())
+			cb.SetHandler(session.WSHandler)
+			session.ChatSession = chatSession
+			session.ChatBot = &cb
+			session.SendError("Reinit chat session for refresh mcp client")
+		}
 		return
 	}
 

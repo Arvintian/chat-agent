@@ -102,6 +102,12 @@ func (m *Manager) SetChatModel(chatmodel model.ToolCallingChatModel) {
 	m.chatmodel = chatmodel
 }
 
+func (m *Manager) GetChatModel() model.ToolCallingChatModel {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.chatmodel
+}
+
 // AddMessage adds a message to the context
 func (m *Manager) AddMessage(ctx context.Context, message *schema.Message) {
 	m.mu.Lock()

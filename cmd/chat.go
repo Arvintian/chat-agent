@@ -294,6 +294,18 @@ var RootCmd = &cobra.Command{
 					err = cb.StreamChat(chatctx, input)
 					if err != nil {
 						os.Stderr.WriteString("\nerror: " + err.Error() + "\n")
+						if strings.Contains(err.Error(), "failed to call mcp tool") && strings.Contains(err.Error(), "transport error") {
+							if newSession, err := switchChat(cmd.Context(), cfg, currentChatName, debug, session, sessionID); err != nil {
+								fmt.Printf("Error reinit chat: %v\n", err)
+							} else {
+								session.Manager.SetChatModel(newSession.Manager.GetChatModel())
+								newSession.Manager = session.Manager
+								session = newSession
+								persistenceStore := session.PersistenceStore()
+								cb = chatbot.NewChatBot(context.WithValue(cmd.Context(), "debug", debug), session.Agent, session.Manager, scanner, persistenceStore)
+								fmt.Printf("Reinit chat session for refresh mcp client: %v\n", currentChatName)
+							}
+						}
 					}
 				}
 				sb.Reset()

@@ -49,11 +49,11 @@ func (m *toolHelper) InvokableRun(ctx context.Context, argumentsInJSON string, o
 		},
 	})
 	if err != nil {
-		return fmt.Sprintf("failed to call mcp tool: %v", err), nil
+		return fmt.Sprintf("failed to call tool: %v", err), nil
 	}
 	marshaledResult, err := sonic.MarshalString(result)
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal mcp tool result: %w", err)
+		return "", fmt.Errorf("failed to marshal tool result: %w", err)
 	}
 	if result.IsError {
 		return marshaledResult, err
