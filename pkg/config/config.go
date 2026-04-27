@@ -71,13 +71,15 @@ type Provider struct {
 
 // Model represents AI model configuration
 type Model struct {
-	Provider    string  `yaml:"provider"`
-	Model       string  `yaml:"model"`
-	Thinking    bool    `yaml:"thinking"`
-	MaxTokens   int     `yaml:"max_tokens,omitempty"`
-	Temperature float64 `yaml:"temperature,omitempty"`
-	TopP        float64 `yaml:"top_p,omitempty"`
-	TopK        int     `yaml:"top_k,omitempty"`
+	Provider        string         `yaml:"provider"`
+	Model           string         `yaml:"model"`
+	Thinking        bool           `yaml:"thinking"`
+	ReasoningEffort *string        `yaml:"reasoning_effort"`
+	MaxTokens       int            `yaml:"max_tokens,omitempty"`
+	Temperature     float64        `yaml:"temperature,omitempty"`
+	TopP            float64        `yaml:"top_p,omitempty"`
+	TopK            int            `yaml:"top_k,omitempty"`
+	ExtraBody       map[string]any `yaml:"extra_body"`
 }
 
 // MCPServer represents MCP server configuration

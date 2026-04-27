@@ -25,11 +25,17 @@ func (f *Factory) createOpenAIModel(ctx context.Context, modelCfg *config.Model,
 	if !modelCfg.Thinking {
 		effort = openai.ReasoningEffortLevel("none")
 	}
+	if modelCfg.ReasoningEffort != nil {
+		effort = openai.ReasoningEffortLevel(*modelCfg.ReasoningEffort)
+	}
 	cfg := &openai.ChatModelConfig{
-		Model:           modelCfg.Model,
-		BaseURL:         providerCfg.BaseURL,
-		APIKey:          providerCfg.APIKey,
-		ReasoningEffort: effort,
+		Model:       modelCfg.Model,
+		BaseURL:     providerCfg.BaseURL,
+		APIKey:      providerCfg.APIKey,
+		ExtraFields: modelCfg.ExtraBody,
+	}
+	if effort != "" {
+		cfg.ReasoningEffort = effort
 	}
 
 	if modelCfg.MaxTokens > 0 {
