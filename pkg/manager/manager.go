@@ -147,7 +147,9 @@ func (m *Manager) IncRound() {
 	m.round = len(m.messages) - 1
 }
 
-// simplifyRound simplifies a single round to keep only first user message and last assistant message
+// simplifyRound simplifies a single round to keep only first user message and last assistant message.
+// If the last assistant message has tool calls, the corresponding tool response messages are also preserved
+// to maintain tool call / tool result pairing integrity for API calls.
 func (m *Manager) simplifyRound(messages []*schema.Message) []*schema.Message {
 	if len(messages) == 0 {
 		return messages
@@ -171,6 +173,23 @@ func (m *Manager) simplifyRound(messages []*schema.Message) []*schema.Message {
 	}
 	if lastAssistantMsg != nil {
 		result = append(result, lastAssistantMsg)
+
+		// If the last assistant message has tool calls, preserve the corresponding
+		// tool response messages to maintain tool_call/tool_result pairing.
+		if len(lastAssistantMsg.ToolCalls) > 0 {
+			toolCallIDs := make(map[string]bool)
+			for _, tc := range lastAssistantMsg.ToolCalls {
+				if tc.ID != "" {
+					toolCallIDs[tc.ID] = true
+				}
+			}
+			// Append tool response messages that match the tool call IDs
+			for _, msg := range messages {
+				if msg.Role == schema.Tool && msg.ToolCallID != "" && toolCallIDs[msg.ToolCallID] {
+					result = append(result, msg)
+				}
+			}
+		}
 	}
 
 	return result
@@ -388,6 +407,7 @@ func (m *Manager) getAllRounds() [][]*schema.Message {
 
 // GetMessages retrieves simplified messages in the current context
 // Old rounds are simplified (first user message + last assistant response)
+// The returned messages are guaranteed to have proper tool_call / tool_result pairing.
 func (m *Manager) GetMessages() []*schema.Message {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -402,7 +422,7 @@ func (m *Manager) GetMessages() []*schema.Message {
 		for _, round := range allRounds {
 			simplifiedMessages = append(simplifiedMessages, round...)
 		}
-		return simplifiedMessages
+		return m.validateAndCleanRound(simplifiedMessages)
 	}
 
 	cutoffIndex := totalRounds - m.fullMessageRounds
@@ -435,11 +455,14 @@ func (m *Manager) GetMessages() []*schema.Message {
 		}
 	}
 
-	return simplifiedMessages
+	// Ensure tool call / tool result pairing is valid before returning to the caller.
+	// This catches any edge cases where simplification or compression left unpaired messages.
+	return m.validateAndCleanRound(simplifiedMessages)
 }
 
 // GetFullMessages retrieves all full messages in the current context
-// This includes all original messages without any simplification
+// This includes all original messages without any simplification.
+// The returned messages are guaranteed to have proper tool_call / tool_result pairing.
 func (m *Manager) GetFullMessages() []*schema.Message {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -449,7 +472,7 @@ func (m *Manager) GetFullMessages() []*schema.Message {
 	for _, round := range allRounds {
 		fullMessages = append(fullMessages, round...)
 	}
-	return fullMessages
+	return m.validateAndCleanRound(fullMessages)
 }
 
 // Clear clears the context (preserves system messages)
