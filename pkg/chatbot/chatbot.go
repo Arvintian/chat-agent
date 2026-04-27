@@ -314,8 +314,25 @@ func (cb *ChatBot) StreamChat(ctx context.Context, userInput string) error {
 			}
 		} else if event.Output.MessageOutput.Message != nil {
 			if len(event.Output.MessageOutput.Message.ToolCalls) > 0 {
-				for _, tc := range event.Output.MessageOutput.Message.ToolCalls {
-					fmt.Printf("ToolCall: (%s) %s", tc.Function.Name, tc.Function.Arguments)
+				for i, tc := range event.Output.MessageOutput.Message.ToolCalls {
+					index := tc.Index
+					if index == nil {
+						index = &i
+					}
+					toolMap[*index] = append(toolMap[*index], &schema.Message{
+						Role: event.Output.MessageOutput.Message.Role,
+						ToolCalls: []schema.ToolCall{{
+							ID:    tc.ID,
+							Type:  tc.Type,
+							Index: index,
+							Function: schema.FunctionCall{
+								Name:      tc.Function.Name,
+								Arguments: tc.Function.Arguments,
+							},
+						}},
+					})
+					line, _ := TruncateToTermWidth(fmt.Sprintf("ToolCall: (%s) %s", tc.Function.Name, tc.Function.Arguments))
+					fmt.Print(line)
 					fmt.Print("\n---\n")
 				}
 			}
@@ -582,6 +599,18 @@ func (cb *ChatBot) StreamChatWithHandler(ctx context.Context, userInput string, 
 					if index == nil {
 						index = &i
 					}
+					toolMap[*index] = append(toolMap[*index], &schema.Message{
+						Role: event.Output.MessageOutput.Message.Role,
+						ToolCalls: []schema.ToolCall{{
+							ID:    tc.ID,
+							Type:  tc.Type,
+							Index: index,
+							Function: schema.FunctionCall{
+								Name:      tc.Function.Name,
+								Arguments: tc.Function.Arguments,
+							},
+						}},
+					})
 					cb.handler.SendToolCall(tc.Function.Name, tc.Function.Arguments, tc.ID, false)
 				}
 				// Reset firstChunk after tool call
