@@ -406,6 +406,18 @@ func (s *ChatSession) RemoveLastRound() {
 	}
 }
 
+// GetLastUserMessage returns the last user message from the conversation, if any.
+// Used for redo/regenerate functionality.
+func (s *ChatSession) GetLastUserMessage() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.Manager != nil {
+		return s.Manager.GetLastUserMessage()
+	}
+	return ""
+}
+
 // GetMessageCount returns the number of messages in the session
 func (s *ChatSession) GetMessageCount() int {
 	s.mu.Lock()

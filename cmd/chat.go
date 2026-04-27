@@ -269,6 +269,18 @@ var RootCmd = &cobra.Command{
 				case "/clear", "/c":
 					session.Clear()
 					fmt.Println("The conversation context is cleared")
+				case "/redo", "/r":
+					lastMsg := session.GetLastUserMessage()
+					if lastMsg == "" {
+						fmt.Println("No previous user message to redo")
+					} else {
+						session.RemoveLastRound()
+						fmt.Printf("Redoing last message: %s\n", lastMsg)
+						chatctx, cancel := context.WithCancel(cmd.Context())
+						chatCancel = cancel
+						err = cb.StreamChat(chatctx, lastMsg)
+						session, cb = handleStreamError(err, cmd.Context(), cfg, debug, session, sessionID, scanner, cb)
+					}
 				case "/keep", "/k":
 					if err := session.OnKeep(); err != nil {
 						fmt.Printf("Error executing keep hook: %v\n", err)
@@ -292,21 +304,7 @@ var RootCmd = &cobra.Command{
 					return nil
 				default:
 					err = cb.StreamChat(chatctx, input)
-					if err != nil {
-						os.Stderr.WriteString("\nerror: " + err.Error() + "\n")
-						if strings.Contains(err.Error(), "failed to call mcp tool") && strings.Contains(err.Error(), "transport error") {
-							if newSession, err := switchChat(cmd.Context(), cfg, currentChatName, debug, session, sessionID); err != nil {
-								fmt.Printf("Error reinit chat: %v\n", err)
-							} else {
-								session.Manager.SetChatModel(newSession.Manager.GetChatModel())
-								newSession.Manager = session.Manager
-								session = newSession
-								persistenceStore := session.PersistenceStore()
-								cb = chatbot.NewChatBot(context.WithValue(cmd.Context(), "debug", debug), session.Agent, session.Manager, scanner, persistenceStore)
-								fmt.Printf("Reinit chat session for refresh mcp client: %v\n", currentChatName)
-							}
-						}
-					}
+					session, cb = handleStreamError(err, cmd.Context(), cfg, debug, session, sessionID, scanner, cb)
 				}
 				sb.Reset()
 			}
@@ -319,6 +317,7 @@ func printHelp() {
 	fmt.Println("  /help    or /h   - Show this help message")
 	fmt.Println("  /history or /i   - Get conversation history")
 	fmt.Println("  /clear   or /c   - Clear conversation context")
+	fmt.Println("  /redo    or /r   - Redo last round")
 	fmt.Println("  /keep    or /k   - Execute session keep hook")
 	fmt.Println("  /tools   or /l   - List the loaded tools")
 	fmt.Println("  /chat            - List available chats")
@@ -361,6 +360,35 @@ func printChats() {
 			fmt.Printf("    Model: %s\n", preset.Model)
 		}
 	}
+}
+
+// recoverSessionAfterMCPError attempts to reinitialize the session after an MCP transport error.
+// Returns the new session and chatbot if recovery succeeded, or the originals if not.
+func recoverSessionAfterMCPError(ctx context.Context, cfg *config.Config, debug bool, session *chatbot.ChatSession, sessionID string, scanner *readline.Instance, cb chatbot.ChatBot) (*chatbot.ChatSession, chatbot.ChatBot) {
+	if newSession, err := switchChat(ctx, cfg, currentChatName, debug, session, sessionID); err != nil {
+		fmt.Printf("Error reinit chat: %v\n", err)
+	} else {
+		session.Manager.SetChatModel(newSession.Manager.GetChatModel())
+		newSession.Manager = session.Manager
+		persistenceStore := newSession.PersistenceStore()
+		newCB := chatbot.NewChatBot(context.WithValue(ctx, "debug", debug), newSession.Agent, newSession.Manager, scanner, persistenceStore)
+		fmt.Printf("Reinit chat session for refresh mcp client: %v\n", currentChatName)
+		return newSession, newCB
+	}
+	return session, cb
+}
+
+// handleStreamError processes a StreamChat error, printing it and triggering MCP recovery if needed.
+// Returns the (possibly new) session and chatbot.
+func handleStreamError(err error, ctx context.Context, cfg *config.Config, debug bool, session *chatbot.ChatSession, sessionID string, scanner *readline.Instance, cb chatbot.ChatBot) (*chatbot.ChatSession, chatbot.ChatBot) {
+	if err == nil {
+		return session, cb
+	}
+	os.Stderr.WriteString("\nerror: " + err.Error() + "\n")
+	if strings.Contains(err.Error(), "failed to call mcp tool") && strings.Contains(err.Error(), "transport error") {
+		return recoverSessionAfterMCPError(ctx, cfg, debug, session, sessionID, scanner, cb)
+	}
+	return session, cb
 }
 
 func Execute() {

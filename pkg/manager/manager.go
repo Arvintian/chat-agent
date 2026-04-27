@@ -478,6 +478,28 @@ func (m *Manager) RemoveLastRound() {
 	}
 }
 
+// GetLastUserMessage returns the content of the last user message in the conversation.
+// Returns empty string if no user message is found.
+func (m *Manager) GetLastUserMessage() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if len(m.messages) == 0 {
+		return ""
+	}
+
+	// Search from the last round backwards
+	for i := len(m.messages) - 1; i >= 0; i-- {
+		// Search messages within the round backwards
+		for j := len(m.messages[i]) - 1; j >= 0; j-- {
+			if m.messages[i][j].Role == schema.User {
+				return m.messages[i][j].Content
+			}
+		}
+	}
+	return ""
+}
+
 // GetMessageCount returns the total number of messages in the context
 func (m *Manager) GetMessageCount() int {
 	m.mu.Lock()
