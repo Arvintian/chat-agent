@@ -162,6 +162,42 @@ async function deleteMessagesForChat(chatName) {
     }
 }
 
+// Delete the last message for a chat from IndexedDB
+async function deleteLastMessageForChat(chatName) {
+    try {
+        await initIndexedDB();
+        
+        const transaction = db.transaction([STORE_NAME], 'readwrite');
+        const store = transaction.objectStore(STORE_NAME);
+        const index = store.index('chatName');
+        
+        return new Promise((resolve, reject) => {
+            const request = index.getAll(chatName);
+            
+            request.onsuccess = () => {
+                const records = request.result || [];
+                if (records.length === 0) {
+                    resolve();
+                    return;
+                }
+                // Sort by timestamp to find the last one
+                records.sort((a, b) => a.timestamp - b.timestamp);
+                const lastRecord = records[records.length - 1];
+                const deleteRequest = store.delete(lastRecord.id);
+                deleteRequest.onsuccess = () => resolve();
+                deleteRequest.onerror = () => reject(deleteRequest.error);
+            };
+            
+            request.onerror = () => {
+                console.error('Failed to load messages for deletion:', request.error);
+                reject(request.error);
+            };
+        });
+    } catch (error) {
+        console.error('Error deleting last message from IndexedDB:', error);
+    }
+}
+
 // Delete all messages from IndexedDB
 async function deleteAllMessages() {
     try {
@@ -227,6 +263,7 @@ window.ChatDB = {
     saveMessage: saveMessageWithFiles,
     loadMessages: loadMessagesForChat,
     deleteMessages: deleteMessagesForChat,
+    deleteLastMessage: deleteLastMessageForChat,
     deleteAll: deleteAllMessages,
     getUsage: getStorageUsage,
     isSupported: isIndexedDBSupported

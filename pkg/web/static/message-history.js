@@ -245,6 +245,87 @@
         return [];
     }
 
+    // Remove all messages after the last user message (used for regenerate)
+    function removeMessagesAfterLastUser() {
+        if (!currentChat) {
+            return Promise.resolve();
+        }
+
+        return Promise.resolve().then(function() {
+            if (global.ChatDB && global.ChatDB.isSupported()) {
+                return global.ChatDB.loadMessages(currentChat)
+                    .then(function(messages) {
+                        if (!messages || messages.length === 0) {
+                            return;
+                        }
+                        
+                        // Find the index of the last user message
+                        var lastUserIndex = -1;
+                        for (var i = messages.length - 1; i >= 0; i--) {
+                            if (messages[i].type === 'user') {
+                                lastUserIndex = i;
+                                break;
+                            }
+                        }
+                        
+                        if (lastUserIndex === -1 || lastUserIndex === messages.length - 1) {
+                            // No user message found or it's already the last message
+                            return;
+                        }
+                        
+                        // Delete all messages after the last user message one by one
+                        var deleteCount = messages.length - 1 - lastUserIndex;
+                        var deletePromises = [];
+                        for (var d = 0; d < deleteCount; d++) {
+                            deletePromises.push(global.ChatDB.deleteLastMessage(currentChat));
+                        }
+                        return Promise.all(deletePromises);
+                    })
+                    .then(function() {
+                        // Also update localStorage fallback
+                        return removeMessagesAfterLastUserFromLocalStorage();
+                    });
+            } else {
+                return removeMessagesAfterLastUserFromLocalStorage();
+            }
+        }).catch(function(e) {
+            console.error('Failed to remove messages after last user:', e);
+        });
+    }
+
+    // Remove messages after last user from localStorage fallback
+    function removeMessagesAfterLastUserFromLocalStorage() {
+        if (!currentChat) {
+            return;
+        }
+        
+        var key = getHistoryKey(currentChat);
+        try {
+            var stored = localStorage.getItem(key);
+            if (stored) {
+                var history = JSON.parse(stored);
+                if (Array.isArray(history)) {
+                    // Find the index of the last user message
+                    var lastUserIndex = -1;
+                    for (var i = history.length - 1; i >= 0; i--) {
+                        if (history[i].type === 'user') {
+                            lastUserIndex = i;
+                            break;
+                        }
+                    }
+                    
+                    if (lastUserIndex !== -1 && lastUserIndex < history.length - 1) {
+                        // Keep only messages up to and including the last user message
+                        history = history.slice(0, lastUserIndex + 1);
+                        localStorage.setItem(key, JSON.stringify(history));
+                    }
+                }
+            }
+        } catch (e) {
+            console.error('Failed to update localStorage history:', e);
+        }
+    }
+
     // Clear message history for current chat
     function clearMessageHistory() {
         if (!currentChat) {
@@ -312,6 +393,7 @@
         loadHistory: loadMessageHistoryFromStorage,
         clearHistory: clearMessageHistory,
         clearAllHistories: clearAllChatHistories,
+        removeMessagesAfterLastUser: removeMessagesAfterLastUser,
         MAX_HISTORY_MESSAGES: MAX_HISTORY_MESSAGES,
         HISTORY_KEY_PREFIX: HISTORY_KEY_PREFIX
     };

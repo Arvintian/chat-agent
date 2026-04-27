@@ -388,6 +388,24 @@ func (s *ChatSession) Clear() error {
 	return nil
 }
 
+// RemoveLastRound removes the last round of messages (used for regenerate)
+func (s *ChatSession) RemoveLastRound() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.Manager != nil {
+		s.Manager.RemoveLastRound()
+
+		// Update persistence with remaining messages
+		if s.persistence != nil {
+			messages := s.Manager.GetFullMessages()
+			if err := s.persistence.SaveMessagesOverwrite(messages); err != nil {
+				logger.Warn("chatbot", fmt.Sprintf("Failed to overwrite persistence after removing last round: %v", err))
+			}
+		}
+	}
+}
+
 // GetMessageCount returns the number of messages in the session
 func (s *ChatSession) GetMessageCount() int {
 	s.mu.Lock()

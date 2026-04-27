@@ -317,6 +317,17 @@ body {
     color: #4caf50;
 }
 
+/* Regenerate button in message footer */
+.regen-btn {
+    margin-left: 8px;
+}
+
+.regen-btn:hover {
+    background: #e8f0fe !important;
+    border-color: #667eea !important;
+    color: #667eea !important;
+}
+
 /* Code block copy button styles */
 .markdown-body pre,
 pre.code-block {

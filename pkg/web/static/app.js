@@ -38,6 +38,9 @@ let reconnectAttempts = 0;
 const maxReconnectAttempts = 5;
 let toastTimeout = null;
 let isGenerating = false;
+let lastUserMessage = '';
+let lastUserFiles = null;
+let lastUserMessageElement = null;  // DOM element of the last user message
 
 // Store chat configurations (name -> { hasKeepHook: boolean })
 const chatConfigs = {};
@@ -319,6 +322,12 @@ function backToChatSelection() {
         keepBtn.style.display = 'none';
     }
 
+    // Hide regenerate button and reset state
+    removeRegenerateFromLastMessage();
+    lastUserMessage = '';
+    lastUserFiles = null;
+    lastUserMessageElement = null;
+
     // Re-init to reload chat list (keep WebSocket connection alive)
     init();
 }
@@ -352,6 +361,11 @@ async function loadMessageHistory() {
             displayStoredToolCall(msg.toolData);
         }
     });
+
+    // Add regenerate button to the last user message after loading
+    if (lastUserMessageElement && (lastUserMessage || (lastUserFiles && lastUserFiles.length > 0))) {
+        addRegenerateButton(lastUserMessageElement);
+    }
 
     // Scroll to bottom after loading history
     scrollToBottom(true);
@@ -464,6 +478,16 @@ function displayStoredMessage(content, type) {
     }
 
     document.getElementById('messages').appendChild(div);
+
+    // Track last user message and add regenerate button
+    if (type === 'user') {
+        removeRegenerateFromLastMessage();
+        lastUserMessageElement = div;
+        // Save last user message content for regenerate
+        lastUserMessage = content;
+        lastUserFiles = null;
+        // Note: regenerate button will be added after response completes or on error
+    }
 
     // Add copy buttons to code blocks
     addCopyButtonsToCodeBlocks(div);
@@ -587,6 +611,8 @@ function handleMessage(msg) {
                 }
                 isGenerating = false;
                 updateSendButton();
+                // Show regenerate button on the last user message after successful completion
+                addRegenerateButton(lastUserMessageElement);
             }
             smartScrollToBottom(true);
             //setStatus('Response completed', false);
@@ -605,6 +631,8 @@ function handleMessage(msg) {
                 }
                 isGenerating = false;
                 updateSendButton();
+                // Show regenerate button on error (for retry)
+                addRegenerateButton(lastUserMessageElement);
             }
             break;
         case 'stopped':
@@ -620,6 +648,8 @@ function handleMessage(msg) {
                         inputStopped.focus();
                     }
                 }
+                // Show regenerate button after stop (partial response)
+                addRegenerateButton(lastUserMessageElement);
             }
             break;
         case 'cleared':
@@ -957,6 +987,19 @@ function sendMessage() {
     // Display user message with files
     displayUserMessageWithFiles(message, window.FileUploadHandler.getPendingFiles());
 
+    // Save last user message for regenerate
+    lastUserMessage = message;
+    lastUserFiles = window.FileUploadHandler.getPendingFiles().length > 0 
+        ? window.FileUploadHandler.getPendingFiles().map(file => ({
+            url: file.url,
+            type: file.type,
+            name: file.name,
+            file_size: file.size
+        }))
+        : null;
+    // Remove regenerate button from previous last user message
+    removeRegenerateFromLastMessage();
+
     // Force scroll to bottom when user sends a message
     scrollToBottom(true);
 
@@ -1002,6 +1045,129 @@ function updateSendButton() {
         sendBtn.title = 'Send message';
         sendBtn.classList.remove('stopping');
     }
+}
+
+// Add regenerate button to a user message element (near the copy button)
+function addRegenerateButton(messageElement) {
+    if (!messageElement) return;
+    
+    // Don't add if already has a regenerate button
+    if (messageElement.querySelector('.regen-btn')) return;
+    
+    // Only add if we have a valid last message
+    const hasMessage = lastUserMessage && lastUserMessage.trim() !== '';
+    const hasFiles = lastUserFiles && lastUserFiles.length > 0;
+    if (!hasMessage && !hasFiles) return;
+    
+    const footer = messageElement.querySelector('.message-footer');
+    if (!footer) return;
+    
+    const regenBtn = document.createElement('button');
+    regenBtn.className = 'copy-btn regen-btn';
+    regenBtn.title = 'Regenerate response';
+    regenBtn.innerHTML = `
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="1 4 1 10 7 10"></polyline>
+            <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+        </svg>
+        <span class="copy-text">Redo</span>
+    `;
+    regenBtn.onclick = function(e) {
+        e.stopPropagation();
+        regenerate();
+    };
+    footer.appendChild(regenBtn);
+}
+
+// Remove regenerate button from the last user message
+function removeRegenerateFromLastMessage() {
+    if (lastUserMessageElement) {
+        const regenBtn = lastUserMessageElement.querySelector('.regen-btn');
+        if (regenBtn) {
+            regenBtn.remove();
+        }
+    }
+}
+
+// Regenerate response - resend the last user message
+function regenerate() {
+    if (isGenerating) {
+        // If currently generating, stop first
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+                type: 'stop',
+                payload: {}
+            }));
+        }
+        return;
+    }
+
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+        showToast('WebSocket not connected', true);
+        return;
+    }
+
+    // Check if we have a last message to regenerate
+    const hasMessage = lastUserMessage && lastUserMessage.trim() !== '';
+    const hasFiles = lastUserFiles && lastUserFiles.length > 0;
+
+    if (!hasMessage && !hasFiles) {
+        showToast('No message to regenerate', true);
+        return;
+    }
+
+    // Remove old assistant response from DOM (all elements after last user message)
+    if (lastUserMessageElement) {
+        let nextEl = lastUserMessageElement.nextElementSibling;
+        while (nextEl) {
+            const toRemove = nextEl;
+            nextEl = nextEl.nextElementSibling;
+            toRemove.remove();
+        }
+    }
+
+    // Reset streaming state variables since old DOM elements are removed
+    thinkingBlock = null;
+    responseBlock = null;
+    currentChunk = '';
+    currentThinkingChunk = '';
+    currentAssistantMessage = '';
+    currentThinkingMessage = '';
+    currentContentType = '';
+    chunkElement = null;
+    thinkingElement = null;
+
+    // Hide regenerate button
+    removeRegenerateFromLastMessage();
+
+    // Remove old assistant/tool_call messages from local storage
+    window.MessageHistory.removeMessagesAfterLastUser();
+
+    // Prepare payload
+    const payload = {
+        message: lastUserMessage || ''
+    };
+    if (hasFiles) {
+        payload.files = lastUserFiles;
+    }
+
+    // Force scroll to bottom
+    scrollToBottom(true);
+
+    // Disable input and set generating state
+    const input = document.getElementById('message-input');
+    if (input) {
+        input.value = '';  // Clear current input since we're resending last message
+        input.disabled = true;
+    }
+    isGenerating = true;
+    updateSendButton();
+
+    // Send regenerate message
+    ws.send(JSON.stringify({
+        type: 'regenerate',
+        payload: payload
+    }));
 }
 
 // Display user message with files/files
@@ -1066,6 +1232,26 @@ function displayUserMessageWithFiles(text, files, msgIndex = -1) {
     div.appendChild(footer);
 
     document.getElementById('messages').appendChild(div);
+
+    // Update last user message element reference
+    removeRegenerateFromLastMessage();
+    lastUserMessageElement = div;
+    // Set lastUserMessage/lastUserFiles for history loading
+    if (msgIndex >= 0) {
+        lastUserMessage = (text && text.trim()) ? text.trim() : '';
+        lastUserFiles = (files && files.length > 0) ? files.map(file => ({
+            url: file.url,
+            type: file.type,
+            name: file.name,
+            file_size: file.size
+        })) : null;
+    }
+    // When called from loadMessageHistory (msgIndex >= 0), regenerate button is added after loading
+    // When called from sendMessage/regenerate (msgIndex < 0), add now
+    if (msgIndex < 0) {
+        // Don't add regenerate button here - it will be added on complete/error/stopped
+        // addRegenerateButton(div);
+    }
     // Don't auto-scroll here - the forced scroll in sendMessage() handles it
 }
 
@@ -1735,11 +1921,13 @@ function handleKeyDown(e) {
         return;
     }
 
-    // When user starts typing, reset history navigation
+    // When user starts typing, reset history navigation and hide regenerate button
     if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) {
         if (window.InputHistory.getHistoryIndex() !== -1) {
             window.InputHistory.resetHistoryNavigation();
         }
+        // Hide regenerate button when user starts typing new message
+        removeRegenerateFromLastMessage();
     }
 }
 

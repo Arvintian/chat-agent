@@ -461,6 +461,23 @@ func (m *Manager) Clear() {
 	m.compressBuffer = make([][]*schema.Message, 0)
 }
 
+// RemoveLastRound removes the last round of messages from the context.
+// This is used for regenerating a response - the last assistant response
+// is removed so the user message can be re-processed.
+func (m *Manager) RemoveLastRound() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if len(m.messages) == 0 {
+		return
+	}
+
+	m.messages = m.messages[:len(m.messages)-1]
+	if m.round >= len(m.messages) {
+		m.round = len(m.messages) - 1
+	}
+}
+
 // GetMessageCount returns the total number of messages in the context
 func (m *Manager) GetMessageCount() int {
 	m.mu.Lock()

@@ -511,6 +511,13 @@ func (h *WebSocketHandler) processMessage(session *chatbot.WSSession, msg *chatb
 		h.handleSelectChat(session, msg)
 	case "chat":
 		h.handleChat(session, msg)
+	case "regenerate":
+		// Remove last round (user message + assistant response) before re-processing
+		if session.ChatSession != nil {
+			session.ChatSession.RemoveLastRound()
+		}
+		// Then process as normal chat
+		h.handleChat(session, msg)
 	case "stop":
 		h.handleStop(session)
 	case "clear":
