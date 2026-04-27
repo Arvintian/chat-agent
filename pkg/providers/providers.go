@@ -193,10 +193,15 @@ func (f *Factory) createDeepSeekModel(ctx context.Context, modelCfg *config.Mode
 		APIKey:  providerCfg.APIKey,
 	}
 
-	// Note: DeepSeek thinking support requires enabling reasoning in the API request
-	// The current library version may not fully support thinking configuration
-	// For DeepSeek R1 and other reasoning models, thinking is typically enabled by default
-	// when using those specific model names (e.g., "deepseek-reasoner")
+	if modelCfg.Thinking {
+		cfg.ThinkingConfig = &deepseek.ThinkingConfig{
+			Type: "enabled",
+		}
+	} else {
+		cfg.ThinkingConfig = &deepseek.ThinkingConfig{
+			Type: "disabled",
+		}
+	}
 
 	if modelCfg.MaxTokens > 0 {
 		cfg.MaxTokens = modelCfg.MaxTokens

@@ -4,17 +4,17 @@ go 1.25.5
 
 require (
 	github.com/Arvintian/readline v0.0.0-20260304114544-c7c8d2e72445
-	github.com/bytedance/sonic v1.14.1
-	github.com/cloudwego/eino v0.7.32
-	github.com/cloudwego/eino-ext/components/model/ark v0.1.64
+	github.com/bytedance/sonic v1.15.0
+	github.com/cloudwego/eino v0.8.11
+	github.com/cloudwego/eino-ext/components/model/ark v0.1.67
 	github.com/cloudwego/eino-ext/components/model/claude v0.1.15
-	github.com/cloudwego/eino-ext/components/model/deepseek v0.1.2
+	github.com/cloudwego/eino-ext/components/model/deepseek v0.1.5
 	github.com/cloudwego/eino-ext/components/model/gemini v0.1.26
-	github.com/cloudwego/eino-ext/components/model/ollama v0.1.8
+	github.com/cloudwego/eino-ext/components/model/ollama v0.1.9
 	github.com/cloudwego/eino-ext/components/model/openai v0.1.8
 	github.com/cloudwego/eino-ext/components/model/openrouter v0.1.2
 	github.com/cloudwego/eino-ext/components/model/qianfan v0.1.4
-	github.com/cloudwego/eino-ext/components/model/qwen v0.1.5
+	github.com/cloudwego/eino-ext/components/model/qwen v0.1.9
 	github.com/cloudwego/eino-ext/components/tool/mcp v0.0.8
 	github.com/eino-contrib/jsonschema v1.0.3
 	github.com/eino-contrib/ollama v0.1.0
@@ -56,10 +56,10 @@ require (
 	github.com/baidubce/bce-sdk-go v0.9.164 // indirect
 	github.com/buger/jsonparser v1.1.1 // indirect
 	github.com/bytedance/gopkg v0.1.3 // indirect
-	github.com/bytedance/sonic/loader v0.3.0 // indirect
+	github.com/bytedance/sonic/loader v0.5.0 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
-	github.com/cloudwego/eino-ext/libs/acl/openai v0.1.13 // indirect
-	github.com/cohesion-org/deepseek-go v1.3.2 // indirect
+	github.com/cloudwego/eino-ext/libs/acl/openai v0.1.17 // indirect
+	github.com/cohesion-org/deepseek-go v1.3.4 // indirect
 	github.com/djherbis/times v1.6.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/emirpasic/gods/v2 v2.0.0-alpha // indirect
@@ -88,7 +88,7 @@ require (
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-runewidth v0.0.16 // indirect
-	github.com/meguminnnnnnnnn/go-openai v0.1.1 // indirect
+	github.com/meguminnnnnnnnn/go-openai v0.1.2 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
