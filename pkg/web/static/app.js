@@ -53,6 +53,9 @@ const SESSION_ID_KEY = 'chat_agent_session_id';
 // Last used chat storage key
 const LAST_CHAT_KEY = 'chat_agent_last_chat';
 
+// Flag to distinguish between initial page load and user-initiated back-to-selection
+let isInitialPageLoad = true;
+
 // Load last used chat from localStorage
 function loadLastChat() {
     try {
@@ -203,11 +206,19 @@ async function init() {
             }
         }
 
-        // If only one chat exists, auto-select and start chat immediately
+        // Auto-start chat on initial page load:
+        // 1. If only one chat exists, auto-start it immediately
+        // 2. If there's a last used chat (and it was selected above), auto-start it
         if (data.chats.length === 1) {
             select.value = data.chats[0].name;
             startChat();
+        } else if (isInitialPageLoad && chatToSelect) {
+            // On initial page load, auto-enter the last used / default chat
+            startChat();
         }
+        
+        // Mark initial load as complete (subsequent backToChatSelection won't auto-start)
+        isInitialPageLoad = false;
     } catch (e) {
         console.error('Failed to load chats:', e);
     }
