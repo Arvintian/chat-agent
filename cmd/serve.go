@@ -138,10 +138,19 @@ Example:
 			sort.Slice(chats, func(i, j int) bool {
 				return chats[i].Name < chats[j].Name
 			})
+
+			// Get active chats for this session (if session_id provided)
+			activeChats := make(map[string]bool)
+			sessionID := r.URL.Query().Get("session_id")
+			if sessionID != "" {
+				activeChats = wsHandler.sessionManager.getActiveChats(sessionID)
+			}
+
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"chats":        chats,
 				"default_chat": defaultChat,
+				"active_chats": activeChats,
 			})
 		})
 
@@ -249,35 +258,97 @@ type SessionManager struct {
 	sessions map[string]*SessionInfo
 	cfg      *config.Config
 	mu       sync.RWMutex
-	// activeConnections tracks which sessions have active WebSocket connections
-	activeConnections map[string]bool
+	// connectionCount tracks the number of active WebSocket connections per session
+	connectionCount map[string]int
+	// activeChats tracks which chats are currently active per session
+	// sessionId -> chatName -> connection count
+	activeChats map[string]map[string]int
 }
 
 func NewSessionManager(cfg *config.Config) *SessionManager {
 	return &SessionManager{
-		sessions:          make(map[string]*SessionInfo),
-		cfg:               cfg,
-		activeConnections: make(map[string]bool),
+		sessions:        make(map[string]*SessionInfo),
+		cfg:             cfg,
+		connectionCount: make(map[string]int),
+		activeChats:     make(map[string]map[string]int),
 	}
 }
 
-// tryRegisterConnection atomically checks and registers a connection.
-// Returns true if registered successfully, false if session already has an active connection.
-func (sm *SessionManager) tryRegisterConnection(sessionID string) bool {
+// tryRegisterConnection increments the connection count for a session.
+// Multiple tabs/windows can share the same session.
+func (sm *SessionManager) tryRegisterConnection(sessionID string) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
-	if sm.activeConnections[sessionID] {
-		return false
-	}
-	sm.activeConnections[sessionID] = true
-	return true
+	sm.connectionCount[sessionID]++
+	log.Printf("Session %s: connection count increased to %d", sessionID, sm.connectionCount[sessionID])
 }
 
-// unregisterConnection marks a session as no longer having an active connection.
+// markChatActive increments the active count for a chat in a session.
+// Returns true if this is the first connection to activate this chat.
+func (sm *SessionManager) markChatActive(sessionID, chatName string) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	if sm.activeChats[sessionID] == nil {
+		sm.activeChats[sessionID] = make(map[string]int)
+	}
+	sm.activeChats[sessionID][chatName]++
+	log.Printf("Session %s: chat '%s' active count increased to %d", sessionID, chatName, sm.activeChats[sessionID][chatName])
+}
+
+// markChatInactive decrements the active count for a chat in a session.
+func (sm *SessionManager) markChatInactive(sessionID, chatName string) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	if chats, ok := sm.activeChats[sessionID]; ok {
+		if count, ok := chats[chatName]; ok {
+			if count <= 1 {
+				delete(chats, chatName)
+				if len(chats) == 0 {
+					delete(sm.activeChats, sessionID)
+				}
+			} else {
+				chats[chatName] = count - 1
+			}
+		}
+	}
+	log.Printf("Session %s: chat '%s' active count decreased", sessionID, chatName)
+}
+
+// isChatActive checks if a chat is already active in another connection of the same session.
+func (sm *SessionManager) isChatActive(sessionID, chatName string) bool {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	if chats, ok := sm.activeChats[sessionID]; ok {
+		return chats[chatName] > 0
+	}
+	return false
+}
+
+// getActiveChats returns the set of active chat names for a session.
+func (sm *SessionManager) getActiveChats(sessionID string) map[string]bool {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	result := make(map[string]bool)
+	if chats, ok := sm.activeChats[sessionID]; ok {
+		for name := range chats {
+			result[name] = true
+		}
+	}
+	return result
+}
+
+// unregisterConnection decrements the connection count for a session.
 func (sm *SessionManager) unregisterConnection(sessionID string) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
-	delete(sm.activeConnections, sessionID)
+	if count, ok := sm.connectionCount[sessionID]; ok {
+		if count <= 1 {
+			delete(sm.connectionCount, sessionID)
+		} else {
+			sm.connectionCount[sessionID] = count - 1
+		}
+	}
+	log.Printf("Session %s: connection count decreased to %d", sessionID, sm.connectionCount[sessionID])
 }
 
 func (sm *SessionManager) GetSession(sessionID string) (*SessionInfo, bool) {
@@ -372,7 +443,8 @@ func (sm *SessionManager) CloseAllSessions() {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	for sessionID := range sm.sessions {
-		delete(sm.activeConnections, sessionID)
+		delete(sm.connectionCount, sessionID)
+		delete(sm.activeChats, sessionID)
 	}
 	for sessionID, session := range sm.sessions {
 		for chatName, state := range session.Chats {
@@ -420,17 +492,12 @@ func (h *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Reques
 	}
 	log.Printf("WebSocket connection: %s", sessionID)
 
-	// Check if there's already an active WebSocket connection for this session ID
-	if !h.sessionManager.tryRegisterConnection(sessionID) {
-		// Reject the connection - session is already in use
-		log.Printf("WebSocket connection rejected for session %s: another connection is already active", sessionID)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusConflict)
-		json.NewEncoder(w).Encode(map[string]string{
-			"error": "Session already in use. Please close other tabs/windows using the same session.",
-		})
-		return
-	}
+	// Allow multiple tabs/windows to share the same session
+	// Each tab gets its own WSSession wrapper but shares the underlying ChatSession
+	h.sessionManager.tryRegisterConnection(sessionID)
+
+	// Track the chat that this connection has active
+	connectionActiveChat := ""
 
 	// Check if session already exists
 	existingSession, exists := h.sessionManager.GetSession(sessionID)
@@ -438,24 +505,9 @@ func (h *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Reques
 
 	if exists && len(existingSession.Chats) > 0 {
 		// Reuse existing session - create new WSSession with same ID but new connection
+		// Don't auto-restore any chat - let the client explicitly select one.
+		// This prevents conflicts when multiple tabs share a session.
 		session = chatbot.NewWSSession(conn, sessionID, h.cfg)
-		// Restore current chat name
-		session.ChatName = existingSession.ChatName
-
-		// Restore chat session and bot for the current chat
-		if session.ChatName != "" {
-			if chatState, ok := existingSession.Chats[session.ChatName]; ok && chatState.ChatSession != nil {
-				session.ChatSession = chatState.ChatSession
-				session.ChatBot = chatState.ChatBot
-				// Reinitialize WSHandler with new connection
-				session.WSHandler = chatbot.NewWSChatHandler(session)
-				// Update ChatBot's handler to use the new WSHandler
-				if session.ChatBot != nil {
-					session.ChatBot.SetHandler(session.WSHandler)
-				}
-				log.Printf("Reconnected to existing session %s (chat: %s)", sessionID, session.ChatName)
-			}
-		}
 		log.Printf("Reconnected to existing session %s with %d chats", sessionID, len(existingSession.Chats))
 	} else {
 		// Create new session
@@ -471,6 +523,10 @@ func (h *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Reques
 
 	// Ensure cleanup on connection close
 	defer func() {
+		// Mark chat inactive if this connection had one active
+		if connectionActiveChat != "" {
+			h.sessionManager.markChatInactive(sessionID, connectionActiveChat)
+		}
 		// Cleanup handler and logging
 		if session.ChatSession != nil {
 			session.WSHandler = nil
@@ -500,15 +556,15 @@ func (h *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Reques
 			continue
 		}
 
-		go h.processMessage(session, &wsMsg)
+		go h.processMessage(session, &wsMsg, &connectionActiveChat)
 	}
 }
 
 // processMessage processes a WebSocket message
-func (h *WebSocketHandler) processMessage(session *chatbot.WSSession, msg *chatbot.WSMessage) {
+func (h *WebSocketHandler) processMessage(session *chatbot.WSSession, msg *chatbot.WSMessage, connectionActiveChat *string) {
 	switch msg.Type {
 	case "select_chat":
-		h.handleSelectChat(session, msg)
+		h.handleSelectChat(session, msg, connectionActiveChat)
 	case "chat":
 		h.handleChat(session, msg)
 	case "regenerate":
@@ -526,13 +582,15 @@ func (h *WebSocketHandler) processMessage(session *chatbot.WSSession, msg *chatb
 		h.handleKeep(session)
 	case "approval_response":
 		h.handleApprovalResponse(session, msg)
+	case "deselect_chat":
+		h.handleDeselectChat(session, connectionActiveChat)
 	default:
 		session.SendError(fmt.Sprintf("Unknown message type: %s", msg.Type))
 	}
 }
 
 // handleSelectChat handles chat selection
-func (h *WebSocketHandler) handleSelectChat(session *chatbot.WSSession, msg *chatbot.WSMessage) {
+func (h *WebSocketHandler) handleSelectChat(session *chatbot.WSSession, msg *chatbot.WSMessage, connectionActiveChat *string) {
 	var req ChatRequest
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		session.SendError("Invalid select_chat request")
@@ -548,6 +606,16 @@ func (h *WebSocketHandler) handleSelectChat(session *chatbot.WSSession, msg *cha
 
 	// If already using the same chat and it's initialized, just reinitialize the WSHandler
 	if session.ChatName == req.ChatName && session.ChatSession != nil {
+		// Same chat on same connection - just reinitialize handler
+		// Mark as active if not already tracked
+		if *connectionActiveChat != req.ChatName {
+			if *connectionActiveChat != "" {
+				h.sessionManager.markChatInactive(session.SessionID, *connectionActiveChat)
+			}
+			h.sessionManager.markChatActive(session.SessionID, req.ChatName)
+			*connectionActiveChat = req.ChatName
+		}
+
 		log.Printf("Session %s: Reactivating existing chat session for '%s'", session.SessionID, req.ChatName)
 		// Reinitialize WSHandler with current connection
 		session.WSHandler = chatbot.NewWSChatHandler(session)
@@ -570,16 +638,28 @@ func (h *WebSocketHandler) handleSelectChat(session *chatbot.WSSession, msg *cha
 		return
 	}
 
+	// Check if this chat is already active in another connection of the same session
+	if h.sessionManager.isChatActive(session.SessionID, req.ChatName) {
+		session.SendError(fmt.Sprintf("Chat '%s' is already open in another tab. Please close it there first or select a different chat.", req.ChatName))
+		return
+	}
+
 	// Switching to a different chat
 	previousChat := session.ChatName
 	if previousChat != "" {
 		log.Printf("Session %s: Switching chat from '%s' to '%s'", session.SessionID, previousChat, req.ChatName)
+		// Mark old chat as inactive
+		h.sessionManager.markChatInactive(session.SessionID, previousChat)
 		// Note: We don't close the previous chat session, just save its state
 		// The MCP client and other resources remain alive in the saved ChatState
 		session.ChatSession = nil
 		session.ChatBot = nil
 		session.WSHandler = nil
 	}
+
+	// Mark new chat as active
+	h.sessionManager.markChatActive(session.SessionID, req.ChatName)
+	*connectionActiveChat = req.ChatName
 
 	// Check if this chat was previously used in this session (restore state)
 	if chatState, ok := h.sessionManager.GetChatState(session.SessionID, req.ChatName); ok && chatState.ChatSession != nil {
@@ -613,6 +693,9 @@ func (h *WebSocketHandler) handleSelectChat(session *chatbot.WSSession, msg *cha
 	ctx := context.Background()
 	chatSession, err := chatbot.InitChatSession(ctx, h.cfg, req.ChatName, session.SessionID, false)
 	if err != nil {
+		// Clean up active chat tracking on failure
+		h.sessionManager.markChatInactive(session.SessionID, req.ChatName)
+		*connectionActiveChat = ""
 		session.SendError(fmt.Sprintf("Failed to initialize chat session: %v", err))
 		return
 	}
@@ -756,6 +839,20 @@ func (h *WebSocketHandler) handleStop(session *chatbot.WSSession) {
 
 	// Set cancelled flag to stop ongoing stream
 	session.SetCancelled()
+}
+
+// handleDeselectChat handles deselecting the current chat (user returns to selection page)
+func (h *WebSocketHandler) handleDeselectChat(session *chatbot.WSSession, connectionActiveChat *string) {
+	if *connectionActiveChat != "" {
+		log.Printf("Session %s: Deselecting chat '%s'", session.SessionID, *connectionActiveChat)
+		h.sessionManager.markChatInactive(session.SessionID, *connectionActiveChat)
+		*connectionActiveChat = ""
+	}
+	// Clear the chat state from the WSSession but keep it in SessionInfo for later restoration
+	session.ChatName = ""
+	session.ChatSession = nil
+	session.ChatBot = nil
+	session.WSHandler = nil
 }
 
 // handleApprovalResponse handles approval response from the client

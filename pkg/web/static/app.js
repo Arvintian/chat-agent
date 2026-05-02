@@ -47,16 +47,24 @@ const chatConfigs = {};
 
 // Scroll behavior is now handled by scroll-handler.js module
 
-// Session ID storage key
+// Session ID storage key (localStorage - persistent across tabs and browser restarts)
 const SESSION_ID_KEY = 'chat_agent_session_id';
 
-// Last used chat storage key
+// Last used chat storage key (localStorage - shared across tabs, persistent)
+// Only updated when user explicitly selects a chat from the dropdown, not on auto-enter/refresh
 const LAST_CHAT_KEY = 'chat_agent_last_chat';
+
+// Per-tab chat storage key (sessionStorage - survives refresh, cleared on tab close)
+// Used to restore the tab's current chat on refresh
+const TAB_CHAT_KEY = 'chat_agent_tab_chat';
 
 // Flag to distinguish between initial page load and user-initiated back-to-selection
 let isInitialPageLoad = true;
 
-// Load last used chat from localStorage
+// Flag: true when startChat() is called from init() auto-start, false when user explicitly clicks start
+let isAutoStarting = false;
+
+// Load last used chat from localStorage (shared across tabs, for new tabs only)
 function loadLastChat() {
     try {
         return localStorage.getItem(LAST_CHAT_KEY);
@@ -66,13 +74,37 @@ function loadLastChat() {
     }
 }
 
-// Save last used chat to localStorage
+// Save last used chat to localStorage (only on explicit user selection)
 function saveLastChat(chatName) {
     try {
         localStorage.setItem(LAST_CHAT_KEY, chatName);
         console.log('Last chat saved:', chatName);
     } catch (e) {
         console.error('Failed to save last chat:', e);
+    }
+}
+
+// Load per-tab chat from sessionStorage (survives refresh, cleared on tab close)
+function loadTabChat() {
+    try {
+        return sessionStorage.getItem(TAB_CHAT_KEY);
+    } catch (e) {
+        console.error('Failed to load tab chat:', e);
+        return null;
+    }
+}
+
+// Save per-tab chat to sessionStorage
+function saveTabChat(chatName) {
+    try {
+        if (chatName) {
+            sessionStorage.setItem(TAB_CHAT_KEY, chatName);
+        } else {
+            sessionStorage.removeItem(TAB_CHAT_KEY);
+        }
+        console.log('Tab chat saved:', chatName);
+    } catch (e) {
+        console.error('Failed to save tab chat:', e);
     }
 }
 
@@ -152,16 +184,22 @@ async function init() {
     try {
         const configResponse = await fetch('/config');
         const configData = await configResponse.json();
-        const title = configData.webui?.title || 'Chat-Agent';
-        document.title = title;
-        document.getElementById('login-header').textContent = '🤖 ' + title;
-        document.getElementById('agent-header').textContent = '🤖 ' + title;
+        const appTitle = configData.webui?.title || 'Chat-Agent';
+        document.title = appTitle;
+        document.getElementById('login-header').textContent = '🤖 ' + appTitle;
+        document.getElementById('agent-header').textContent = '🤖 ' + appTitle;
     } catch (e) {
         console.error('Failed to load webui config:', e);
     }
 
     try {
-        const response = await fetch('/chats');
+        // Load session ID for passing to /chats endpoint
+        const currentSessionId = loadSessionId();
+        const chatsUrl = currentSessionId 
+            ? '/chats?session_id=' + encodeURIComponent(currentSessionId)
+            : '/chats';
+        
+        const response = await fetch(chatsUrl);
         const data = await response.json();
         const select = document.getElementById('chat-select');
         // Clear existing options to prevent duplicates when re-initializing
@@ -170,21 +208,38 @@ async function init() {
         // Clear chat configs
         Object.keys(chatConfigs).forEach(key => delete chatConfigs[key]);
 
-        // Get last used chat from localStorage
-        const lastUsedChat = loadLastChat();
+        // Get active chats from server (chats already open in other tabs)
+        const activeChats = data.active_chats || {};
 
-        // Determine which chat to select
+        // Determine which chat to auto-select
         let chatToSelect = null;
         
-        // Priority 1: Use last used chat if it exists in the server list
-        if (lastUsedChat && data.chats.some(c => c.name === lastUsedChat)) {
-            chatToSelect = lastUsedChat;
-            console.log('Will select last used chat:', chatToSelect);
+        // Priority 1: Per-tab chat from sessionStorage (survives refresh)
+        // This keeps the tab stable when refreshing while multiple tabs are open
+        const tabChat = loadTabChat();
+        if (tabChat && data.chats.some(c => c.name === tabChat)) {
+            if (!activeChats[tabChat]) {
+                chatToSelect = tabChat;
+                console.log('Will restore tab chat:', chatToSelect);
+            } else {
+                // Tab's chat is active in another tab - this shouldn't normally happen
+                // (could happen if the tab was closed and reopened very quickly)
+                console.log('Tab chat is already active in another tab, skipping:', tabChat);
+            }
         }
-        // Priority 2: Use server default chat
-        else if (data.default_chat && data.chats.some(c => c.name === data.default_chat)) {
-            chatToSelect = data.default_chat;
-            console.log('Will select server default chat:', chatToSelect);
+        
+        // Priority 2: Last used chat from localStorage (for new tabs/windows)
+        // BUT skip if it's already active in another tab
+        if (!chatToSelect) {
+            const lastUsedChat = loadLastChat();
+            if (lastUsedChat && data.chats.some(c => c.name === lastUsedChat)) {
+                if (!activeChats[lastUsedChat]) {
+                    chatToSelect = lastUsedChat;
+                    console.log('Will select last used chat:', chatToSelect);
+                } else {
+                    console.log('Last used chat is already active in another tab, skipping:', lastUsedChat);
+                }
+            }
         }
 
         // Build the option list and store chat configs
@@ -192,7 +247,16 @@ async function init() {
             const chatName = chatInfo.name;
             const option = document.createElement('option');
             option.value = chatName;
-            option.textContent = chatName;
+            
+            // If chat is already active in another tab, disable it and add indicator
+            if (activeChats[chatName]) {
+                option.textContent = '🔒 ' + chatName + ' (已在其他标签页打开)';
+                option.disabled = true;
+                option.style.color = '#999';
+            } else {
+                option.textContent = chatName;
+            }
+
             select.appendChild(option);
 
             // Store chat configuration
@@ -206,15 +270,23 @@ async function init() {
             }
         }
 
+        // If no chat was auto-selected (no tab/last chat, or all are active),
+        // mark the server's default_chat as selected in the dropdown
+        if (!chatToSelect && data.default_chat) {
+            for (let i = 0; i < select.options.length; i++) {
+                if (select.options[i].value === data.default_chat && !select.options[i].disabled) {
+                    select.options[i].selected = true;
+                    break;
+                }
+            }
+        }
+
         // Auto-start chat on initial page load:
-        // 1. If only one chat exists, auto-start it immediately
-        // 2. If there's a last used chat (and it was selected above), auto-start it
-        if (data.chats.length === 1) {
-            select.value = data.chats[0].name;
+        // Only auto-enter if there's a saved chat to restore (tab chat / last used)
+        if (isInitialPageLoad && chatToSelect) {
+            isAutoStarting = true;
             startChat();
-        } else if (isInitialPageLoad && chatToSelect) {
-            // On initial page load, auto-enter the last used / default chat
-            startChat();
+            isAutoStarting = false;
         }
         
         // Mark initial load as complete (subsequent backToChatSelection won't auto-start)
@@ -233,8 +305,16 @@ async function startChat() {
     currentChat = chatName;
     window.MessageHistory.setCurrentChat(chatName);
     
-    // Save last used chat to localStorage
-    saveLastChat(chatName);
+    // Always save per-tab chat (sessionStorage) for refresh stability
+    saveTabChat(chatName);
+    
+    // Only save last used chat (localStorage) on explicit user selection, not auto-start
+    if (!isAutoStarting) {
+        saveLastChat(chatName);
+    }
+    
+    // Update document title to reflect current chat name
+    document.title = chatName;
     
     document.getElementById('login-header').textContent = chatName;
     document.getElementById('login-panel').style.display = 'none';
@@ -265,7 +345,7 @@ async function startChat() {
 
     // Badge will be updated when we receive chat_selected message from server
 
-    // Load session ID from localStorage if not already set
+    // Load base session ID from localStorage if not already set
     if (!sessionId) {
         sessionId = loadSessionId();
     }
@@ -287,8 +367,16 @@ async function startChat() {
 
 // Navigate back to chat selection page
 function backToChatSelection() {
+    // Send deselect message to server so the chat is marked as inactive
+    if (ws && ws.readyState === WebSocket.OPEN && currentChat) {
+        ws.send(JSON.stringify({ type: 'deselect_chat', payload: {} }));
+    }
+
     // Clear current chat state (but keep session ID and WebSocket connection)
     currentChat = null;
+    
+    // Clear per-tab chat so next refresh shows selection page
+    saveTabChat(null);
 
     // Clear messages display
     const messagesContainer = document.getElementById('messages');
@@ -307,17 +395,25 @@ function backToChatSelection() {
     document.getElementById('chat-panel').style.display = 'none';
     document.getElementById('login-panel').style.display = 'flex';
 
-    // Reset headers
-    const title = document.title.replace(/^🤖 /, '') || 'Chat-Agent';
-    document.getElementById('login-header').textContent = '🤖 ' + title;
+    // Reset headers and page title
+    // login-header after startChat() contains just the chat name (no emoji prefix).
+    // The original app title is stored on the agent-header's chat-name-text span.
+    const agentHeaderEl = document.getElementById('agent-header');
+    const chatNameSpan = agentHeaderEl ? agentHeaderEl.querySelector('.chat-name-text') : null;
+    let appTitle = 'Chat-Agent';
+    if (chatNameSpan && chatNameSpan.textContent) {
+        // Extract original title from "💬 chatName" or "🤖 Title" format
+        appTitle = chatNameSpan.textContent.replace(/^[💬🤖] /, '');
+    }
+    document.title = appTitle;
+    document.getElementById('login-header').textContent = '🤖 ' + appTitle;
     
     // Reset agent header to default
-    const agentHeader = document.getElementById('agent-header');
-    const chatNameText = agentHeader.querySelector('.chat-name-text');
+    const chatNameText = agentHeaderEl ? agentHeaderEl.querySelector('.chat-name-text') : null;
     if (chatNameText) {
-        chatNameText.textContent = '🤖 ' + title;
-    } else {
-        agentHeader.textContent = '🤖 ' + title;
+        chatNameText.textContent = '🤖 ' + appTitle;
+    } else if (agentHeaderEl) {
+        agentHeaderEl.textContent = '🤖 ' + appTitle;
     }
 
     // Reset clear badge
@@ -346,6 +442,9 @@ function backToChatSelection() {
 // Load and display message history from storage
 async function loadMessageHistory() {
     const history = await window.MessageHistory.loadHistory();
+
+    // Update badge with locally loaded message count (will be refined by server's chat_selected)
+    updateClearBadge(history.length);
 
     history.forEach((msg, msgIndex) => {
         if (msg.type === 'user') {
@@ -532,7 +631,11 @@ function connectWebSocket() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     let wsUrl = protocol + '//' + window.location.host + '/ws';
 
-    // Add session ID to URL if available
+    // Use shared session ID so tabs share the same chat history/persistence
+    if (!sessionId) {
+        sessionId = loadSessionId();
+    }
+    // If still no session ID, let the server generate one (don't pass one)
     if (sessionId) {
         wsUrl += '?session_id=' + encodeURIComponent(sessionId);
     }
@@ -630,6 +733,14 @@ function handleMessage(msg) {
             break;
         case 'error':
             setStatus(msg.payload.error, true);
+            // If error mentions "already open", refresh chat list and go back to selection
+            if (msg.payload.error && msg.payload.error.indexOf('already open') !== -1) {
+                // Reset current chat state
+                currentChat = null;
+                // Go back to selection page to refresh the chat list
+                backToChatSelection();
+                return;
+            }
             // 只有在生成中才重置状态
             if (isGenerating) {
                 const inputErr = document.getElementById('message-input');
