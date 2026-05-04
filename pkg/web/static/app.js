@@ -29,7 +29,98 @@ marked.use(markedHighlight({
         return hljs.highlight(code, { language }).value;
     }
 }));
+// Register marked-katex-extension for inline math ($...$ delimiters) only.
+// $$...$$ (display math), \[...\] and \(...\) are handled by custom extensions below.
+// We rely on our displayKatex for $$ blocks because marked-katex-extension's blockKatex
+// has issues with some markdown edge cases.
 marked.use(markedKatex({ throwOnError: false, nonStandard: true }));
+
+// Custom block-level tokenizer for $$...$$ display math
+// Handles both multi-line ($$\n...\n$$) and inline-ish ($$ ... $$) forms.
+// Uses a preprocessor approach: converts $$...$$ to a known safe token,
+// then renders via KaTeX in the renderer.
+const displayKatex = {
+    name: 'displayKatex',
+    level: 'block',
+    start(src) { return src.indexOf('$$'); },
+    tokenizer(src) {
+        // Match both forms:
+        // 1. $$\ncontent\n$$  (standard multi-line)
+        // 2. $$ content $$     (content on same line as delimiters)
+        const match = /^\$\$[ \t]*\n?([\s\S]*?)\n?[ \t]*\$\$/.exec(src);
+        if (!match) return;
+        // Validate that we actually captured content between $$ delimiters
+        // Avoid matching empty $$ $$ or edge cases with no content
+        const math = match[1].trim();
+        if (!math) return;
+        return {
+            type: 'displayKatex',
+            raw: match[0],
+            text: math
+        };
+    },
+    renderer(token) {
+        try {
+            return katex.renderToString(token.text, { displayMode: true, throwOnError: false }) + '\n';
+        } catch (e) {
+            return '<pre class="katex-error">' + escapeHtml(token.text) + '</pre>';
+        }
+    }
+};
+
+// Custom block-level tokenizer for \[...\] display math
+const bracketLatexDisplay = {
+    name: 'bracketLatexDisplay',
+    level: 'block',
+    start(src) { return src.indexOf('\\['); },
+    tokenizer(src) {
+        const match = /^\\\[([\s\S]*?)\\\]/.exec(src);
+        if (match) {
+            return {
+                type: 'bracketLatexDisplay',
+                raw: match[0],
+                text: match[1].trim()
+            };
+        }
+    },
+    renderer(token) {
+        try {
+            return katex.renderToString(token.text, { displayMode: true, throwOnError: false }) + '\n';
+        } catch (e) {
+            return '<pre class="katex-error">' + escapeHtml(token.text) + '</pre>';
+        }
+    }
+};
+
+// Custom inline tokenizer for \(...\) inline math
+const bracketLatexInline = {
+    name: 'bracketLatexInline',
+    level: 'inline',
+    start(src) { return src.indexOf('\\('); },
+    tokenizer(src) {
+        const match = /^\\\(([\s\S]*?)\\\)/.exec(src);
+        if (match) {
+            return {
+                type: 'bracketLatexInline',
+                raw: match[0],
+                text: match[1].trim()
+            };
+        }
+    },
+    renderer(token) {
+        try {
+            return katex.renderToString(token.text, { displayMode: false, throwOnError: false });
+        } catch (e) {
+            return '<span class="katex-error">' + escapeHtml(token.text) + '</span>';
+        }
+    }
+};
+
+// Register custom extensions after marked-katex-extension so they take priority.
+// Order: displayKatex ($$) and bracketLatexDisplay (\[) handle block math,
+// bracketLatexInline (\() handles inline bracket math,
+// marked-katex-extension's inlineKatex ($) handles standard inline math.
+marked.use({ extensions: [displayKatex, bracketLatexDisplay, bracketLatexInline] });
 
 let ws = null;
 let currentChat = null;
