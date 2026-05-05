@@ -22,6 +22,11 @@ type CompressionCompleteCallback func([]*schema.Message) error
 const (
 	DefaultMaxMessageRound   int = 10
 	DefaultFullMessageRounds int = 1
+	// CompressionThreshold defines the minimum maxMessageRounds required for
+	// async compression. When maxMessageRounds is below this value, simple
+	// truncation is used instead to avoid issues like empty user queries or
+	// premature compression.
+	CompressionThreshold int = 8
 )
 
 // Manager manages conversation context with intelligent context management capabilities
@@ -285,12 +290,35 @@ func (m *Manager) validateAndCleanRound(messages []*schema.Message) []*schema.Me
 	return validMessages
 }
 
-// trimMessages trims the message history, preserving system messages and recent messages
-// When messages exceed threshold, compresses half of the window using chatmodel
+// trimMessages trims the message history, preserving system messages and recent messages.
+//
+// When maxMessageRound is below CompressionThreshold, simple truncation is used:
+// the oldest rounds are discarded directly to keep the window within the limit.
+// This avoids issues with async compression (e.g., empty user queries, premature
+// compression) when the window is small.
+//
+// When maxMessageRound >= CompressionThreshold, async compression is triggered at
+// ~70% of the limit, using the chatmodel to summarize older rounds.
 func (m *Manager) trimMessages(ctx context.Context) {
+	if m.maxMessageRound < CompressionThreshold {
+		// Simple truncation: keep only the most recent rounds within the limit.
+		// No compression model needed in this mode.
+		for len(m.messages) > m.maxMessageRound {
+			// Discard the oldest round
+			m.messages = m.messages[1:]
+			m.round = len(m.messages) - 1
+		}
+		return
+	}
+
 	// Start async compression early at ~70% of maxMessageRound threshold
 	// This gives time for compression to complete before hitting the hard limit
+	// Minimum threshold of 4 rounds to ensure at least 2 rounds get compressed
+	// (numToCompress = len/2 = 2), avoiding single-round compression
 	asyncCompressThreshold := int(float64(m.maxMessageRound) * 0.7)
+	if asyncCompressThreshold < 4 {
+		asyncCompressThreshold = 4
+	}
 	if len(m.messages) >= asyncCompressThreshold && !m.compressing && m.chatmodel != nil {
 		go m.compressMessagesAsync(ctx)
 	}

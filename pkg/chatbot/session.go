@@ -147,28 +147,30 @@ func InitChatSession(ctx context.Context, cfg *config.Config, chatName string, s
 		}
 	}
 
-	// mcp client
-	toolsChan, errChan := make(chan []tool.BaseTool, 1), make(chan error, 1)
+	// mcp client - only initialize if MCP servers are configured
 	var mcpclient *mcp.Client
-	go func() {
-		mcpclient = mcp.NewClient(cfg)
-		if err := mcpclient.InitializeForChat(ctx, preset); err != nil {
-			toolsChan <- nil
-			errChan <- err
+	if len(preset.MCPServers) > 0 {
+		toolsChan, errChan := make(chan []tool.BaseTool, 1), make(chan error, 1)
+		go func() {
+			mcpclient = mcp.NewClient(cfg)
+			if err := mcpclient.InitializeForChat(ctx, preset); err != nil {
+				toolsChan <- nil
+				errChan <- err
+			}
+			mcptools := mcpclient.GetToolListForServers(preset.MCPServers)
+			toolsChan <- mcptools
+			errChan <- nil
+		}()
+		select {
+		case <-time.After(10 * time.Second):
+			return nil, fmt.Errorf("load mcp tools timeout")
+		case err := <-errChan:
+			if err != nil {
+				return nil, err
+			}
+			mcptools := <-toolsChan
+			tools = append(tools, mcptools...)
 		}
-		mcptools := mcpclient.GetToolListForServers(preset.MCPServers)
-		toolsChan <- mcptools
-		errChan <- nil
-	}()
-	select {
-	case <-time.After(10 * time.Second):
-		return nil, fmt.Errorf("load mcp tools timeout")
-	case err := <-errChan:
-		if err != nil {
-			return nil, err
-		}
-		mcptools := <-toolsChan
-		tools = append(tools, mcptools...)
 	}
 
 	var hookMgr *hook.HookManager
@@ -194,16 +196,11 @@ func InitChatSession(ctx context.Context, cfg *config.Config, chatName string, s
 	if preset.MaxRetries > 0 {
 		maxRetries = preset.MaxRetries
 	}
-	agent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
+	agentConfig := &adk.ChatModelAgentConfig{
 		Name:        chatName,
 		Description: preset.Desc,
 		Instruction: systemPrompt,
 		Model:       model,
-		ToolsConfig: adk.ToolsConfig{
-			ToolsNodeConfig: compose.ToolsNodeConfig{
-				Tools: tools,
-			},
-		},
 		MaxIterations: maxIterations,
 		ModelRetryConfig: &adk.ModelRetryConfig{
 			MaxRetries:  maxRetries,
@@ -235,7 +232,17 @@ func InitChatSession(ctx context.Context, cfg *config.Config, chatName string, s
 			msgs = append([]adk.Message{sp}, msgs...)
 			return msgs, nil
 		},
-	})
+	}
+	// Only configure tools if there are any, to avoid "no tools to bind" error
+	// from models that don't accept empty tool lists
+	if len(tools) > 0 {
+		agentConfig.ToolsConfig = adk.ToolsConfig{
+			ToolsNodeConfig: compose.ToolsNodeConfig{
+				Tools: tools,
+			},
+		}
+	}
+	agent, err := adk.NewChatModelAgent(ctx, agentConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -245,9 +252,12 @@ func InitChatSession(ctx context.Context, cfg *config.Config, chatName string, s
 	if err != nil {
 		return nil, err
 	}
-	contextModel, err = contextModel.WithTools(toolSchemas)
-	if err != nil {
-		return nil, err
+	// Only bind tools to the context model if there are any, to avoid "no tools to bind" error
+	if len(toolSchemas) > 0 {
+		contextModel, err = contextModel.WithTools(toolSchemas)
+		if err != nil {
+			return nil, err
+		}
 	}
 	manager := manager.NewManager(preset.MaxMessageRounds)
 	manager.SetChatModel(contextModel)
