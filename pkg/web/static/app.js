@@ -2025,6 +2025,12 @@ async function quickClearContext() {
         return;
     }
 
+    // Don't allow clearing while AI is generating a response
+    if (isGenerating) {
+        showToast('Cannot clear context while AI is replying', true);
+        return;
+    }
+
     // Send clear message to server (only clears conversation context)
     if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'clear', payload: {} }));
@@ -2233,5 +2239,63 @@ if (messageInput) {
 }
 
 // Image preview functions have been moved to image-preview.js module
+
+// Mobile double-tap to clear context (similar to desktop Ctrl+K)
+// Only active on mobile devices, and disabled during AI response generation
+(function initMobileDoubleTapClear() {
+    let lastTapTime = 0;
+    const DOUBLE_TAP_THRESHOLD = 400; // ms between taps
+    const DOUBLE_TAP_DISTANCE = 30;   // max pixels between tap positions
+
+    let lastTapX = 0;
+    let lastTapY = 0;
+
+    // Attach to the messages area - the main content region
+    const messagesEl = document.getElementById('messages');
+    if (!messagesEl) return;
+
+    messagesEl.addEventListener('touchstart', function(e) {
+        // Only handle single-finger taps
+        if (e.touches.length !== 1) return;
+    }, { passive: true });
+
+    messagesEl.addEventListener('touchend', function(e) {
+        // Only on mobile devices
+        if (!isMobileDevice()) return;
+
+        // Don't trigger if user is interacting with buttons, links, inputs, etc.
+        const target = e.target;
+        if (target.closest('button') || target.closest('a') ||
+            target.closest('input') || target.closest('textarea') ||
+            target.closest('pre') || target.closest('code') ||
+            target.closest('img') || target.closest('.user-files') ||
+            target.closest('.copy-btn') || target.closest('.code-copy-btn') ||
+            target.closest('.regen-btn')) {
+            return;
+        }
+
+        const now = Date.now();
+        const touch = e.changedTouches[0];
+        const tapX = touch.clientX;
+        const tapY = touch.clientY;
+
+        const timeDiff = now - lastTapTime;
+        const distX = Math.abs(tapX - lastTapX);
+        const distY = Math.abs(tapY - lastTapY);
+
+        if (timeDiff < DOUBLE_TAP_THRESHOLD && timeDiff > 0 &&
+            distX < DOUBLE_TAP_DISTANCE && distY < DOUBLE_TAP_DISTANCE) {
+            // Double tap detected
+            e.preventDefault();
+            quickClearContext();
+            // Reset to prevent triple-tap
+            lastTapTime = 0;
+        } else {
+            lastTapTime = now;
+            lastTapX = tapX;
+            lastTapY = tapY;
+        }
+    }, { passive: false });
+})();
 
 init();
