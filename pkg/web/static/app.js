@@ -271,6 +271,9 @@ async function init() {
     // Load input history from localStorage
     window.InputHistory.loadHistory();
 
+    // Initialize quick phrases
+    window.QuickPhrases.init();
+
     // Load webui config from server
     try {
         const configResponse = await fetch('/config');
@@ -2085,6 +2088,12 @@ function handleKeyDown(e) {
     const input = document.getElementById('message-input');
     if (!input) return;
 
+    // Quick phrases panel keyboard navigation (handles keys when panel is visible)
+    if (window.QuickPhrases && window.QuickPhrases.isVisible()) {
+        var handled = window.QuickPhrases.handleKeyDown(e);
+        if (handled) return;
+    }
+
     // Ctrl+K / Cmd+K = clear conversation context (without deleting local data)
     if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
         e.preventDefault();
@@ -2097,6 +2106,16 @@ function handleKeyDown(e) {
         e.preventDefault();
         sendMessage();
         return;
+    }
+
+    // Arrow Left = show quick phrases panel (only when input is empty)
+    if (e.key === 'ArrowLeft') {
+        var isEmpty = input.value.length === 0;
+        if (isEmpty && !e.shiftKey && window.QuickPhrases) {
+            e.preventDefault();
+            window.QuickPhrases.show();
+            return;
+        }
     }
 
     // Arrow Up = navigate to older history (only when input is empty or at cursor start)
@@ -2142,6 +2161,10 @@ function handleKeyDown(e) {
 
     // When user starts typing, reset history navigation and hide regenerate button
     if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) {
+        // Hide quick phrases panel when typing
+        if (window.QuickPhrases && window.QuickPhrases.isVisible()) {
+            window.QuickPhrases.hide();
+        }
         if (window.InputHistory.getHistoryIndex() !== -1) {
             window.InputHistory.resetHistoryNavigation();
         }
