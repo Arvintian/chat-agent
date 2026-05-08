@@ -2265,13 +2265,20 @@ if (messageInput) {
 
 // Mobile double-tap to clear context (similar to desktop Ctrl+K)
 // Only active on mobile devices, and disabled during AI response generation
+// Uses swipe detection: a "tap" is only counted if the finger stays mostly in place
+// during the entire touch (touchstart -> touchend movement < SWIPE_THRESHOLD).
+// This prevents false double-tap triggers when the user is scrolling quickly.
 (function initMobileDoubleTapClear() {
     let lastTapTime = 0;
     const DOUBLE_TAP_THRESHOLD = 400; // ms between taps
     const DOUBLE_TAP_DISTANCE = 30;   // max pixels between tap positions
+    const SWIPE_THRESHOLD = 15;       // max movement during a single touch to count as tap
 
     let lastTapX = 0;
     let lastTapY = 0;
+    let touchStartX = 0;
+    let touchStartY = 0;
+    let touchHasMoved = false;
 
     // Attach to the messages area - the main content region
     const messagesEl = document.getElementById('messages');
@@ -2280,11 +2287,28 @@ if (messageInput) {
     messagesEl.addEventListener('touchstart', function(e) {
         // Only handle single-finger taps
         if (e.touches.length !== 1) return;
+        const touch = e.touches[0];
+        touchStartX = touch.clientX;
+        touchStartY = touch.clientY;
+        touchHasMoved = false;
+    }, { passive: true });
+
+    messagesEl.addEventListener('touchmove', function(e) {
+        if (touchHasMoved) return;
+        const touch = e.touches[0];
+        const dx = Math.abs(touch.clientX - touchStartX);
+        const dy = Math.abs(touch.clientY - touchStartY);
+        if (dx > SWIPE_THRESHOLD || dy > SWIPE_THRESHOLD) {
+            touchHasMoved = true;
+        }
     }, { passive: true });
 
     messagesEl.addEventListener('touchend', function(e) {
         // Only on mobile devices
         if (!isMobileDevice()) return;
+
+        // Skip if this touch was a swipe (not a stationary tap)
+        if (touchHasMoved) return;
 
         // Don't trigger if user is interacting with buttons, links, inputs, etc.
         const target = e.target;
