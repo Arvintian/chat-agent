@@ -48,7 +48,7 @@
         panelElement.innerHTML = `
             <div class="quick-phrases-header">
                 <span class="quick-phrases-title">⚡ Quick Phrases</span>
-                <span class="quick-phrases-hint">↑↓ select  Enter confirm  Del delete</span>
+                <button class="quick-phrases-minimize" id="quick-phrases-minimize-btn" title="Hide panel">−</button>
             </div>
             <div class="quick-phrases-list" id="quick-phrases-list"></div>
             <div class="quick-phrases-add">
@@ -77,6 +77,13 @@
                 e.stopPropagation();
                 addPhrase();
             }
+        });
+
+        // 绑定最小化按钮事件
+        const minimizeBtn = panelElement.querySelector('#quick-phrases-minimize-btn');
+        minimizeBtn.addEventListener('click', function() {
+            hidePanel();
+            if (inputElement) inputElement.focus();
         });
     }
 

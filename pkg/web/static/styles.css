@@ -1662,9 +1662,26 @@ pre.code-block:hover .code-copy-btn {
     color: #667eea;
 }
 
-.quick-phrases-hint {
-    font-size: 11px;
+.quick-phrases-minimize {
+    width: 24px;
+    height: 24px;
+    border: none;
+    background: transparent;
     color: #999;
+    font-size: 20px;
+    cursor: pointer;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s;
+    line-height: 1;
+    padding: 0;
+}
+
+.quick-phrases-minimize:hover {
+    background: #e0e0e0;
+    color: #333;
 }
 
 .quick-phrases-list {
