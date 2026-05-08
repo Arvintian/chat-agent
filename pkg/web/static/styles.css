@@ -2040,3 +2040,29 @@ pre.code-block:hover .code-copy-btn {
         margin-top: 12px;
     }
 }
+
+/* Mermaid diagram styles */
+.markdown-body pre.mermaid {
+    background: transparent;
+    padding: 16px;
+    overflow-x: auto;
+    display: flex;
+    justify-content: center;
+}
+
+.markdown-body pre.mermaid svg {
+    max-width: 100%;
+    height: auto;
+}
+
+.markdown-body pre.mermaid-error {
+    background: #fff5f5;
+    border: 1px solid #ffcdd2;
+    border-radius: 6px;
+    padding: 12px;
+}
+
+.mermaid-error-msg {
+    color: #c62828;
+    font-size: 13px;
+}

@@ -122,6 +122,74 @@ const bracketLatexInline = {
 // marked-katex-extension's inlineKatex ($) handles standard inline math.
 marked.use({ extensions: [displayKatex, bracketLatexDisplay, bracketLatexInline] });
 
+// Initialize Mermaid
+mermaid.initialize({
+    startOnLoad: false,
+    theme: 'default',
+    securityLevel: 'loose',
+    flowchart: {
+        useMaxWidth: true,
+        htmlLabels: true,
+        curve: 'basis'
+    },
+    themeVariables: {
+        primaryColor: '#667eea',
+        primaryTextColor: '#333',
+        primaryBorderColor: '#667eea',
+        lineColor: '#666',
+        secondaryColor: '#f5f5f5',
+        tertiaryColor: '#e8f0fe'
+    }
+});
+
+// Custom marked.js extension for mermaid code blocks
+// Transforms ```mermaid blocks into <pre class="mermaid"> elements
+const mermaidExtension = {
+    name: 'mermaid',
+    level: 'block',
+    start(src) { return src.indexOf('```mermaid'); },
+    tokenizer(src) {
+        const match = /^```mermaid\s*\n([\s\S]*?)\n\s*```/.exec(src);
+        if (!match) return;
+        const mermaidCode = match[1];
+        if (!mermaidCode || !mermaidCode.trim()) return;
+        return {
+            type: 'mermaid',
+            raw: match[0],
+            text: mermaidCode
+        };
+    },
+    renderer(token) {
+        // Use a unique ID for each mermaid diagram
+        const id = 'mermaid-' + Math.random().toString(36).substr(2, 9);
+        return '<pre class="mermaid" id="' + id + '">' + escapeHtml(token.text) + '</pre>';
+    }
+};
+
+marked.use({ extensions: [mermaidExtension] });
+
+// Helper function to render mermaid diagrams in a container element
+function renderMermaidDiagrams(container) {
+    if (!container) return;
+    const mermaidElements = container.querySelectorAll('pre.mermaid');
+    if (mermaidElements.length === 0) return;
+    
+    // Use requestAnimationFrame to ensure DOM is settled
+    requestAnimationFrame(async () => {
+        try {
+            await mermaid.run({ nodes: Array.from(mermaidElements) });
+        } catch (e) {
+            console.error('Mermaid rendering error:', e);
+            // For each failed element, show error
+            mermaidElements.forEach(el => {
+                if (el.querySelector('svg')) return; // already rendered
+                el.classList.add('mermaid-error');
+                el.innerHTML = '<div class="mermaid-error-msg">⚠️ Mermaid rendering failed: ' + escapeHtml(e.message || 'Unknown error') + '</div>';
+            });
+        }
+    });
+}
+
 let ws = null;
 let currentChat = null;
 let sessionId = null;
@@ -615,6 +683,7 @@ function displayStoredThinkingAndResponse(thinkingContent, responseContent) {
         }
         document.getElementById('messages').appendChild(div);
         addCopyButtonsToCodeBlocks(div);
+        renderMermaidDiagrams(div);
     }
 
     // Display response message if exists
@@ -644,6 +713,7 @@ function displayStoredThinkingAndResponse(thinkingContent, responseContent) {
         }
         document.getElementById('messages').appendChild(div);
         addCopyButtonsToCodeBlocks(div);
+        renderMermaidDiagrams(div);
     }
 }
 
@@ -702,6 +772,9 @@ function displayStoredMessage(content, type) {
 
     // Add copy buttons to code blocks
     addCopyButtonsToCodeBlocks(div);
+    if (type === 'assistant') {
+        renderMermaidDiagrams(div);
+    }
 }
 
 // Display a stored tool call
@@ -1522,6 +1595,10 @@ function addMessage(text, type) {
     // 为消息中的代码块添加复制按钮
     addCopyButtonsToCodeBlocks(div);
 
+    if (type === 'assistant') {
+        renderMermaidDiagrams(div);
+    }
+
     smartScrollToBottom();
 }
 
@@ -1661,6 +1738,7 @@ function displayChunk(content, isFirst, isLast, contentType = 'response') {
                 thinkingBlock.appendChild(footer);
             }
             addCopyButtonsToCodeBlocks(thinkingBlock);
+            renderMermaidDiagrams(thinkingBlock);
         }
 
         if (responseBlock) {
@@ -1680,6 +1758,7 @@ function displayChunk(content, isFirst, isLast, contentType = 'response') {
                 responseBlock.appendChild(footer);
             }
             addCopyButtonsToCodeBlocks(responseBlock);
+            renderMermaidDiagrams(responseBlock);
         }
 
         // 保存完整消息到本地存储（包含思考内容和回答内容）
@@ -1902,6 +1981,11 @@ function copyResponseMessage(btn) {
 function addCopyButtonsToCodeBlocks(messageDiv) {
     const codeBlocks = messageDiv.querySelectorAll('pre');
     codeBlocks.forEach((pre, index) => {
+        // Skip mermaid diagrams
+        if (pre.classList.contains('mermaid')) {
+            return;
+        }
+
         // 检查是否已经添加了复制按钮
         if (pre.querySelector('.code-copy-btn')) {
             return;
