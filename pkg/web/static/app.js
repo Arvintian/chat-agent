@@ -412,6 +412,13 @@ async function startChat() {
     
     document.getElementById('login-header').textContent = chatName;
     document.getElementById('login-panel').style.display = 'none';
+    
+    // Ensure chat-panel has correct height before displaying (fixes PWA input-area hidden issue)
+    const chatPanel = document.getElementById('chat-panel');
+    if (chatPanel) {
+        const vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+        chatPanel.style.height = vh + 'px';
+    }
     document.getElementById('chat-panel').style.display = 'flex';
     
     // Update agent header with chat name
@@ -2178,14 +2185,15 @@ let lastViewportHeight = window.innerHeight;
 
 function handleViewportChange() {
     const viewport = window.visualViewport;
-    if (!viewport) return;
-
-    const viewportHeight = viewport.height || window.innerHeight;
+    const viewportHeight = viewport ? viewport.height : window.innerHeight;
     const chatPanel = document.getElementById('chat-panel');
 
-    if (chatPanel) {
+    // Always keep chat-panel height in sync with actual viewport
+    if (chatPanel && chatPanel.style.display !== 'none') {
         chatPanel.style.height = viewportHeight + 'px';
     }
+
+    if (!viewport) return;
 
     // Detect keyboard show/hide by comparing viewport height change
     const heightDiff = lastViewportHeight - viewportHeight;
