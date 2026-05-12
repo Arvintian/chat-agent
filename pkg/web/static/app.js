@@ -176,8 +176,19 @@ function renderMermaidDiagrams(container) {
     
     // Use requestAnimationFrame to ensure DOM is settled
     requestAnimationFrame(async () => {
+        // First, add export buttons to any already-rendered mermaid diagrams
+        mermaidElements.forEach(el => {
+            if (el.querySelector('svg')) {
+                addMermaidExportButton(el);
+            }
+        });
+        
         try {
             await mermaid.run({ nodes: Array.from(mermaidElements) });
+            // Add export buttons after successful rendering
+            mermaidElements.forEach(el => {
+                addMermaidExportButton(el);
+            });
         } catch (e) {
             console.error('Mermaid rendering error:', e);
             // For each failed element, show error
@@ -188,6 +199,102 @@ function renderMermaidDiagrams(container) {
             });
         }
     });
+}
+
+// Add export button to a rendered mermaid diagram
+function addMermaidExportButton(preElement) {
+    // Skip if already has export button
+    if (preElement.querySelector('.mermaid-export-btn')) return;
+    
+    const svg = preElement.querySelector('svg');
+    if (!svg) return;
+    
+    const exportBtn = document.createElement('button');
+    exportBtn.className = 'mermaid-export-btn';
+    exportBtn.title = 'Export as PNG';
+    exportBtn.innerHTML = `
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+        </svg>
+    `;
+    exportBtn.onclick = function(e) {
+        e.stopPropagation();
+        e.preventDefault();
+        exportMermaidToPNG(preElement);
+    };
+    
+    preElement.style.position = 'relative';
+    preElement.appendChild(exportBtn);
+}
+
+// Export mermaid diagram as PNG
+function exportMermaidToPNG(preElement) {
+    const svg = preElement.querySelector('svg');
+    if (!svg) {
+        showToast('No diagram to export', true);
+        return;
+    }
+    
+    try {
+        // Clone the SVG to avoid modifying the displayed one
+        const svgClone = svg.cloneNode(true);
+        
+        // Get SVG dimensions
+        const svgRect = svg.getBoundingClientRect();
+        const width = svgRect.width || svg.getAttribute('width') || svg.viewBox?.baseVal?.width || 800;
+        const height = svgRect.height || svg.getAttribute('height') || svg.viewBox?.baseVal?.height || 600;
+        
+        // Set explicit dimensions on clone
+        svgClone.setAttribute('width', width);
+        svgClone.setAttribute('height', height);
+        
+        // Serialize SVG to string
+        const serializer = new XMLSerializer();
+        const svgString = serializer.serializeToString(svgClone);
+        const svgBlob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+        const url = URL.createObjectURL(svgBlob);
+        
+        // Create canvas and draw
+        const canvas = document.createElement('canvas');
+        const scale = 2; // 2x for retina quality
+        canvas.width = width * scale;
+        canvas.height = height * scale;
+        const ctx = canvas.getContext('2d');
+        ctx.scale(scale, scale);
+        
+        // Set white background
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, width, height);
+        
+        const img = new Image();
+        img.onload = function() {
+            ctx.drawImage(img, 0, 0, width, height);
+            URL.revokeObjectURL(url);
+            
+            // Trigger download
+            canvas.toBlob(function(blob) {
+                const downloadUrl = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = downloadUrl;
+                a.download = 'mermaid-diagram-' + new Date().toISOString().slice(0, 19).replace(/:/g, '-') + '.png';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(downloadUrl);
+                showToast('Diagram exported as PNG', false);
+            }, 'image/png');
+        };
+        img.onerror = function() {
+            URL.revokeObjectURL(url);
+            showToast('Failed to export diagram', true);
+        };
+        img.src = url;
+    } catch (e) {
+        console.error('Mermaid export error:', e);
+        showToast('Export failed: ' + (e.message || 'Unknown error'), true);
+    }
 }
 
 let ws = null;
