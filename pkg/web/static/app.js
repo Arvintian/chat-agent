@@ -956,9 +956,9 @@ function connectWebSocket() {
     ws.onclose = function () {
         console.log('WebSocket disconnected');
         if (reconnectAttempts < maxReconnectAttempts) {
-            setStatus('Connection lost. Reconnecting in 3 seconds...', true);
+            setStatus('Connection lost. Reconnecting in 2 seconds...', true);
             reconnectAttempts++;
-            setTimeout(connectWebSocket, 3000);
+            setTimeout(connectWebSocket, 2000);
         } else {
             setStatus('Unable to reconnect. Please refresh the page.', true);
         }
