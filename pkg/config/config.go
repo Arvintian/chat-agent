@@ -94,6 +94,10 @@ type MCPServer struct {
 	Headers           map[string]string `yaml:"headers,omitempty"`
 	AutoApproval      bool              `yaml:"autoApproval"`
 	AutoApprovalTools []string          `yaml:"autoApprovalTools"`
+	// Tool filtering: include only these tools (if non-empty, only these tools are kept)
+	Include []string `yaml:"include,omitempty"`
+	// Tool filtering: exclude these tools (if non-empty, these tools are removed)
+	Exclude []string `yaml:"exclude,omitempty"`
 }
 
 type Tool struct {

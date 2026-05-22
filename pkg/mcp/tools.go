@@ -10,6 +10,24 @@ import (
 	mcpProtocol "github.com/mark3labs/mcp-go/mcp"
 )
 
+// toolFiltered checks whether a tool should be filtered based on include/exclude lists.
+// Returns true if the tool should be kept, false if it should be filtered out.
+func toolFiltered(toolName string, include, exclude []string) bool {
+	// If include list is non-empty, only keep tools in the include list
+	if len(include) > 0 {
+		if !slices.Contains(include, toolName) {
+			return false
+		}
+	}
+	// If exclude list is non-empty, remove tools in the exclude list
+	if len(exclude) > 0 {
+		if slices.Contains(exclude, toolName) {
+			return false
+		}
+	}
+	return true
+}
+
 // discoverTools discovers tools from MCP servers
 func (c *Client) discoverTools(ctx context.Context) error {
 	for serverName, mcpClient := range c.clients {
@@ -50,6 +68,12 @@ func (c *Client) discoverTools(ctx context.Context) error {
 				if err != nil {
 					return fmt.Errorf("failed to get tool info: %w", err)
 				}
+
+				// Apply server-level include/exclude filtering
+				if !toolFiltered(info.Name, serverConfig.Include, serverConfig.Exclude) {
+					continue
+				}
+
 				// Use serverName_toolName as tool name to avoid conflicts
 				toolName := fmt.Sprintf("%s_%s", serverName, info.Name)
 				if serverConfig.AutoApproval || slices.Contains(serverConfig.AutoApprovalTools, info.Name) {
