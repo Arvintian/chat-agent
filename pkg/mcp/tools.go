@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/cloudwego/eino-ext/components/tool/mcp"
+	"github.com/Arvintian/chat-agent/pkg/eino-ext/components/tool/mcp"
 	"github.com/cloudwego/eino/components/tool"
 	mcpProtocol "github.com/mark3labs/mcp-go/mcp"
 )

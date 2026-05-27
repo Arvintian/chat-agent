@@ -15,7 +15,6 @@ require (
 	github.com/cloudwego/eino-ext/components/model/openrouter v0.1.10
 	github.com/cloudwego/eino-ext/components/model/qianfan v0.1.4
 	github.com/cloudwego/eino-ext/components/model/qwen v0.1.9
-	github.com/cloudwego/eino-ext/components/tool/mcp v0.0.8
 	github.com/eino-contrib/jsonschema v1.0.3
 	github.com/eino-contrib/ollama v0.1.0
 	github.com/go-cmd/cmd v1.4.3
@@ -25,6 +24,7 @@ require (
 	github.com/mark3labs/mcp-filesystem-server v0.11.1
 	github.com/mark3labs/mcp-go v0.43.2
 	github.com/spf13/cobra v1.10.2
+	github.com/stretchr/testify v1.11.1
 	golang.org/x/sys v0.43.0
 	golang.org/x/term v0.42.0
 	gopkg.in/yaml.v3 v3.0.1
@@ -63,6 +63,7 @@ require (
 	github.com/cloudwego/base64x v0.1.6 // indirect
 	github.com/cloudwego/eino-ext/libs/acl/openai v0.1.17 // indirect
 	github.com/cohesion-org/deepseek-go v1.3.4 // indirect
+	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/djherbis/times v1.6.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/emirpasic/gods/v2 v2.0.0-alpha // indirect
@@ -101,6 +102,7 @@ require (
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
 	github.com/pelletier/go-toml/v2 v2.3.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
+	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/sagikazarmark/locafero v0.12.0 // indirect
 	github.com/sirupsen/logrus v1.9.4 // indirect
