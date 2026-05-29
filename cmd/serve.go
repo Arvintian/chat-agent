@@ -244,6 +244,16 @@ type ApprovalItem struct {
 	Reason   string `json:"reason,omitempty"`
 }
 
+// WebSocket ping/pong configuration
+const (
+	// Time allowed to read the next pong message from the peer
+	pongWait = 5 * time.Second
+	// Send pings to peer with this period. Must be less than pongWait.
+	pingPeriod = (pongWait * 8) / 10
+	// Maximum message size allowed from peer.
+	maxMessageSize = 65536
+)
+
 // WebSocket upgrader
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
@@ -521,6 +531,31 @@ func (h *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Reques
 		"session_id": sessionID,
 	})
 
+	// Configure ping/pong to detect dead connections (e.g., mobile network loss)
+	// Set read deadline: if no pong is received within pongWait, the connection is considered dead.
+	conn.SetReadLimit(maxMessageSize)
+	conn.SetReadDeadline(time.Now().Add(pongWait))
+	conn.SetPongHandler(func(string) error {
+		conn.SetReadDeadline(time.Now().Add(pongWait))
+		return nil
+	})
+
+	// Start a goroutine to send periodic pings
+	pingDone := make(chan struct{})
+	defer close(pingDone)
+	go func() {
+		ticker := time.NewTicker(pingPeriod)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				session.SendPing()
+			case <-pingDone:
+				return
+			}
+		}
+	}()
+
 	// Ensure cleanup on connection close
 	defer func() {
 		// Mark chat inactive if this connection had one active
@@ -638,9 +673,10 @@ func (h *WebSocketHandler) handleSelectChat(session *chatbot.WSSession, msg *cha
 		return
 	}
 
-	// Check if this chat is already active in another connection of the same session
+	// Check if this chat is already active in another connection of the same session.
+	// The 5s ping/pong mechanism ensures dead connections are cleaned up quickly.
 	if h.sessionManager.isChatActive(session.SessionID, req.ChatName) {
-		session.SendError(fmt.Sprintf("Chat '%s' is already open in another tab. Please close it there first or select a different chat.", req.ChatName))
+		session.SendError(fmt.Sprintf("Chat '%s' is already active in another connection of this session", req.ChatName))
 		return
 	}
 

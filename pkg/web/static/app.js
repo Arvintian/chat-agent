@@ -301,7 +301,9 @@ let ws = null;
 let currentChat = null;
 let sessionId = null;
 let reconnectAttempts = 0;
-const maxReconnectAttempts = 5;
+const maxReconnectAttempts = 10;
+const reconnectBaseDelay = 1000;  // 1 second
+const reconnectMaxDelay = 15000; // 15 seconds
 let toastTimeout = null;
 let isGenerating = false;
 let lastUserMessage = '';
@@ -955,10 +957,20 @@ function connectWebSocket() {
 
     ws.onclose = function () {
         console.log('WebSocket disconnected');
+        // Disable input while disconnected
+        const input = document.getElementById('message-input');
+        if (input) {
+            input.disabled = true;
+        }
         if (reconnectAttempts < maxReconnectAttempts) {
-            setStatus('Connection lost. Reconnecting in 2 seconds...', true);
+            // Exponential backoff: 1s, 2s, 4s, 8s, 15s, 15s...
+            const delay = Math.min(reconnectBaseDelay * Math.pow(2, reconnectAttempts), reconnectMaxDelay);
+            const attemptNum = reconnectAttempts + 1;
+            console.log(`Reconnecting in ${delay}ms (attempt ${attemptNum}/${maxReconnectAttempts})`);
+            // Show reconnecting status to user
+            setStatus(`Reconnecting... (${attemptNum}/${maxReconnectAttempts})`, false);
             reconnectAttempts++;
-            setTimeout(connectWebSocket, 2000);
+            setTimeout(connectWebSocket, delay);
         } else {
             setStatus('Unable to reconnect. Please refresh the page.', true);
         }

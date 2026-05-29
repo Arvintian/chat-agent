@@ -113,6 +113,18 @@ func (s *WSSession) SendMessage(msgType string, content interface{}) {
 	}
 }
 
+// SendPing sends a WebSocket ping frame to the client.
+// Used for keepalive to detect dead connections (e.g., mobile network loss).
+// The write deadline ensures we don't block forever if the connection is dead.
+func (s *WSSession) SendPing() {
+	s.connMu.Lock()
+	defer s.connMu.Unlock()
+	s.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	if err := s.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+		log.Printf("Ping failed for session %s: %v", s.SessionID, err)
+	}
+}
+
 func (s *WSSession) SendChunk(content string, isFirst, isLast bool, contentType string) {
 	s.SendMessage("chunk", map[string]interface{}{
 		"content":      content,
