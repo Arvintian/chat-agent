@@ -53,8 +53,6 @@ func (f *Factory) CreateChatModel(ctx context.Context, modelName string) (model.
 		return f.createOllamaModel(ctx, &modelCfg, &providerCfg)
 	case "openrouter":
 		return f.createOpenRouterModel(ctx, &modelCfg, &providerCfg)
-	case "localopenrouter":
-		return f.createLocalOpenRouterModel(ctx, &modelCfg, &providerCfg)
 	default:
 		return nil, fmt.Errorf("unsupported provider type: %s", providerCfg.Type)
 	}

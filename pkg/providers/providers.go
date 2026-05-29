@@ -6,7 +6,6 @@ import (
 	"github.com/Arvintian/chat-agent/pkg/config"
 	"github.com/eino-contrib/ollama/api"
 
-	localopenrouter "github.com/Arvintian/chat-agent/pkg/providers/openrouter"
 	"github.com/cloudwego/eino-ext/components/model/ark"
 	"github.com/cloudwego/eino-ext/components/model/claude"
 	"github.com/cloudwego/eino-ext/components/model/deepseek"
@@ -280,35 +279,4 @@ func (f *Factory) createOpenRouterModel(ctx context.Context, modelCfg *config.Mo
 	}
 
 	return openrouter.NewChatModel(ctx, cfg)
-}
-
-func (f *Factory) createLocalOpenRouterModel(ctx context.Context, modelCfg *config.Model, providerCfg *config.Provider) (model.ToolCallingChatModel, error) {
-	effort := localopenrouter.EffortOfMedium
-	if !modelCfg.Thinking {
-		effort = localopenrouter.EffortOfNone
-	}
-	cfg := localopenrouter.Config{
-		Model:   modelCfg.Model,
-		BaseURL: providerCfg.BaseURL,
-		APIKey:  providerCfg.APIKey,
-		Reasoning: &localopenrouter.ReasoningConfig{
-			Effort:  effort,
-			Exclude: !modelCfg.Thinking,
-			Enabled: &modelCfg.Thinking,
-		},
-	}
-
-	if modelCfg.MaxTokens > 0 {
-		cfg.MaxTokens = &modelCfg.MaxTokens
-	}
-	if modelCfg.Temperature > 0 {
-		temp := float32(modelCfg.Temperature)
-		cfg.Temperature = &temp
-	}
-	if modelCfg.TopP > 0 {
-		topP := float32(modelCfg.TopP)
-		cfg.TopP = &topP
-	}
-
-	return localopenrouter.NewChatModel(cfg)
 }

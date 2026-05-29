@@ -121,7 +121,7 @@ func (cb *ChatBot) StreamChat(ctx context.Context, userInput string) error {
 	// Generate streaming response
 	streamReader := cb.runner.Run(ctx, messages, adk.WithCheckPointID("local"))
 
-	response, debug := strings.Builder{}, false
+	response, reasoningContent, debug := strings.Builder{}, strings.Builder{}, false
 	if v, ok := cb.ctx.Value("debug").(bool); ok {
 		debug = v
 	}
@@ -199,6 +199,7 @@ func (cb *ChatBot) StreamChat(ctx context.Context, userInput string) error {
 		}
 
 		response.Reset()
+		reasoningContent.Reset()
 		toolMap := map[int][]*schema.Message{}
 		if event.Output.MessageOutput.MessageStream != nil {
 			reasoning, firstword := false, false
@@ -284,6 +285,7 @@ func (cb *ChatBot) StreamChat(ctx context.Context, userInput string) error {
 						fmt.Print(*out)
 					}
 				}
+				reasoningContent.WriteString(message.ReasoningContent)
 				if message.Content != "" && reasoning && !firstword {
 					fmt.Print("\n---\n")
 					firstword = true
@@ -338,15 +340,17 @@ func (cb *ChatBot) StreamChat(ctx context.Context, userInput string) error {
 			}
 			fmt.Print(event.Output.MessageOutput.Message.Content)
 			response.WriteString(event.Output.MessageOutput.Message.Content)
+			reasoningContent.WriteString(event.Output.MessageOutput.Message.ReasoningContent)
 		}
 		if event.Output.MessageOutput.Role == schema.Tool {
 			fmt.Print("\n---\n")
 		}
 		if len(toolMap) > 0 {
 			toolMsg := schema.Message{
-				Role:      schema.Assistant,
-				ToolCalls: make([]schema.ToolCall, len(toolMap)),
-				Content:   response.String(),
+				Role:             schema.Assistant,
+				ToolCalls:        make([]schema.ToolCall, len(toolMap)),
+				Content:          response.String(),
+				ReasoningContent: reasoningContent.String(),
 			}
 			for index, msgs := range toolMap {
 				m, err := schema.ConcatMessages(msgs)
@@ -360,7 +364,11 @@ func (cb *ChatBot) StreamChat(ctx context.Context, userInput string) error {
 	}
 
 	fmt.Print("\n")
-	cb.manager.AddMessage(ctx, schema.AssistantMessage(response.String(), nil))
+	cb.manager.AddMessage(ctx, &schema.Message{
+		Role:             schema.Assistant,
+		Content:          response.String(),
+		ReasoningContent: reasoningContent.String(),
+	})
 
 	return nil
 }
@@ -391,6 +399,7 @@ func (cb *ChatBot) StreamChatWithHandler(ctx context.Context, userInput string, 
 	streamReader := cb.runner.Run(ctx, messages, adk.WithCheckPointID("web"))
 
 	response := strings.Builder{}
+	reasoningContent := strings.Builder{}
 	firstChunk := true
 
 	for {
@@ -481,6 +490,7 @@ func (cb *ChatBot) StreamChatWithHandler(ctx context.Context, userInput string, 
 		}
 
 		response.Reset()
+		reasoningContent.Reset()
 		toolMap := map[int][]*schema.Message{}
 		if event.Output.MessageOutput.MessageStream != nil {
 			reasoning, firstword := false, false
@@ -571,6 +581,7 @@ func (cb *ChatBot) StreamChatWithHandler(ctx context.Context, userInput string, 
 					}
 					cb.handler.SendChunk(decodedReasoning, firstChunk, false, "thinking")
 					firstChunk = false
+					reasoningContent.WriteString(message.ReasoningContent)
 				}
 
 				// Transition from thinking to response content
@@ -620,15 +631,17 @@ func (cb *ChatBot) StreamChatWithHandler(ctx context.Context, userInput string, 
 				cb.handler.SendChunk(event.Output.MessageOutput.Message.Content, firstChunk, false, "response")
 				firstChunk = false
 				response.WriteString(event.Output.MessageOutput.Message.Content)
+				reasoningContent.WriteString(event.Output.MessageOutput.Message.ReasoningContent)
 			}
 			// Send final chunk marker
 			cb.handler.SendChunk("", false, true, "response")
 		}
 		if len(toolMap) > 0 {
 			toolMsg := schema.Message{
-				Role:      schema.Assistant,
-				ToolCalls: make([]schema.ToolCall, len(toolMap)),
-				Content:   response.String(),
+				Role:             schema.Assistant,
+				ToolCalls:        make([]schema.ToolCall, len(toolMap)),
+				Content:          response.String(),
+				ReasoningContent: reasoningContent.String(),
 			}
 			for index, msgs := range toolMap {
 				m, err := schema.ConcatMessages(msgs)
@@ -644,7 +657,11 @@ func (cb *ChatBot) StreamChatWithHandler(ctx context.Context, userInput string, 
 	}
 
 	cb.handler.SendComplete("")
-	cb.manager.AddMessage(ctx, schema.AssistantMessage(response.String(), nil))
+	cb.manager.AddMessage(ctx, &schema.Message{
+		Role:             schema.Assistant,
+		Content:          response.String(),
+		ReasoningContent: reasoningContent.String(),
+	})
 
 	// Send message count update after assistant response is complete
 	cb.handler.SendMessageCount()
