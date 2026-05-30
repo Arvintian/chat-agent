@@ -250,8 +250,6 @@ const (
 	pongWait = 5 * time.Second
 	// Send pings to peer with this period. Must be less than pongWait.
 	pingPeriod = (pongWait * 8) / 10
-	// Maximum message size allowed from peer.
-	maxMessageSize = 65536
 )
 
 // WebSocket upgrader
@@ -533,7 +531,6 @@ func (h *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Reques
 
 	// Configure ping/pong to detect dead connections (e.g., mobile network loss)
 	// Set read deadline: if no pong is received within pongWait, the connection is considered dead.
-	conn.SetReadLimit(maxMessageSize)
 	conn.SetReadDeadline(time.Now().Add(pongWait))
 	conn.SetPongHandler(func(string) error {
 		conn.SetReadDeadline(time.Now().Add(pongWait))
