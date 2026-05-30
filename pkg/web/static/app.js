@@ -929,6 +929,15 @@ function connectWebSocket() {
         console.log('WebSocket connected');
         reconnectAttempts = 0;
         closeStatus(); // Close any existing status when connected
+
+        // Re-enable input if it was disabled during disconnection
+        // Only if we're not currently in the middle of AI generation
+        // (the generation state may have been lost during disconnect)
+        const input = document.getElementById('message-input');
+        if (input && input.disabled && !isGenerating) {
+            input.disabled = false;
+        }
+
         // Auto-select current chat
         if (currentChat) {
             ws.send(JSON.stringify({ type: 'select_chat', payload: { chat_name: currentChat } }));
@@ -973,6 +982,11 @@ function connectWebSocket() {
             setTimeout(connectWebSocket, delay);
         } else {
             setStatus('Unable to reconnect. Please refresh the page.', true);
+            // Re-enable input so user can at least copy their drafted text before refreshing
+            const input = document.getElementById('message-input');
+            if (input) {
+                input.disabled = false;
+            }
         }
     };
 
