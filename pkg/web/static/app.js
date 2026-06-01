@@ -129,7 +129,7 @@ mermaid.initialize({
     securityLevel: 'loose',
     flowchart: {
         useMaxWidth: true,
-        htmlLabels: true,
+        htmlLabels: false,
         curve: 'basis'
     },
     themeVariables: {
@@ -241,14 +241,30 @@ function exportMermaidToPNG(preElement) {
         // Clone the SVG to avoid modifying the displayed one
         const svgClone = svg.cloneNode(true);
         
-        // Get SVG dimensions
-        const svgRect = svg.getBoundingClientRect();
-        const width = svgRect.width || svg.getAttribute('width') || svg.viewBox?.baseVal?.width || 800;
-        const height = svgRect.height || svg.getAttribute('height') || svg.viewBox?.baseVal?.height || 600;
+        // Get SVG dimensions - prefer viewBox for accurate sizing
+        const viewBox = svg.viewBox?.baseVal;
+        let width, height;
+        if (viewBox && viewBox.width > 0 && viewBox.height > 0) {
+            width = viewBox.width;
+            height = viewBox.height;
+        } else {
+            const svgRect = svg.getBoundingClientRect();
+            width = svgRect.width || svg.getAttribute('width') || 800;
+            height = svgRect.height || svg.getAttribute('height') || 600;
+        }
         
-        // Set explicit dimensions on clone
+        // Set explicit dimensions and viewBox on clone for canvas rendering
         svgClone.setAttribute('width', width);
         svgClone.setAttribute('height', height);
+        svgClone.setAttribute('viewBox', `0 0 ${width} ${height}`);
+        
+        // Ensure text elements have explicit fill color for proper canvas rendering
+        const textElements = svgClone.querySelectorAll('text');
+        textElements.forEach(el => {
+            if (!el.getAttribute('fill')) {
+                el.setAttribute('fill', '#333');
+            }
+        });
         
         // Serialize SVG to string
         const serializer = new XMLSerializer();
