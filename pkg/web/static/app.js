@@ -252,9 +252,14 @@ function exportMermaidToPNG(preElement) {
         
         // Serialize SVG to string
         const serializer = new XMLSerializer();
-        const svgString = serializer.serializeToString(svgClone);
-        const svgBlob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
-        const url = URL.createObjectURL(svgBlob);
+        let svgString = serializer.serializeToString(svgClone);
+        
+        // Prepend XML declaration for proper encoding
+        svgString = '<?xml version="1.0" encoding="UTF-8"?>\n' + svgString;
+        
+        // Encode SVG string to base64 data URI to avoid tainted canvas issues
+        const svgBase64 = btoa(unescape(encodeURIComponent(svgString)));
+        const dataUri = 'data:image/svg+xml;base64,' + svgBase64;
         
         // Create canvas and draw
         const canvas = document.createElement('canvas');
@@ -269,9 +274,10 @@ function exportMermaidToPNG(preElement) {
         ctx.fillRect(0, 0, width, height);
         
         const img = new Image();
+        // Set crossOrigin to anonymous to avoid tainting
+        img.crossOrigin = 'anonymous';
         img.onload = function() {
             ctx.drawImage(img, 0, 0, width, height);
-            URL.revokeObjectURL(url);
             
             // Trigger download
             canvas.toBlob(function(blob) {
@@ -287,10 +293,9 @@ function exportMermaidToPNG(preElement) {
             }, 'image/png');
         };
         img.onerror = function() {
-            URL.revokeObjectURL(url);
             showToast('Failed to export diagram', true);
         };
-        img.src = url;
+        img.src = dataUri;
     } catch (e) {
         console.error('Mermaid export error:', e);
         showToast('Export failed: ' + (e.message || 'Unknown error'), true);
