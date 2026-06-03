@@ -102,6 +102,8 @@ chats:
 #   - autoApprovalTools: list of specific tool names to auto-approve
 #   - include: list of tool names to include (if set, only these tools are enabled)
 #   - exclude: list of tool names to exclude (if set, these tools are removed)
+#   - noConcurrent: list of tool names that should NOT be called concurrently
+#     (use this for tools that don't support parallel calls, e.g. SSE-based MCP servers)
 mcp_servers:
   web_search:
     type: sse

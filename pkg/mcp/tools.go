@@ -74,12 +74,23 @@ func (c *Client) discoverTools(ctx context.Context) error {
 					continue
 				}
 
+				// Determine the final invokable tool (wrapping as needed)
+				var finalTool tool.InvokableTool
+
+				// Wrap with per-tool mutex if tool is in noConcurrent list
+				// Each tool gets its own mutex, so different tools don't block each other
+				if slices.Contains(serverConfig.NoConcurrent, info.Name) {
+					finalTool = newSerializedTool(invokableTool)
+				} else {
+					finalTool = invokableTool
+				}
+
 				// Use serverName_toolName as tool name to avoid conflicts
 				toolName := fmt.Sprintf("%s_%s", serverName, info.Name)
 				if serverConfig.AutoApproval || slices.Contains(serverConfig.AutoApprovalTools, info.Name) {
-					c.tools[toolName] = invokableTool
+					c.tools[toolName] = finalTool
 				} else {
-					c.tools[toolName] = InvokableApprovableTool{InvokableTool: invokableTool}
+					c.tools[toolName] = InvokableApprovableTool{InvokableTool: finalTool}
 				}
 			}
 		}

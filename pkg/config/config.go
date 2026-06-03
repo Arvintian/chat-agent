@@ -98,6 +98,9 @@ type MCPServer struct {
 	Include []string `yaml:"include,omitempty"`
 	// Tool filtering: exclude these tools (if non-empty, these tools are removed)
 	Exclude []string `yaml:"exclude,omitempty"`
+	// NoConcurrent: list of tool names that should NOT be called concurrently
+	// These tools will be serialized (one at a time) to avoid server-side issues
+	NoConcurrent []string `yaml:"noConcurrent,omitempty"`
 }
 
 type Tool struct {
