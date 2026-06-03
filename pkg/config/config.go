@@ -107,9 +107,12 @@ type MCPServer struct {
 	Include []string `yaml:"include,omitempty"`
 	// Tool filtering: exclude these tools (if non-empty, these tools are removed)
 	Exclude []string `yaml:"exclude,omitempty"`
-	// NoConcurrent: list of tool names that should NOT be called concurrently
-	// These tools will be serialized (one at a time) to avoid server-side issues
-	NoConcurrent []string `yaml:"noConcurrent,omitempty"`
+	// NoConcurrent: if true, all tools from this server share a single mutex,
+	// meaning no two tools from this server can run concurrently.
+	NoConcurrent bool `yaml:"noConcurrent,omitempty"`
+	// NoConcurrentTools: list of specific tool names that should NOT be called concurrently.
+	// Each listed tool gets its own mutex, so different tools don't block each other.
+	NoConcurrentTools []string `yaml:"noConcurrentTools,omitempty"`
 }
 
 type Tool struct {

@@ -14,18 +14,20 @@ import (
 
 // Client MCP client structure
 type Client struct {
-	mu      sync.RWMutex
-	clients map[string]*client.Client
-	tools   map[string]tool.BaseTool
-	config  *config.Config
+	mu            sync.RWMutex
+	clients       map[string]*client.Client
+	tools         map[string]tool.BaseTool
+	config        *config.Config
+	serverMutexes map[string]*sync.Mutex // per-server mutex for NoConcurrent=true servers
 }
 
 // NewClient creates a new MCP client
 func NewClient(cfg *config.Config) *Client {
 	return &Client{
-		clients: make(map[string]*client.Client),
-		tools:   make(map[string]tool.BaseTool),
-		config:  cfg,
+		clients:       make(map[string]*client.Client),
+		tools:         make(map[string]tool.BaseTool),
+		config:        cfg,
+		serverMutexes: make(map[string]*sync.Mutex),
 	}
 }
 

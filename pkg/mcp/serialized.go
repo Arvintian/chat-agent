@@ -8,9 +8,9 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
-// serializedTool wraps an InvokableTool and ensures that calls to the same tool
-// are serialized using a per-tool mutex. This prevents concurrent calls to
-// specific tools that don't support concurrency.
+// serializedTool wraps an InvokableTool and ensures that calls are serialized
+// using a mutex. The mutex can be per-tool (for NoConcurrentTools) or shared
+// across all tools of a server (for server-level NoConcurrent).
 type serializedTool struct {
 	tool.InvokableTool
 	mu *sync.Mutex
@@ -32,5 +32,15 @@ func newSerializedTool(t tool.InvokableTool) tool.InvokableTool {
 	return &serializedTool{
 		InvokableTool: t,
 		mu:            &sync.Mutex{},
+	}
+}
+
+// newSerializedToolWithMutex creates a serialized tool wrapper that uses the
+// provided mutex. This is used for server-level NoConcurrent where all tools
+// from the same server share a single mutex.
+func newSerializedToolWithMutex(t tool.InvokableTool, mu *sync.Mutex) tool.InvokableTool {
+	return &serializedTool{
+		InvokableTool: t,
+		mu:            mu,
 	}
 }

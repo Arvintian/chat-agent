@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"sync"
 
 	"github.com/Arvintian/chat-agent/pkg/eino-ext/components/tool/mcp"
 	"github.com/cloudwego/eino/components/tool"
@@ -77,9 +78,15 @@ func (c *Client) discoverTools(ctx context.Context) error {
 				// Determine the final invokable tool (wrapping as needed)
 				var finalTool tool.InvokableTool
 
-				// Wrap with per-tool mutex if tool is in noConcurrent list
-				// Each tool gets its own mutex, so different tools don't block each other
-				if slices.Contains(serverConfig.NoConcurrent, info.Name) {
+				// Server-level NoConcurrent: all tools from this server share one mutex.
+				// Tool-level NoConcurrentTools: each listed tool gets its own mutex.
+				// Server-level takes precedence.
+				if serverConfig.NoConcurrent {
+					if _, ok := c.serverMutexes[serverName]; !ok {
+						c.serverMutexes[serverName] = &sync.Mutex{}
+					}
+					finalTool = newSerializedToolWithMutex(invokableTool, c.serverMutexes[serverName])
+				} else if slices.Contains(serverConfig.NoConcurrentTools, info.Name) {
 					finalTool = newSerializedTool(invokableTool)
 				} else {
 					finalTool = invokableTool

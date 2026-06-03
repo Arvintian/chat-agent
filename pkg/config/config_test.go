@@ -30,6 +30,7 @@ func TestSnakeToCamel(t *testing.T) {
 		{"auto_approval_tools", "autoApprovalTools"},
 		{"gen_model_input", "genModelInput"},
 		{"no_concurrent", "noConcurrent"},
+		{"no_concurrent_tools", "noConcurrentTools"},
 		{"alreadyCamelCase", "alreadyCamelCase"},
 	}
 
@@ -68,6 +69,8 @@ func TestNormalizeNodeKeys(t *testing.T) {
 										},
 									},
 									{Kind: yaml.ScalarNode, Tag: "!!str", Value: "no_concurrent"},
+									{Kind: yaml.ScalarNode, Tag: "!!bool", Value: "true"},
+									{Kind: yaml.ScalarNode, Tag: "!!str", Value: "no_concurrent_tools"},
 									{
 										Kind: yaml.SequenceNode,
 										Content: []*yaml.Node{
@@ -125,6 +128,9 @@ func TestNormalizeNodeKeys(t *testing.T) {
 	if !serverKeys["noConcurrent"] {
 		t.Error("nested noConcurrent key not normalized")
 	}
+	if !serverKeys["noConcurrentTools"] {
+		t.Error("nested noConcurrentTools key not normalized")
+	}
 }
 
 func TestLoadConfigCamelCase(t *testing.T) {
@@ -151,7 +157,8 @@ mcpServers:
   myserver:
     type: sse
     url: http://localhost:8080
-    noConcurrent:
+    noConcurrent: true
+    noConcurrentTools:
       - search
 `
 	if err := os.WriteFile(path, []byte(data), 0644); err != nil {
@@ -169,9 +176,12 @@ mcpServers:
 	if cfg.Models["gpt4"].MaxTokens != 4096 {
 		t.Errorf("MaxTokens = %d", cfg.Models["gpt4"].MaxTokens)
 	}
-	if len(cfg.MCPServers["myserver"].NoConcurrent) != 1 ||
-		cfg.MCPServers["myserver"].NoConcurrent[0] != "search" {
+	if !cfg.MCPServers["myserver"].NoConcurrent {
 		t.Errorf("NoConcurrent = %v", cfg.MCPServers["myserver"].NoConcurrent)
+	}
+	if len(cfg.MCPServers["myserver"].NoConcurrentTools) != 1 ||
+		cfg.MCPServers["myserver"].NoConcurrentTools[0] != "search" {
+		t.Errorf("NoConcurrentTools = %v", cfg.MCPServers["myserver"].NoConcurrentTools)
 	}
 }
 
@@ -204,7 +214,8 @@ mcp_servers:
     url: http://localhost:8080
     auto_approval_tools:
       - list
-    no_concurrent:
+    no_concurrent: true
+    no_concurrent_tools:
       - search
       - fetch
 `
@@ -263,10 +274,13 @@ mcp_servers:
 		cfg.MCPServers["myserver"].AutoApprovalTools[0] != "list" {
 		t.Errorf("AutoApprovalTools = %v", cfg.MCPServers["myserver"].AutoApprovalTools)
 	}
-	if len(cfg.MCPServers["myserver"].NoConcurrent) != 2 ||
-		cfg.MCPServers["myserver"].NoConcurrent[0] != "search" ||
-		cfg.MCPServers["myserver"].NoConcurrent[1] != "fetch" {
+	if !cfg.MCPServers["myserver"].NoConcurrent {
 		t.Errorf("NoConcurrent = %v", cfg.MCPServers["myserver"].NoConcurrent)
+	}
+	if len(cfg.MCPServers["myserver"].NoConcurrentTools) != 2 ||
+		cfg.MCPServers["myserver"].NoConcurrentTools[0] != "search" ||
+		cfg.MCPServers["myserver"].NoConcurrentTools[1] != "fetch" {
+		t.Errorf("NoConcurrentTools = %v", cfg.MCPServers["myserver"].NoConcurrentTools)
 	}
 }
 
@@ -295,7 +309,8 @@ mcp_servers:
   myserver:
     type: sse
     url: http://localhost:8080
-    no_concurrent:
+    no_concurrent: true
+    noConcurrentTools:
       - search
 `
 	if err := os.WriteFile(path, []byte(data), 0644); err != nil {
@@ -325,8 +340,12 @@ mcp_servers:
 	if cfg.Chats["default"].MaxRetries != 2 {
 		t.Errorf("MaxRetries = %d", cfg.Chats["default"].MaxRetries)
 	}
-	if len(cfg.MCPServers["myserver"].NoConcurrent) != 1 {
+	if !cfg.MCPServers["myserver"].NoConcurrent {
 		t.Errorf("NoConcurrent = %v", cfg.MCPServers["myserver"].NoConcurrent)
+	}
+	if len(cfg.MCPServers["myserver"].NoConcurrentTools) != 1 ||
+		cfg.MCPServers["myserver"].NoConcurrentTools[0] != "search" {
+		t.Errorf("NoConcurrentTools = %v", cfg.MCPServers["myserver"].NoConcurrentTools)
 	}
 }
 
