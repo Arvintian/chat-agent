@@ -2,8 +2,8 @@
 providers:
   deepseek:
     type: deepseek
-    base_url: https://api.deepseek.com
-    api_key: sk-secret-token
+    baseUrl: https://api.deepseek.com
+    apiKey: sk-secret-token
 
 # Model configuration
 models:
@@ -25,7 +25,7 @@ models:
 #   - fullMessageRounds: number of recent rounds to keep full messages, older rounds will be simplified (default: 1)
 #   - maxIterations: maximum iterations for tool calling (default: 20)
 #   - maxRetries: maximum retries for model generation (default: 5)
-#   - mcp_servers: list of MCP servers to use
+#   - mcpServers: list of MCP servers to use
 #   - tools: list of built-in tools to use (see tools section below)
 #   - persistence: whether to persist conversation context (default: false)
 #   - skill: skill configuration
@@ -62,7 +62,7 @@ chats:
     model: deepseek-chat
     desc: "A friendly assistant"
     system: "You are a helpful search assistant."
-    mcp_servers:
+    mcpServers:
       - web_search
   reasoner:
     model: deepseek-reasoner
@@ -72,7 +72,7 @@ chats:
     model: deepseek-reasoner
     desc: "A friendly assistant"
     system: "You are a helpful search assistant."
-    mcp_servers:
+    mcpServers:
       - web_search
   template-example:
     model: deepseek-chat
@@ -104,7 +104,7 @@ chats:
 #   - exclude: list of tool names to exclude (if set, these tools are removed)
 #   - noConcurrent: list of tool names that should NOT be called concurrently
 #     (use this for tools that don't support parallel calls, e.g. SSE-based MCP servers)
-mcp_servers:
+mcpServers:
   web_search:
     type: sse
     url: "https://your-mcp-host"

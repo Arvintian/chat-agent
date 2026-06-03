@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -15,8 +16,16 @@ type Config struct {
 	Chats      map[string]Chat      `yaml:"chats,omitempty"`
 	Providers  map[string]Provider  `yaml:"providers,omitempty"`
 	Models     map[string]Model     `yaml:"models,omitempty"`
-	MCPServers map[string]MCPServer `yaml:"mcp_servers,omitempty"`
+	MCPServers map[string]MCPServer `yaml:"mcpServers,omitempty"`
 	Tools      map[string]Tool      `yaml:"tools,omitempty"`
+}
+
+// UnmarshalYAML implements custom YAML unmarshaling for backward compatibility.
+// It normalizes snake_case keys to camelCase so both styles are accepted.
+func (c *Config) UnmarshalYAML(value *yaml.Node) error {
+	normalizeNodeKeys(value)
+	type plain Config
+	return value.Decode((*plain)(c))
 }
 
 type Chat struct {
@@ -27,7 +36,7 @@ type Chat struct {
 	FullMessageRounds int           `yaml:"fullMessageRounds,omitempty"`
 	MaxIterations     int           `yaml:"maxIterations"`
 	MaxRetries        int           `yaml:"maxRetries"`
-	MCPServers        []string      `yaml:"mcp_servers,omitempty"`
+	MCPServers        []string      `yaml:"mcpServers,omitempty"`
 	Skill             *Skill        `yaml:"skill,omitempty"`
 	Tools             []string      `yaml:"tools,omitempty"`
 	Default           bool          `yaml:"default"`
@@ -45,7 +54,7 @@ type SessionHooks struct {
 type SessionHookConfig struct {
 	Enabled    bool              `yaml:"enabled"`
 	Type       string            `yaml:"type,omitempty"`    // "script" or "http", default is "script"
-	ScriptPath string            `yaml:"script_path"`       // used when type is "script"
+	ScriptPath string            `yaml:"scriptPath"`        // used when type is "script"
 	URL        string            `yaml:"url,omitempty"`     // used when type is "http"
 	Method     string            `yaml:"method,omitempty"`  // HTTP method for http type, default is "POST"
 	Headers    map[string]string `yaml:"headers,omitempty"` // HTTP headers for http type
@@ -65,8 +74,8 @@ type Skill struct {
 // Provider represents AI provider configuration
 type Provider struct {
 	Type    string `yaml:"type"`
-	BaseURL string `yaml:"base_url,omitempty"`
-	APIKey  string `yaml:"api_key,omitempty"`
+	BaseURL string `yaml:"baseUrl,omitempty"`
+	APIKey  string `yaml:"apiKey,omitempty"`
 }
 
 // Model represents AI model configuration
@@ -74,12 +83,12 @@ type Model struct {
 	Provider        string         `yaml:"provider"`
 	Model           string         `yaml:"model"`
 	Thinking        bool           `yaml:"thinking"`
-	ReasoningEffort *string        `yaml:"reasoning_effort"`
-	MaxTokens       int            `yaml:"max_tokens,omitempty"`
+	ReasoningEffort *string        `yaml:"reasoningEffort"`
+	MaxTokens       int            `yaml:"maxTokens,omitempty"`
 	Temperature     float64        `yaml:"temperature,omitempty"`
-	TopP            float64        `yaml:"top_p,omitempty"`
-	TopK            int            `yaml:"top_k,omitempty"`
-	ExtraBody       map[string]any `yaml:"extra_body"`
+	TopP            float64        `yaml:"topP,omitempty"`
+	TopK            int            `yaml:"topK,omitempty"`
+	ExtraBody       map[string]any `yaml:"extraBody"`
 }
 
 // MCPServer represents MCP server configuration
@@ -138,4 +147,46 @@ func LoadConfig(configPath string) (*Config, error) {
 // GetConfig gets global configuration
 func GetConfig() *Config {
 	return globalConfig
+}
+
+// normalizeNodeKeys recursively normalizes mapping node keys from snake_case to camelCase.
+// This provides backward compatibility: old configs with snake_case keys still work.
+func normalizeNodeKeys(node *yaml.Node) {
+	if node == nil {
+		return
+	}
+	switch node.Kind {
+	case yaml.DocumentNode:
+		for _, child := range node.Content {
+			normalizeNodeKeys(child)
+		}
+	case yaml.MappingNode:
+		// Mapping nodes have Content as pairs: [key, value, key, value, ...]
+		for i := 0; i < len(node.Content); i += 2 {
+			keyNode := node.Content[i]
+			valueNode := node.Content[i+1]
+			if keyNode.Kind == yaml.ScalarNode && keyNode.Tag == "!!str" {
+				keyNode.Value = snakeToCamel(keyNode.Value)
+			}
+			normalizeNodeKeys(valueNode)
+		}
+	case yaml.SequenceNode:
+		for _, child := range node.Content {
+			normalizeNodeKeys(child)
+		}
+	}
+}
+
+// snakeToCamel converts a snake_case string to camelCase.
+func snakeToCamel(s string) string {
+	parts := strings.Split(s, "_")
+	if len(parts) <= 1 {
+		return s
+	}
+	for i := 1; i < len(parts); i++ {
+		if len(parts[i]) > 0 {
+			parts[i] = strings.ToUpper(parts[i][:1]) + parts[i][1:]
+		}
+	}
+	return strings.Join(parts, "")
 }
