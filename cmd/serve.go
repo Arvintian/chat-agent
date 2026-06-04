@@ -26,62 +26,85 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// BasicAuthMiddleware creates a middleware for HTTP Basic Authentication
-func BasicAuthMiddleware(user, pass string) func(http.Handler) http.Handler {
+// BasicAuthMiddleware creates a middleware for HTTP Basic Authentication.
+// It accepts a map of username->password pairs and authenticates against any of them.
+func BasicAuthMiddleware(credentials map[string]string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Skip auth if credentials are not configured
-			if user == "" && pass == "" {
+			// Skip auth if no credentials are configured
+			if len(credentials) == 0 {
 				next.ServeHTTP(w, r)
 				return
 			}
 
-			authHeader := r.Header.Get("Authorization")
-			if authHeader == "" {
+			writeUnauthorized := func() {
 				w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
 				w.WriteHeader(http.StatusUnauthorized)
 				w.Write([]byte("401 Unauthorized"))
+			}
+
+			authHeader := r.Header.Get("Authorization")
+			if authHeader == "" {
+				writeUnauthorized()
 				return
 			}
 
 			// Extract credentials from Authorization header
 			parts := strings.SplitN(authHeader, " ", 2)
 			if len(parts) != 2 || strings.ToLower(parts[0]) != "basic" {
-				w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
-				w.WriteHeader(http.StatusUnauthorized)
-				w.Write([]byte("401 Unauthorized"))
+				writeUnauthorized()
 				return
 			}
 
 			decoded, err := base64.StdEncoding.DecodeString(parts[1])
 			if err != nil {
-				w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
-				w.WriteHeader(http.StatusUnauthorized)
-				w.Write([]byte("401 Unauthorized"))
+				writeUnauthorized()
 				return
 			}
 
 			credentialParts := strings.SplitN(string(decoded), ":", 2)
 			if len(credentialParts) != 2 {
-				w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
-				w.WriteHeader(http.StatusUnauthorized)
-				w.Write([]byte("401 Unauthorized"))
+				writeUnauthorized()
 				return
 			}
 
 			receivedUser := credentialParts[0]
 			receivedPass := credentialParts[1]
 
-			if receivedUser != user || receivedPass != pass {
-				w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
-				w.WriteHeader(http.StatusUnauthorized)
-				w.Write([]byte("401 Unauthorized"))
+			expectedPass, ok := credentials[receivedUser]
+			if !ok || receivedPass != expectedPass {
+				writeUnauthorized()
 				return
 			}
 
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// parseBasicAuth parses a comma-separated list of "user:pass" pairs into a map.
+// Empty or malformed input returns an empty map (auth disabled).
+func parseBasicAuth(raw string) map[string]string {
+	credentials := make(map[string]string)
+	if raw == "" {
+		return credentials
+	}
+	for _, pair := range strings.Split(raw, ",") {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue
+		}
+		parts := strings.SplitN(pair, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		user := strings.TrimSpace(parts[0])
+		pass := strings.TrimSpace(parts[1])
+		if user != "" {
+			credentials[user] = pass
+		}
+	}
+	return credentials
 }
 
 // serveCmd represents the serve command
@@ -92,8 +115,9 @@ var serveCmd = &cobra.Command{
 
 Each client connection can select a chat and start independent conversation sessions.
 
-Example:
-  chat-agent serve --port 8080`,
+Examples:
+  chat-agent serve --port 8080
+  chat-agent serve --port 8080 --basic-auth "alice:pwd1,bob:pwd2"`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := logger.Init(); err != nil {
 			return err
@@ -106,12 +130,11 @@ Example:
 		port, _ := cmd.Flags().GetInt("port")
 		host, _ := cmd.Flags().GetString("host")
 		welcome, _ := cmd.Flags().GetString("welcome")
-		basicAuthUser, _ := cmd.Flags().GetString("basic-auth-user")
-		basicAuthPass, _ := cmd.Flags().GetString("basic-auth-pass")
+		basicAuth, _ := cmd.Flags().GetString("basic-auth")
 
 		wsHandler := NewWebSocketHandler(cfg)
 
-		authMiddleware := BasicAuthMiddleware(basicAuthUser, basicAuthPass)
+		authMiddleware := BasicAuthMiddleware(parseBasicAuth(basicAuth))
 
 		router := mux.NewRouter()
 		router.Use(authMiddleware)
@@ -920,8 +943,7 @@ func init() {
 	// Add serve command
 	serveCmd.Flags().StringP("host", "", "0.0.0.0", "Host to listen on")
 	serveCmd.Flags().IntP("port", "", 8080, "Port to listen on")
-	serveCmd.Flags().StringP("basic-auth-user", "", "", "Basic auth username (enables authentication if set)")
-	serveCmd.Flags().StringP("basic-auth-pass", "", "", "Basic auth password")
+	serveCmd.Flags().StringP("basic-auth", "", "", "Basic auth credentials as comma-separated user:pass pairs (e.g., \"alice:pwd1,bob:pwd2\")")
 
 	RootCmd.AddCommand(serveCmd)
 }
