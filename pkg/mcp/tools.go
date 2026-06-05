@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/Arvintian/chat-agent/pkg/eino-ext/components/tool/mcp"
@@ -70,8 +71,19 @@ func (c *Client) discoverTools(ctx context.Context) error {
 					return fmt.Errorf("failed to get tool info: %w", err)
 				}
 
+				toolName := info.Name
+
+				// Optionally lowercase tool name for matching and registration.
+				// When enabled, we wrap the tool so that the LLM agent sees a
+				// lowercase Function.Name via Info(), while internal MCP
+				// communication continues to use the original tool name.
+				if serverConfig.LowercaseTools {
+					toolName = strings.ToLower(toolName)
+					invokableTool = newRenamedTool(invokableTool, toolName)
+				}
+
 				// Apply server-level include/exclude filtering
-				if !toolFiltered(info.Name, serverConfig.Include, serverConfig.Exclude) {
+				if !toolFiltered(toolName, serverConfig.Include, serverConfig.Exclude) {
 					continue
 				}
 
@@ -86,18 +98,18 @@ func (c *Client) discoverTools(ctx context.Context) error {
 						c.serverMutexes[serverName] = &sync.Mutex{}
 					}
 					finalTool = newSerializedToolWithMutex(invokableTool, c.serverMutexes[serverName])
-				} else if slices.Contains(serverConfig.NoConcurrentTools, info.Name) {
+				} else if slices.Contains(serverConfig.NoConcurrentTools, toolName) {
 					finalTool = newSerializedTool(invokableTool)
 				} else {
 					finalTool = invokableTool
 				}
 
 				// Use serverName_toolName as tool name to avoid conflicts
-				toolName := fmt.Sprintf("%s_%s", serverName, info.Name)
-				if serverConfig.AutoApproval || slices.Contains(serverConfig.AutoApprovalTools, info.Name) {
-					c.tools[toolName] = finalTool
+				fullName := fmt.Sprintf("%s_%s", serverName, toolName)
+				if serverConfig.AutoApproval || slices.Contains(serverConfig.AutoApprovalTools, toolName) {
+					c.tools[fullName] = finalTool
 				} else {
-					c.tools[toolName] = InvokableApprovableTool{InvokableTool: finalTool}
+					c.tools[fullName] = InvokableApprovableTool{InvokableTool: finalTool}
 				}
 			}
 		}

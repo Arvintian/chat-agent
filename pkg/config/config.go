@@ -113,6 +113,9 @@ type MCPServer struct {
 	// NoConcurrentTools: list of specific tool names that should NOT be called concurrently.
 	// Each listed tool gets its own mutex, so different tools don't block each other.
 	NoConcurrentTools []string `yaml:"noConcurrentTools,omitempty"`
+	// LowercaseTools: if true, all discovered tool names are lowercased before
+	// filtering (include/exclude/autoApprovalTools/noConcurrentTools) and registration.
+	LowercaseTools bool `yaml:"lowercaseTools,omitempty"`
 }
 
 type Tool struct {

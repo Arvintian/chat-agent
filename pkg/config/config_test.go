@@ -31,6 +31,7 @@ func TestSnakeToCamel(t *testing.T) {
 		{"gen_model_input", "genModelInput"},
 		{"no_concurrent", "noConcurrent"},
 		{"no_concurrent_tools", "noConcurrentTools"},
+		{"lowercase_tools", "lowercaseTools"},
 		{"alreadyCamelCase", "alreadyCamelCase"},
 	}
 
@@ -77,6 +78,8 @@ func TestNormalizeNodeKeys(t *testing.T) {
 											{Kind: yaml.ScalarNode, Tag: "!!str", Value: "fetch"},
 										},
 									},
+									{Kind: yaml.ScalarNode, Tag: "!!str", Value: "lowercase_tools"},
+									{Kind: yaml.ScalarNode, Tag: "!!bool", Value: "true"},
 								},
 							},
 						},
@@ -131,6 +134,9 @@ func TestNormalizeNodeKeys(t *testing.T) {
 	if !serverKeys["noConcurrentTools"] {
 		t.Error("nested noConcurrentTools key not normalized")
 	}
+	if !serverKeys["lowercaseTools"] {
+		t.Error("nested lowercaseTools key not normalized")
+	}
 }
 
 func TestLoadConfigCamelCase(t *testing.T) {
@@ -160,6 +166,7 @@ mcpServers:
     noConcurrent: true
     noConcurrentTools:
       - search
+    lowercaseTools: true
 `
 	if err := os.WriteFile(path, []byte(data), 0644); err != nil {
 		t.Fatal(err)
@@ -182,6 +189,9 @@ mcpServers:
 	if len(cfg.MCPServers["myserver"].NoConcurrentTools) != 1 ||
 		cfg.MCPServers["myserver"].NoConcurrentTools[0] != "search" {
 		t.Errorf("NoConcurrentTools = %v", cfg.MCPServers["myserver"].NoConcurrentTools)
+	}
+	if !cfg.MCPServers["myserver"].LowercaseTools {
+		t.Errorf("LowercaseTools = %v", cfg.MCPServers["myserver"].LowercaseTools)
 	}
 }
 
@@ -218,6 +228,7 @@ mcp_servers:
     no_concurrent_tools:
       - search
       - fetch
+    lowercase_tools: true
 `
 	if err := os.WriteFile(path, []byte(data), 0644); err != nil {
 		t.Fatal(err)
@@ -282,6 +293,9 @@ mcp_servers:
 		cfg.MCPServers["myserver"].NoConcurrentTools[1] != "fetch" {
 		t.Errorf("NoConcurrentTools = %v", cfg.MCPServers["myserver"].NoConcurrentTools)
 	}
+	if !cfg.MCPServers["myserver"].LowercaseTools {
+		t.Errorf("LowercaseTools = %v", cfg.MCPServers["myserver"].LowercaseTools)
+	}
 }
 
 func TestLoadConfigMixedCase(t *testing.T) {
@@ -312,6 +326,7 @@ mcp_servers:
     no_concurrent: true
     noConcurrentTools:
       - search
+    lowercase_tools: true
 `
 	if err := os.WriteFile(path, []byte(data), 0644); err != nil {
 		t.Fatal(err)
@@ -346,6 +361,9 @@ mcp_servers:
 	if len(cfg.MCPServers["myserver"].NoConcurrentTools) != 1 ||
 		cfg.MCPServers["myserver"].NoConcurrentTools[0] != "search" {
 		t.Errorf("NoConcurrentTools = %v", cfg.MCPServers["myserver"].NoConcurrentTools)
+	}
+	if !cfg.MCPServers["myserver"].LowercaseTools {
+		t.Errorf("LowercaseTools = %v", cfg.MCPServers["myserver"].LowercaseTools)
 	}
 }
 

@@ -44,3 +44,34 @@ func newSerializedToolWithMutex(t tool.InvokableTool, mu *sync.Mutex) tool.Invok
 		mu:            mu,
 	}
 }
+
+// renamedTool wraps an InvokableTool and overrides the tool name returned by
+// Info(). InvokableRun delegates to the underlying tool, so the original
+// tool name flows through to the MCP server unchanged. This is used to
+// present lowercase tool names to the LLM agent while keeping internal MCP
+// communication intact.
+type renamedTool struct {
+	base tool.InvokableTool // the underlying tool (e.g. toolHelper)
+	name string             // new name exposed via Info()
+}
+
+func (r *renamedTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
+	info, err := r.base.Info(ctx)
+	if err != nil {
+		return nil, err
+	}
+	copied := *info
+	copied.Name = r.name
+	return &copied, nil
+}
+
+func (r *renamedTool) InvokableRun(ctx context.Context, argumentsInJSON string, opts ...tool.Option) (string, error) {
+	return r.base.InvokableRun(ctx, argumentsInJSON, opts...)
+}
+
+func newRenamedTool(base tool.InvokableTool, name string) tool.InvokableTool {
+	return &renamedTool{
+		base: base,
+		name: name,
+	}
+}
