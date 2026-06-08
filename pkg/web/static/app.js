@@ -2107,27 +2107,22 @@ function toggleThinkingExpand(btn) {
     const isCollapsed = contentDiv.classList.contains('thinking-collapsed');
     
     if (isCollapsed) {
-        // 展开
+        // Expand: remove collapsed class, page height grows naturally
         contentDiv.classList.remove('thinking-collapsed');
         btn.textContent = 'Collapse ▴';
         btn.title = 'Collapse thinking';
     } else {
-        // 收起
+        // Collapse: add collapsed class, scroll inner content to show newest lines
         contentDiv.classList.add('thinking-collapsed');
         btn.textContent = 'Expand ▾';
         btn.title = 'Expand thinking';
-        // Scroll to bottom so newest content is visible
         scrollThinkingContentToBottom(contentDiv);
     }
     
-    // 展开/收起后滚动到合适位置
-    setTimeout(() => {
-        if (!isCollapsed) {
-            // 收起后，将thinking header滚动到可见区域
-            thinkingBlock.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }
+    // Let layout settle, then smart-scroll to maintain correct position
+    requestAnimationFrame(() => {
         smartScrollToBottom();
-    }, 100);
+    });
 }
 
 // 复制思考消息内容

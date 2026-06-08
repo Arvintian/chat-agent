@@ -265,23 +265,13 @@ body {
     position: relative;
     scrollbar-width: none;
     -ms-overflow-style: none;
+    /* Fade bottom via mask instead of sticky pseudo-element to avoid layout issues */
+    -webkit-mask-image: linear-gradient(to bottom, black 60%, transparent 100%);
+    mask-image: linear-gradient(to bottom, black 60%, transparent 100%);
 }
 
 .thinking-content.thinking-collapsed::-webkit-scrollbar {
     display: none;
-}
-
-/* Fade out gradient at bottom when collapsed */
-.thinking-content.thinking-collapsed::after {
-    content: '';
-    position: sticky;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    display: block;
-    height: 2em;
-    background: linear-gradient(transparent, #fafafa);
-    pointer-events: none;
 }
 
 /* Expand button in thinking header */
