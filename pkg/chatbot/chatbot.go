@@ -272,7 +272,6 @@ func (cb *ChatBot) StreamChat(ctx context.Context, userInput string) error {
 					toolMu.Unlock()
 				}
 				if message.ReasoningContent != "" && !reasoning {
-					fmt.Print("Thinking:\n")
 					reasoning = true
 				}
 				if message.ReasoningContent != "" {
@@ -281,18 +280,30 @@ func (cb *ChatBot) StreamChat(ctx context.Context, userInput string) error {
 					if err := json.Unmarshal([]byte(message.ReasoningContent), &decodedReasoning); err != nil {
 						decodedReasoning = message.ReasoningContent
 					}
-					if out := filter.Process(decodedReasoning); out != nil {
-						fmt.Print(*out)
+					// Skip whitespace-only chunks at the beginning (before any meaningful content)
+					if reasoningContent.Len() > 0 || strings.TrimSpace(decodedReasoning) != "" {
+						if reasoning && reasoningContent.Len() == 0 {
+							fmt.Print("Thinking:\n")
+						}
+						if out := filter.Process(decodedReasoning); out != nil {
+							fmt.Print(*out)
+						}
 					}
 				}
 				reasoningContent.WriteString(message.ReasoningContent)
 				if message.Content != "" && reasoning && !firstword {
-					fmt.Print("\n---\n")
+					// Only print separator if we actually printed some reasoning
+					if reasoningContent.Len() > 0 {
+						fmt.Print("\n---\n")
+					}
 					firstword = true
 				}
 				if message.Content != "" {
-					if out := filter.Process(message.Content); out != nil {
-						fmt.Print(*out)
+					// Skip whitespace-only chunks at the beginning (before any meaningful content)
+					if response.Len() > 0 || strings.TrimSpace(message.Content) != "" {
+						if out := filter.Process(message.Content); out != nil {
+							fmt.Print(*out)
+						}
 					}
 				}
 				response.WriteString(message.Content)
@@ -579,8 +590,11 @@ func (cb *ChatBot) StreamChatWithHandler(ctx context.Context, userInput string, 
 					if err := json.Unmarshal([]byte(message.ReasoningContent), &decodedReasoning); err != nil {
 						decodedReasoning = message.ReasoningContent
 					}
-					cb.handler.SendChunk(decodedReasoning, firstChunk, false, "thinking")
-					firstChunk = false
+					// Skip whitespace-only chunks at the beginning (before any meaningful content)
+					if reasoningContent.Len() > 0 || strings.TrimSpace(decodedReasoning) != "" {
+						cb.handler.SendChunk(decodedReasoning, firstChunk, false, "thinking")
+						firstChunk = false
+					}
 					reasoningContent.WriteString(message.ReasoningContent)
 				}
 
@@ -591,8 +605,11 @@ func (cb *ChatBot) StreamChatWithHandler(ctx context.Context, userInput string, 
 				}
 
 				if message.Content != "" {
-					cb.handler.SendChunk(message.Content, firstChunk, false, "response")
-					firstChunk = false
+					// Skip whitespace-only chunks at the beginning (before any meaningful content)
+					if response.Len() > 0 || strings.TrimSpace(message.Content) != "" {
+						cb.handler.SendChunk(message.Content, firstChunk, false, "response")
+						firstChunk = false
+					}
 					response.WriteString(message.Content)
 				}
 			}
