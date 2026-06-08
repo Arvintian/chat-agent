@@ -790,8 +790,9 @@ function displayStoredThinkingAndResponse(thinkingContent, responseContent) {
             <div class="thinking-header">
                 <span class="thinking-icon">💭</span>
                 <span class="thinking-title">Thinking</span>
+                <button class="thinking-expand-btn" onclick="toggleThinkingExpand(this)" title="Expand thinking">Expand ▾</button>
             </div>
-            <div class="thinking-content markdown-body"></div>
+            <div class="thinking-content thinking-collapsed markdown-body"></div>
             <div class="message-footer">
                 <button class="copy-btn" onclick="copyThinkingMessage(this)" title="Copy thinking content">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -812,6 +813,7 @@ function displayStoredThinkingAndResponse(thinkingContent, responseContent) {
             thinkingDiv.textContent = thinkingContent.trim();
         }
         document.getElementById('messages').appendChild(div);
+        scrollThinkingContentToBottom(thinkingDiv);
         addCopyButtonsToCodeBlocks(div);
         renderMermaidDiagrams(div);
     }
@@ -1950,8 +1952,9 @@ function displayChunk(content, isFirst, isLast, contentType = 'response') {
                 <div class="thinking-header">
                     <span class="thinking-icon">💭</span>
                     <span class="thinking-title">Thinking</span>
+                    <button class="thinking-expand-btn" onclick="toggleThinkingExpand(this)" title="Expand thinking">Expand ▾</button>
                 </div>
-                <div class="thinking-content markdown-body"></div>
+                <div class="thinking-content thinking-collapsed markdown-body"></div>
             `;
             thinkingElement = thinkingBlock.querySelector('.thinking-content');
             currentThinkingChunk = content;
@@ -1966,6 +1969,7 @@ function displayChunk(content, isFirst, isLast, contentType = 'response') {
                 } catch (e) {
                     thinkingElement.textContent = content;
                 }
+                scrollThinkingContentToBottom(thinkingElement);
             }
             smartScrollToBottom();
         } else {
@@ -1979,6 +1983,7 @@ function displayChunk(content, isFirst, isLast, contentType = 'response') {
                 } catch (e) {
                     thinkingElement.textContent = currentThinkingChunk;
                 }
+                scrollThinkingContentToBottom(thinkingElement);
             }
             smartScrollToBottom();
         }
@@ -2083,6 +2088,46 @@ function copyUserMessage(btn) {
         console.error('Failed to copy user message:', err);
         showToast('Copy failed', false);
     });
+}
+
+// Scroll thinking content to bottom (for collapsed state showing newest lines)
+function scrollThinkingContentToBottom(contentDiv) {
+    if (contentDiv && contentDiv.classList.contains('thinking-collapsed')) {
+        // Use requestAnimationFrame to ensure DOM is rendered before scrolling
+        requestAnimationFrame(() => {
+            contentDiv.scrollTop = contentDiv.scrollHeight;
+        });
+    }
+}
+
+// 切换思考内容的展开/收起状态
+function toggleThinkingExpand(btn) {
+    const thinkingBlock = btn.closest('.thinking-message');
+    const contentDiv = thinkingBlock.querySelector('.thinking-content');
+    const isCollapsed = contentDiv.classList.contains('thinking-collapsed');
+    
+    if (isCollapsed) {
+        // 展开
+        contentDiv.classList.remove('thinking-collapsed');
+        btn.textContent = 'Collapse ▴';
+        btn.title = 'Collapse thinking';
+    } else {
+        // 收起
+        contentDiv.classList.add('thinking-collapsed');
+        btn.textContent = 'Expand ▾';
+        btn.title = 'Expand thinking';
+        // Scroll to bottom so newest content is visible
+        scrollThinkingContentToBottom(contentDiv);
+    }
+    
+    // 展开/收起后滚动到合适位置
+    setTimeout(() => {
+        if (!isCollapsed) {
+            // 收起后，将thinking header滚动到可见区域
+            thinkingBlock.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+        smartScrollToBottom();
+    }, 100);
 }
 
 // 复制思考消息内容

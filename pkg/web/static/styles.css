@@ -255,6 +255,54 @@ body {
 .thinking-content {
     color: #666;
     font-size: 13px;
+    transition: max-height 0.3s ease;
+}
+
+/* Collapsed thinking content - show ~3 lines with scroll */
+.thinking-content.thinking-collapsed {
+    max-height: 4.8em;
+    overflow-y: auto;
+    position: relative;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+.thinking-content.thinking-collapsed::-webkit-scrollbar {
+    display: none;
+}
+
+/* Fade out gradient at bottom when collapsed */
+.thinking-content.thinking-collapsed::after {
+    content: '';
+    position: sticky;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    display: block;
+    height: 2em;
+    background: linear-gradient(transparent, #fafafa);
+    pointer-events: none;
+}
+
+/* Expand button in thinking header */
+.thinking-expand-btn {
+    margin-left: auto;
+    padding: 4px 10px;
+    background: transparent;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    color: #666;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.thinking-expand-btn:hover {
+    background: #f0f0f0;
+    border-color: #ccc;
+    color: #333;
 }
 
 .thinking-content p {
