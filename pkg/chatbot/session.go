@@ -81,7 +81,10 @@ func InitChatSession(ctx context.Context, cfg *config.Config, chatName string, s
 	}
 
 	var tools []tool.BaseTool
-	systemPrompt := preset.System
+	systemPrompt, err := config.ResolveSystemPrompt(cfg, preset.System)
+	if err != nil {
+		return nil, err
+	}
 
 	// builtin tools
 	for _, builtinTool := range preset.Tools {

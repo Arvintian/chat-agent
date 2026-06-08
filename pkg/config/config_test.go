@@ -32,6 +32,7 @@ func TestSnakeToCamel(t *testing.T) {
 		{"no_concurrent", "noConcurrent"},
 		{"no_concurrent_tools", "noConcurrentTools"},
 		{"lowercase_tools", "lowercaseTools"},
+		{"system_prompts", "systemPrompts"},
 		{"alreadyCamelCase", "alreadyCamelCase"},
 	}
 
@@ -157,6 +158,7 @@ models:
 chats:
   default:
     model: gpt4
+    system: general
     mcpServers:
       - myserver
 mcpServers:
@@ -167,6 +169,8 @@ mcpServers:
     noConcurrentTools:
       - search
     lowercaseTools: true
+systemPrompts:
+  general: "You are a helpful assistant."
 `
 	if err := os.WriteFile(path, []byte(data), 0644); err != nil {
 		t.Fatal(err)
@@ -193,6 +197,12 @@ mcpServers:
 	if !cfg.MCPServers["myserver"].LowercaseTools {
 		t.Errorf("LowercaseTools = %v", cfg.MCPServers["myserver"].LowercaseTools)
 	}
+	if cfg.Chats["default"].System != "general" {
+		t.Errorf("System = %q, want %q", cfg.Chats["default"].System, "general")
+	}
+	if cfg.SystemPrompts["general"] != "You are a helpful assistant." {
+		t.Errorf("SystemPrompts[general] = %q", cfg.SystemPrompts["general"])
+	}
 }
 
 func TestLoadConfigSnakeCaseCompat(t *testing.T) {
@@ -214,6 +224,7 @@ models:
 chats:
   default:
     model: gpt4
+    system: general
     mcp_servers:
       - myserver
     max_message_rounds: 10
@@ -229,6 +240,8 @@ mcp_servers:
       - search
       - fetch
     lowercase_tools: true
+system_prompts:
+  general: "You are a helpful assistant."
 `
 	if err := os.WriteFile(path, []byte(data), 0644); err != nil {
 		t.Fatal(err)
@@ -251,6 +264,9 @@ mcp_servers:
 	}
 	if _, ok := cfg.MCPServers["myserver"]; !ok {
 		t.Error("mcp_servers.myserver not parsed")
+	}
+	if _, ok := cfg.SystemPrompts["general"]; !ok {
+		t.Error("system_prompts.general not parsed")
 	}
 
 	// Check provider fields
@@ -296,6 +312,12 @@ mcp_servers:
 	if !cfg.MCPServers["myserver"].LowercaseTools {
 		t.Errorf("LowercaseTools = %v", cfg.MCPServers["myserver"].LowercaseTools)
 	}
+	if cfg.Chats["default"].System != "general" {
+		t.Errorf("System = %q, want %q", cfg.Chats["default"].System, "general")
+	}
+	if cfg.SystemPrompts["general"] != "You are a helpful assistant." {
+		t.Errorf("SystemPrompts[general] = %q", cfg.SystemPrompts["general"])
+	}
 }
 
 func TestLoadConfigMixedCase(t *testing.T) {
@@ -317,6 +339,7 @@ models:
 chats:
   default:
     model: gpt4
+    system: general
     max_message_rounds: 5
     maxRetries: 2
 mcp_servers:
@@ -327,6 +350,8 @@ mcp_servers:
     noConcurrentTools:
       - search
     lowercase_tools: true
+system_prompts:
+  general: "You are a helpful assistant."
 `
 	if err := os.WriteFile(path, []byte(data), 0644); err != nil {
 		t.Fatal(err)
@@ -335,6 +360,10 @@ mcp_servers:
 	cfg, err := LoadConfig(path)
 	if err != nil {
 		t.Fatalf("LoadConfig with mixed case failed: %v", err)
+	}
+
+	if _, ok := cfg.SystemPrompts["general"]; !ok {
+		t.Error("system_prompts.general not parsed")
 	}
 
 	if cfg.Providers["openai"].BaseURL != "https://api.openai.com" {
@@ -365,6 +394,12 @@ mcp_servers:
 	if !cfg.MCPServers["myserver"].LowercaseTools {
 		t.Errorf("LowercaseTools = %v", cfg.MCPServers["myserver"].LowercaseTools)
 	}
+	if cfg.Chats["default"].System != "general" {
+		t.Errorf("System = %q, want %q", cfg.Chats["default"].System, "general")
+	}
+	if cfg.SystemPrompts["general"] != "You are a helpful assistant." {
+		t.Errorf("SystemPrompts[general] = %q", cfg.SystemPrompts["general"])
+	}
 }
 
 func TestLoadConfigMissingFile(t *testing.T) {
@@ -389,5 +424,80 @@ func TestGetConfig(t *testing.T) {
 	globalConfig = testCfg
 	if GetConfig() != testCfg {
 		t.Error("expected same config pointer")
+	}
+}
+
+func TestResolveSystemPrompt(t *testing.T) {
+	cfg := &Config{
+		SystemPrompts: map[string]string{
+			"general": "You are a helpful assistant.",
+			"coder":   "You are an expert programmer.",
+		},
+	}
+
+	tests := []struct {
+		name     string
+		prompt   string
+		expected string
+		wantErr  bool
+	}{
+		{
+			name:     "literal prompt",
+			prompt:   "You are a custom assistant.",
+			expected: "You are a custom assistant.",
+		},
+		{
+			name:     "reference to systemPrompts key",
+			prompt:   "general",
+			expected: "You are a helpful assistant.",
+		},
+		{
+			name:     "reference to another key",
+			prompt:   "coder",
+			expected: "You are an expert programmer.",
+		},
+		{
+			name:     "empty prompt",
+			prompt:   "",
+			expected: "",
+		},
+		{
+			name:    "file reference - nonexistent",
+			prompt:  "@file:/nonexistent/path.txt",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ResolveSystemPrompt(cfg, tt.prompt)
+			if tt.wantErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.expected {
+				t.Errorf("ResolveSystemPrompt() = %q, want %q", got, tt.expected)
+			}
+		})
+	}
+
+	// Test @file: with a real file
+	tmp := t.TempDir()
+	filePath := tmp + "/prompt.txt"
+	content := "Hello from file!"
+	if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ResolveSystemPrompt(cfg, "@file:"+filePath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != content {
+		t.Errorf("ResolveSystemPrompt(@file:) = %q, want %q", got, content)
 	}
 }

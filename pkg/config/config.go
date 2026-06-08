@@ -13,11 +13,12 @@ var globalConfig *Config
 
 // Config represents the configuration for Eino CLI
 type Config struct {
-	Chats      map[string]Chat      `yaml:"chats,omitempty"`
-	Providers  map[string]Provider  `yaml:"providers,omitempty"`
-	Models     map[string]Model     `yaml:"models,omitempty"`
-	MCPServers map[string]MCPServer `yaml:"mcpServers,omitempty"`
-	Tools      map[string]Tool      `yaml:"tools,omitempty"`
+	Chats         map[string]Chat      `yaml:"chats,omitempty"`
+	Providers     map[string]Provider  `yaml:"providers,omitempty"`
+	Models        map[string]Model     `yaml:"models,omitempty"`
+	MCPServers    map[string]MCPServer `yaml:"mcpServers,omitempty"`
+	Tools         map[string]Tool      `yaml:"tools,omitempty"`
+	SystemPrompts map[string]string    `yaml:"systemPrompts,omitempty"`
 }
 
 // UnmarshalYAML implements custom YAML unmarshaling for backward compatibility.
@@ -153,6 +154,26 @@ func LoadConfig(configPath string) (*Config, error) {
 // GetConfig gets global configuration
 func GetConfig() *Config {
 	return globalConfig
+}
+
+// ResolveSystemPrompt resolves a system prompt reference. If the prompt starts
+// with "@file:", the remainder is treated as a file path and its contents are
+// returned. If the prompt matches a key in the top-level systemPrompts map,
+// the referenced value is returned. Otherwise the prompt string is returned as-is.
+func ResolveSystemPrompt(cfg *Config, prompt string) (string, error) {
+	const filePrefix = "@file:"
+	if strings.HasPrefix(prompt, filePrefix) {
+		filePath := strings.TrimSpace(prompt[len(filePrefix):])
+		data, err := os.ReadFile(filePath)
+		if err != nil {
+			return "", fmt.Errorf("failed to read system prompt file %s: %w", filePath, err)
+		}
+		return string(data), nil
+	}
+	if ref, ok := cfg.SystemPrompts[prompt]; ok {
+		return ref, nil
+	}
+	return prompt, nil
 }
 
 // normalizeNodeKeys recursively normalizes mapping node keys from snake_case to camelCase.
