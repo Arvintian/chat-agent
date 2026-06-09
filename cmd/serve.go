@@ -107,6 +107,33 @@ func parseBasicAuth(raw string) map[string]string {
 	return credentials
 }
 
+// parseBasicAuthFile reads a file containing "user:password" pairs (one per line)
+// and returns them as a credentials map. Empty lines and lines starting with "#" are skipped.
+func parseBasicAuthFile(path string) (map[string]string, error) {
+	credentials := make(map[string]string)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read basic auth file %s: %w", path, err)
+	}
+	for lineNum, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		parts := strings.SplitN(line, ":", 2)
+		if len(parts) != 2 {
+			log.Printf("Warning: skipping malformed line %d in %s: %s", lineNum+1, path, line)
+			continue
+		}
+		user := strings.TrimSpace(parts[0])
+		pass := strings.TrimSpace(parts[1])
+		if user != "" {
+			credentials[user] = pass
+		}
+	}
+	return credentials, nil
+}
+
 // serveCmd represents the serve command
 var serveCmd = &cobra.Command{
 	Use:   "serve",
@@ -117,7 +144,8 @@ Each client connection can select a chat and start independent conversation sess
 
 Examples:
   chat-agent serve --port 8080
-  chat-agent serve --port 8080 --basic-auth "alice:pwd1,bob:pwd2"`,
+  chat-agent serve --port 8080 --basic-auth "alice:pwd1,bob:pwd2"
+  chat-agent serve --port 8080 --basic-auth-file /etc/chat-agent/users`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := logger.Init(); err != nil {
 			return err
@@ -131,10 +159,26 @@ Examples:
 		host, _ := cmd.Flags().GetString("host")
 		welcome, _ := cmd.Flags().GetString("welcome")
 		basicAuth, _ := cmd.Flags().GetString("basic-auth")
+		basicAuthFile, _ := cmd.Flags().GetString("basic-auth-file")
+
+		// Merge credentials: start with file-based, then overlay inline (inline takes precedence)
+		credentials := make(map[string]string)
+		if basicAuthFile != "" {
+			fileCreds, err := parseBasicAuthFile(basicAuthFile)
+			if err != nil {
+				return err
+			}
+			for u, p := range fileCreds {
+				credentials[u] = p
+			}
+		}
+		for u, p := range parseBasicAuth(basicAuth) {
+			credentials[u] = p
+		}
 
 		wsHandler := NewWebSocketHandler(cfg)
 
-		authMiddleware := BasicAuthMiddleware(parseBasicAuth(basicAuth))
+		authMiddleware := BasicAuthMiddleware(credentials)
 
 		router := mux.NewRouter()
 		router.Use(authMiddleware)
@@ -944,6 +988,7 @@ func init() {
 	serveCmd.Flags().StringP("host", "", "0.0.0.0", "Host to listen on")
 	serveCmd.Flags().IntP("port", "", 8080, "Port to listen on")
 	serveCmd.Flags().StringP("basic-auth", "", "", "Basic auth credentials as comma-separated user:pass pairs (e.g., \"alice:pwd1,bob:pwd2\")")
+	serveCmd.Flags().StringP("basic-auth-file", "", "", "Path to a file containing user:password pairs (one per line, # for comments)")
 
 	RootCmd.AddCommand(serveCmd)
 }
