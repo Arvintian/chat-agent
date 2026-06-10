@@ -1,11 +1,13 @@
 package cmd
 
 import (
+	"bufio"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -26,8 +28,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// contextKey is a private type for context keys to avoid collisions.
+type contextKey string
+
+const authUserKey contextKey = "auth_user"
+
 // BasicAuthMiddleware creates a middleware for HTTP Basic Authentication.
 // It accepts a map of username->password pairs and authenticates against any of them.
+// On successful auth, the username is stored in the request context under authUserKey.
 func BasicAuthMiddleware(credentials map[string]string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -77,9 +85,70 @@ func BasicAuthMiddleware(credentials map[string]string) func(http.Handler) http.
 				return
 			}
 
-			next.ServeHTTP(w, r)
+			// Store authenticated user in context for access logging
+			ctx := context.WithValue(r.Context(), authUserKey, receivedUser)
+			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+// responseWriter wraps http.ResponseWriter to capture status code and response size.
+type responseWriter struct {
+	http.ResponseWriter
+	statusCode int
+	size       int64
+}
+
+func (rw *responseWriter) WriteHeader(code int) {
+	rw.statusCode = code
+	rw.ResponseWriter.WriteHeader(code)
+}
+
+func (rw *responseWriter) Write(b []byte) (int, error) {
+	if rw.statusCode == 0 {
+		rw.statusCode = http.StatusOK
+	}
+	n, err := rw.ResponseWriter.Write(b)
+	rw.size += int64(n)
+	return n, err
+}
+
+// Hijack implements http.Hijacker so that WebSocket upgrades work through the wrapper.
+func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if hj, ok := rw.ResponseWriter.(http.Hijacker); ok {
+		return hj.Hijack()
+	}
+	return nil, nil, fmt.Errorf("websocket: response does not implement http.Hijacker")
+}
+
+// AccessLogMiddleware logs each HTTP request in a combined-log-like format.
+// If basic auth is active, the authenticated username is included.
+func AccessLogMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		rw := &responseWriter{ResponseWriter: w, statusCode: 0}
+
+		next.ServeHTTP(rw, r)
+
+		duration := time.Since(start)
+
+		// Extract authenticated user from context (set by BasicAuthMiddleware)
+		user := "-"
+		if u, ok := r.Context().Value(authUserKey).(string); ok && u != "" {
+			user = u
+		}
+
+		log.Printf("%s - %s \"%s %s %s\" %d %d %s",
+			r.RemoteAddr,
+			user,
+			r.Method,
+			r.RequestURI,
+			r.Proto,
+			rw.statusCode,
+			rw.size,
+			duration,
+		)
+	})
 }
 
 // parseBasicAuth parses a comma-separated list of "user:pass" pairs into a map.
@@ -182,6 +251,7 @@ Examples:
 
 		router := mux.NewRouter()
 		router.Use(authMiddleware)
+		router.Use(AccessLogMiddleware)
 		router.HandleFunc("/ws", wsHandler.HandleWebSocket)
 
 		router.HandleFunc("/chats", func(w http.ResponseWriter, r *http.Request) {
