@@ -1,3 +1,18 @@
+// ============================================================
+// Pure markdown renderer for thinking content (no KaTeX, no Mermaid, no copy)
+// ============================================================
+const thinkingRenderer = new marked.Renderer();
+thinkingRenderer.link = function (href, title, text) {
+    if (typeof href === 'object') {
+        const { href: url, title: linkTitle, text: linkText } = href;
+        return '<a href="' + url + '" target="_blank" rel="noopener noreferrer"' +
+            (linkTitle ? ' title="' + linkTitle + '"' : '') + '>' + linkText + '</a>';
+    }
+    return '<a href="' + href + '" target="_blank" rel="noopener noreferrer"' +
+        (title ? ' title="' + title + '"' : '') + '>' + text + '</a>';
+};
+const thinkingMarked = new marked.Marked({ renderer: thinkingRenderer, breaks: true, gfm: true });
+
 // Configure marked.js with syntax highlighting
 const renderer = new marked.Renderer();
 
@@ -782,7 +797,7 @@ async function loadMessageHistory() {
 
 // Display stored thinking and response message
 function displayStoredThinkingAndResponse(thinkingContent, responseContent) {
-    // Display thinking message if exists
+    // Display thinking message if exists — 纯 markdown，不处理公式、不处理绘图、不处理copy
     if (thinkingContent && thinkingContent.trim()) {
         const div = document.createElement('div');
         div.className = 'message assistant thinking-message';
@@ -793,29 +808,19 @@ function displayStoredThinkingAndResponse(thinkingContent, responseContent) {
                 <button class="thinking-expand-btn" onclick="toggleThinkingExpand(this)" title="Expand thinking">Expand ▾</button>
             </div>
             <div class="thinking-content thinking-collapsed markdown-body"></div>
-            <div class="message-footer">
-                <button class="copy-btn" onclick="copyThinkingMessage(this)" title="Copy thinking content">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                    </svg>
-                    <span class="copy-text">Copy</span>
-                </button>
-            </div>
         `;
         const thinkingDiv = div.querySelector('.thinking-content');
-        // Store original markdown content for copying
+        // Store original markdown content
         thinkingDiv.dataset.originalContent = thinkingContent.trim();
         try {
-            thinkingDiv.innerHTML = marked.parse(thinkingContent.trim());
+            thinkingDiv.innerHTML = thinkingMarked.parse(thinkingContent.trim());
         } catch (e) {
             console.error('Markdown parsing error for thinking:', e);
             thinkingDiv.textContent = thinkingContent.trim();
         }
         document.getElementById('messages').appendChild(div);
         scrollThinkingContentToBottom(thinkingDiv);
-        addCopyButtonsToCodeBlocks(div);
-        renderMermaidDiagrams(div);
+        // thinking content: no code copy buttons, no mermaid rendering
     }
 
     // Display response message if exists
@@ -1877,25 +1882,7 @@ function displayChunk(content, isFirst, isLast, contentType = 'response') {
     // 检查是否是最后的 final chunk（空内容）
     if (isLast && content === '') {
         // 最终完成处理
-        if (thinkingBlock) {
-            // 为思考消息添加 footer
-            if (!thinkingBlock.querySelector('.message-footer')) {
-                const footer = document.createElement('div');
-                footer.className = 'message-footer';
-                footer.innerHTML = `
-                    <button class="copy-btn" onclick="copyThinkingMessage(this)" title="Copy thinking content">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                        </svg>
-                        <span class="copy-text">Copy</span>
-                    </button>
-                `;
-                thinkingBlock.appendChild(footer);
-            }
-            addCopyButtonsToCodeBlocks(thinkingBlock);
-            renderMermaidDiagrams(thinkingBlock);
-        }
+        // thinkingBlock: 纯 markdown，不添加 copy/footer，不处理 mermaid — nothing extra needed
 
         if (responseBlock) {
             // 为回答消息添加 footer（如果没有）
@@ -1943,7 +1930,7 @@ function displayChunk(content, isFirst, isLast, contentType = 'response') {
 
     // 处理实际内容
     if (contentType === 'thinking') {
-        // 处理思考消息
+        // 处理思考消息 — 纯 markdown，不处理公式、不处理绘图
         if (isFirst || !thinkingBlock) {
             // 创建新的思考消息块
             thinkingBlock = document.createElement('div');
@@ -1958,14 +1945,14 @@ function displayChunk(content, isFirst, isLast, contentType = 'response') {
             `;
             thinkingElement = thinkingBlock.querySelector('.thinking-content');
             currentThinkingChunk = content;
-            // Store original markdown content for copying
+            // Store original markdown content
             thinkingElement.dataset.originalContent = content;
 
             document.getElementById('messages').appendChild(thinkingBlock);
 
             if (thinkingElement) {
                 try {
-                    thinkingElement.innerHTML = marked.parse(content);
+                    thinkingElement.innerHTML = thinkingMarked.parse(content);
                 } catch (e) {
                     thinkingElement.textContent = content;
                 }
@@ -1979,7 +1966,7 @@ function displayChunk(content, isFirst, isLast, contentType = 'response') {
             thinkingElement.dataset.originalContent = currentThinkingChunk;
             if (thinkingElement) {
                 try {
-                    thinkingElement.innerHTML = marked.parse(currentThinkingChunk);
+                    thinkingElement.innerHTML = thinkingMarked.parse(currentThinkingChunk);
                 } catch (e) {
                     thinkingElement.textContent = currentThinkingChunk;
                 }
