@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Arvintian/chat-agent/pkg/config"
@@ -39,6 +40,15 @@ type WSSession struct {
 	ChatBot     *ChatBot
 	WSHandler   *WSChatHandler
 
+	// closed is set to true when the connection is closing, to prevent
+	// writes to a closed connection from in-flight goroutines.
+	closed atomic.Bool
+
+	// readTimeout is used to reset the read deadline after a successful write.
+	// This prevents SendMessage from starving SendPing to the point where
+	// ReadMessage's pongWait expires.
+	readTimeout time.Duration
+
 	// Approval state for handling authorization requests
 	approvalTimeout time.Duration
 	pendingApproval *ApprovalRequest
@@ -64,6 +74,17 @@ func NewWSSession(conn *websocket.Conn, sessionID string, cfg *config.Config) *W
 		isCancelled:     false,
 	}
 	return session
+}
+
+// MarkClosed marks the session as closed so that subsequent SendMessage/SendPing
+// calls are silently dropped instead of writing to a closed connection.
+func (s *WSSession) MarkClosed() {
+	s.closed.Store(true)
+}
+
+// IsClosed returns true if the session has been marked as closed.
+func (s *WSSession) IsClosed() bool {
+	return s.closed.Load()
 }
 
 // SetCancelled marks the session as cancelled
@@ -103,27 +124,48 @@ func (s *WSSession) SetCancelFunc(cancelFunc context.CancelFunc) {
 }
 
 func (s *WSSession) SendMessage(msgType string, content interface{}) {
+	if s.IsClosed() {
+		return
+	}
 	s.connMu.Lock()
 	defer s.connMu.Unlock()
+	// Set write deadline to prevent blocking forever on slow clients.
+	// Without this, a blocked SendMessage holds connMu, starving SendPing,
+	// which causes pongWait to expire and the connection to be closed.
+	s.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	defer s.conn.SetWriteDeadline(time.Time{})
 	data := WSMessage{Type: msgType}
 	payload, _ := json.Marshal(content)
 	data.Payload = payload
 	if err := s.conn.WriteJSON(data); err != nil {
 		log.Printf("Error sending message to session %s: %v", s.SessionID, err)
 	}
+	// Reset read deadline: a successful write proves the connection is alive,
+	// so give ReadMessage more time. This prevents SendPing starvation from
+	// causing a premature pongWait timeout.
+	if s.readTimeout > 0 {
+		s.conn.SetReadDeadline(time.Now().Add(s.readTimeout))
+	}
 }
 
 // SendPing sends a WebSocket ping frame to the client.
 // Used for keepalive to detect dead connections (e.g., mobile network loss).
 // The write deadline ensures we don't block forever if the connection is dead.
+// The deadline is cleared after the write to avoid affecting subsequent writes.
 func (s *WSSession) SendPing() {
+	if s.IsClosed() {
+		return
+	}
 	s.connMu.Lock()
 	defer s.connMu.Unlock()
 	s.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	defer s.conn.SetWriteDeadline(time.Time{}) // Clear write deadline after ping
 	if err := s.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 		log.Printf("Ping failed for session %s: %v", s.SessionID, err)
 	}
 }
+
+
 
 func (s *WSSession) SendChunk(content string, isFirst, isLast bool, contentType string) {
 	s.SendMessage("chunk", map[string]interface{}{
@@ -180,6 +222,11 @@ func (s *WSSession) HandleApprovalResponse(approvalID string, results ApprovalRe
 // SetApprovalTimeout sets the timeout for approval requests
 func (s *WSSession) SetApprovalTimeout(timeout time.Duration) {
 	s.approvalTimeout = timeout
+}
+
+// SetReadTimeout sets the read timeout used to reset the read deadline after writes.
+func (s *WSSession) SetReadTimeout(d time.Duration) {
+	s.readTimeout = d
 }
 
 // WSChatHandler implements Handler for WebSocket output

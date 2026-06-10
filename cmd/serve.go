@@ -653,10 +653,12 @@ func (h *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Reques
 		// Don't auto-restore any chat - let the client explicitly select one.
 		// This prevents conflicts when multiple tabs share a session.
 		session = chatbot.NewWSSession(conn, sessionID, h.cfg)
+		session.SetReadTimeout(pongWait)
 		log.Printf("Reconnected to existing session %s with %d chats", sessionID, len(existingSession.Chats))
 	} else {
 		// Create new session
 		session = chatbot.NewWSSession(conn, sessionID, h.cfg)
+		session.SetReadTimeout(pongWait)
 		h.sessionManager.AddSession(sessionID, "", nil)
 		log.Printf("Created new session %s", sessionID)
 	}
@@ -692,6 +694,10 @@ func (h *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Reques
 
 	// Ensure cleanup on connection close
 	defer func() {
+		// Mark session as closed first, so that any in-flight goroutines
+		// (from processMessage) stop writing to the connection.
+		session.MarkClosed()
+
 		// Mark chat inactive if this connection had one active
 		if connectionActiveChat != "" {
 			h.sessionManager.markChatInactive(sessionID, connectionActiveChat)
