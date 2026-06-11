@@ -137,25 +137,49 @@ const bracketLatexInline = {
 // marked-katex-extension's inlineKatex ($) handles standard inline math.
 marked.use({ extensions: [displayKatex, bracketLatexDisplay, bracketLatexInline] });
 
-// Initialize Mermaid
-mermaid.initialize({
-    startOnLoad: false,
-    theme: 'default',
-    securityLevel: 'loose',
-    flowchart: {
-        useMaxWidth: true,
-        htmlLabels: false,
-        curve: 'basis'
-    },
-    themeVariables: {
-        primaryColor: '#667eea',
-        primaryTextColor: '#333',
-        primaryBorderColor: '#667eea',
-        lineColor: '#666',
-        secondaryColor: '#f5f5f5',
-        tertiaryColor: '#e8f0fe'
-    }
-});
+// Mermaid is lazy-loaded on first use to avoid blocking page load.
+// The ~2MB mermaid.min.js is only fetched when a mermaid diagram is actually rendered.
+let mermaidReady = false;
+let mermaidLoadPromise = null;
+
+async function loadMermaid() {
+    if (mermaidReady) return;
+    if (mermaidLoadPromise) return mermaidLoadPromise;
+
+    mermaidLoadPromise = new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = 'vendor/mermaid/mermaid.min.js';
+        script.onload = () => {
+            mermaid.initialize({
+                startOnLoad: false,
+                theme: 'default',
+                securityLevel: 'loose',
+                flowchart: {
+                    useMaxWidth: true,
+                    htmlLabels: false,
+                    curve: 'basis'
+                },
+                themeVariables: {
+                    primaryColor: '#667eea',
+                    primaryTextColor: '#333',
+                    primaryBorderColor: '#667eea',
+                    lineColor: '#666',
+                    secondaryColor: '#f5f5f5',
+                    tertiaryColor: '#e8f0fe'
+                }
+            });
+            mermaidReady = true;
+            resolve();
+        };
+        script.onerror = () => {
+            mermaidLoadPromise = null;
+            reject(new Error('Failed to load mermaid'));
+        };
+        document.head.appendChild(script);
+    });
+
+    return mermaidLoadPromise;
+}
 
 // Custom marked.js extension for mermaid code blocks
 // Transforms ```mermaid blocks into <pre class="mermaid"> elements
@@ -183,7 +207,8 @@ const mermaidExtension = {
 
 marked.use({ extensions: [mermaidExtension] });
 
-// Helper function to render mermaid diagrams in a container element
+// Helper function to render mermaid diagrams in a container element.
+// Lazily loads mermaid.min.js on first use (~2MB, only fetched when needed).
 function renderMermaidDiagrams(container) {
     if (!container) return;
     const mermaidElements = container.querySelectorAll('pre.mermaid');
@@ -199,6 +224,7 @@ function renderMermaidDiagrams(container) {
         });
         
         try {
+            await loadMermaid(); // lazy-load mermaid on first use
             await mermaid.run({ nodes: Array.from(mermaidElements) });
             // Add export buttons after successful rendering
             mermaidElements.forEach(el => {
