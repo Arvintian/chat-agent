@@ -304,7 +304,7 @@ Examples:
 			})
 		})
 
-		router.PathPrefix("/").Handler(http.FileServer(web.GetFS()))
+		router.PathPrefix("/").Handler(web.StaticHandler())
 
 		addr := fmt.Sprintf("%s:%d", host, port)
 		log.Printf("Starting chat-agent web server on %s", addr)
