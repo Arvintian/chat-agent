@@ -2,12 +2,18 @@ GIT_VERSION = $(shell git rev-parse --short HEAD)
 VERSION = $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev-$(GIT_VERSION)")
 BUILD_TIME = $(shell date -u '+%Y-%m-%d_%H:%M:%S')
 
+.DEFAULT_GOAL := build
+
+.PHONY: vendor
+vendor:
+	@bash scripts/download-vendor.sh
+
 .PHONY: build
-build:
+build: vendor
 	CGO_ENABLED=0 go build -v --ldflags="-w -X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME)" -o dist/chat-agent main.go
 
 .PHONY: build-all
-build-all: clean
+build-all: vendor clean
 	@echo "Building for all platforms..."
 	@mkdir -p dist
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -v --ldflags="-w -X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME)" -o dist/chat-agent-linux-amd64 main.go
@@ -18,14 +24,14 @@ build-all: clean
 	@echo "Build complete. Binaries are in dist/"
 
 .PHONY: build-linux
-build-linux: clean
+build-linux: vendor clean
 	@echo "Building for Linux..."
 	@mkdir -p dist
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -v --ldflags="-w -X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME)" -o dist/chat-agent-linux-amd64 main.go
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -v --ldflags="-w -X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME)" -o dist/chat-agent-linux-arm64 main.go
 
 .PHONY: build-darwin
-build-darwin: clean
+build-darwin: vendor clean
 	@echo "Building for macOS..."
 	@mkdir -p dist
 	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -v --ldflags="-w -X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME)" -o dist/chat-agent-darwin-amd64 main.go

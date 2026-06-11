@@ -1,3 +1,4 @@
 dist/
 config.yml
 chat-agent
+pkg/web/static/vendor/
