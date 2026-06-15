@@ -70,6 +70,19 @@
             </div>
         </div>
 
+        <!-- HTML Preview Modal -->
+        <div id="html-preview-modal" class="modal" style="display: none;" onclick="hideHtmlPreview()">
+            <div class="html-preview-modal-content" onclick="event.stopPropagation();">
+                <div class="html-preview-header">
+                    <h3>🌐 HTML Preview</h3>
+                    <span class="modal-close" onclick="hideHtmlPreview()">×</span>
+                </div>
+                <div class="html-preview-body">
+                    <!-- iframe is dynamically created by previewHtml() -->
+                </div>
+            </div>
+        </div>
+
         <!-- Image Preview Modal -->
         <div id="image-preview-modal" class="modal" style="display: none;" onclick="hideImagePreview()">
             <div class="image-preview-modal-content" onclick="event.stopPropagation();">

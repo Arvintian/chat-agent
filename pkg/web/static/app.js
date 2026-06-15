@@ -213,7 +213,7 @@ function renderMermaidDiagrams(container) {
     if (!container) return;
     const mermaidElements = container.querySelectorAll('pre.mermaid');
     if (mermaidElements.length === 0) return;
-    
+
     // Use requestAnimationFrame to ensure DOM is settled
     requestAnimationFrame(async () => {
         // First, add export buttons to any already-rendered mermaid diagrams
@@ -222,7 +222,7 @@ function renderMermaidDiagrams(container) {
                 addMermaidExportButton(el);
             }
         });
-        
+
         try {
             await loadMermaid(); // lazy-load mermaid on first use
             await mermaid.run({ nodes: Array.from(mermaidElements) });
@@ -246,10 +246,10 @@ function renderMermaidDiagrams(container) {
 function addMermaidExportButton(preElement) {
     // Skip if already has export button
     if (preElement.querySelector('.mermaid-export-btn')) return;
-    
+
     const svg = preElement.querySelector('svg');
     if (!svg) return;
-    
+
     const exportBtn = document.createElement('button');
     exportBtn.className = 'mermaid-export-btn';
     exportBtn.title = 'Export as PNG';
@@ -260,12 +260,12 @@ function addMermaidExportButton(preElement) {
             <line x1="12" y1="15" x2="12" y2="3"></line>
         </svg>
     `;
-    exportBtn.onclick = function(e) {
+    exportBtn.onclick = function (e) {
         e.stopPropagation();
         e.preventDefault();
         exportMermaidToPNG(preElement);
     };
-    
+
     preElement.style.position = 'relative';
     preElement.appendChild(exportBtn);
 }
@@ -277,11 +277,11 @@ function exportMermaidToPNG(preElement) {
         showToast('No diagram to export', true);
         return;
     }
-    
+
     try {
         // Clone the SVG to avoid modifying the displayed one
         const svgClone = svg.cloneNode(true);
-        
+
         // Get SVG dimensions - prefer viewBox for accurate sizing
         const viewBox = svg.viewBox?.baseVal;
         let width, height;
@@ -293,12 +293,12 @@ function exportMermaidToPNG(preElement) {
             width = svgRect.width || svg.getAttribute('width') || 800;
             height = svgRect.height || svg.getAttribute('height') || 600;
         }
-        
+
         // Set explicit dimensions and viewBox on clone for canvas rendering
         svgClone.setAttribute('width', width);
         svgClone.setAttribute('height', height);
         svgClone.setAttribute('viewBox', `0 0 ${width} ${height}`);
-        
+
         // Ensure text elements have explicit fill color for proper canvas rendering
         const textElements = svgClone.querySelectorAll('text');
         textElements.forEach(el => {
@@ -306,18 +306,18 @@ function exportMermaidToPNG(preElement) {
                 el.setAttribute('fill', '#333');
             }
         });
-        
+
         // Serialize SVG to string
         const serializer = new XMLSerializer();
         let svgString = serializer.serializeToString(svgClone);
-        
+
         // Prepend XML declaration for proper encoding
         svgString = '<?xml version="1.0" encoding="UTF-8"?>\n' + svgString;
-        
+
         // Encode SVG string to base64 data URI to avoid tainted canvas issues
         const svgBase64 = btoa(unescape(encodeURIComponent(svgString)));
         const dataUri = 'data:image/svg+xml;base64,' + svgBase64;
-        
+
         // Create canvas and draw
         const canvas = document.createElement('canvas');
         const scale = 2; // 2x for retina quality
@@ -325,19 +325,19 @@ function exportMermaidToPNG(preElement) {
         canvas.height = height * scale;
         const ctx = canvas.getContext('2d');
         ctx.scale(scale, scale);
-        
+
         // Set white background
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(0, 0, width, height);
-        
+
         const img = new Image();
         // Set crossOrigin to anonymous to avoid tainting
         img.crossOrigin = 'anonymous';
-        img.onload = function() {
+        img.onload = function () {
             ctx.drawImage(img, 0, 0, width, height);
-            
+
             // Trigger download
-            canvas.toBlob(function(blob) {
+            canvas.toBlob(function (blob) {
                 const downloadUrl = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = downloadUrl;
@@ -349,7 +349,7 @@ function exportMermaidToPNG(preElement) {
                 showToast('Diagram exported as PNG', false);
             }, 'image/png');
         };
-        img.onerror = function() {
+        img.onerror = function () {
             showToast('Failed to export diagram', true);
         };
         img.src = dataUri;
@@ -528,10 +528,10 @@ async function init() {
     try {
         // Load session ID for passing to /chats endpoint
         const currentSessionId = loadSessionId();
-        const chatsUrl = currentSessionId 
+        const chatsUrl = currentSessionId
             ? '/chats?session_id=' + encodeURIComponent(currentSessionId)
             : '/chats';
-        
+
         const response = await fetch(chatsUrl);
         const data = await response.json();
         const select = document.getElementById('chat-select');
@@ -546,7 +546,7 @@ async function init() {
 
         // Determine which chat to auto-select
         let chatToSelect = null;
-        
+
         // Priority 1: Per-tab chat from sessionStorage (survives refresh)
         // This keeps the tab stable when refreshing while multiple tabs are open
         const tabChat = loadTabChat();
@@ -560,7 +560,7 @@ async function init() {
                 console.log('Tab chat is already active in another tab, skipping:', tabChat);
             }
         }
-        
+
         // Priority 2: Last used chat from localStorage (for new tabs/windows)
         // BUT skip if it's already active in another tab
         if (!chatToSelect) {
@@ -580,7 +580,7 @@ async function init() {
             const chatName = chatInfo.name;
             const option = document.createElement('option');
             option.value = chatName;
-            
+
             // If chat is already active in another tab, disable it and add indicator
             if (activeChats[chatName]) {
                 option.textContent = '🔒 ' + chatName + ' (已在其他标签页打开)';
@@ -621,7 +621,7 @@ async function init() {
             startChat();
             isAutoStarting = false;
         }
-        
+
         // Mark initial load as complete (subsequent backToChatSelection won't auto-start)
         isInitialPageLoad = false;
     } catch (e) {
@@ -637,21 +637,21 @@ async function startChat() {
     }
     currentChat = chatName;
     window.MessageHistory.setCurrentChat(chatName);
-    
+
     // Always save per-tab chat (sessionStorage) for refresh stability
     saveTabChat(chatName);
-    
+
     // Only save last used chat (localStorage) on explicit user selection, not auto-start
     if (!isAutoStarting) {
         saveLastChat(chatName);
     }
-    
+
     // Update document title to reflect current chat name
     document.title = chatName;
-    
+
     document.getElementById('login-header').textContent = chatName;
     document.getElementById('login-panel').style.display = 'none';
-    
+
     // Ensure chat-panel has correct height before displaying (fixes PWA input-area hidden issue)
     const chatPanel = document.getElementById('chat-panel');
     if (chatPanel) {
@@ -659,7 +659,7 @@ async function startChat() {
         chatPanel.style.height = vh + 'px';
     }
     document.getElementById('chat-panel').style.display = 'flex';
-    
+
     // Update agent header with chat name
     const agentHeader = document.getElementById('agent-header');
     const chatNameText = agentHeader.querySelector('.chat-name-text');
@@ -714,7 +714,7 @@ function backToChatSelection() {
 
     // Clear current chat state (but keep session ID and WebSocket connection)
     currentChat = null;
-    
+
     // Clear per-tab chat so next refresh shows selection page
     saveTabChat(null);
 
@@ -747,7 +747,7 @@ function backToChatSelection() {
     }
     document.title = appTitle;
     document.getElementById('login-header').textContent = '🤖 ' + appTitle;
-    
+
     // Reset agent header to default
     const chatNameText = agentHeaderEl ? agentHeaderEl.querySelector('.chat-name-text') : null;
     if (chatNameText) {
@@ -1472,7 +1472,7 @@ function sendMessage() {
 
     // Save last user message for regenerate
     lastUserMessage = message;
-    lastUserFiles = window.FileUploadHandler.getPendingFiles().length > 0 
+    lastUserFiles = window.FileUploadHandler.getPendingFiles().length > 0
         ? window.FileUploadHandler.getPendingFiles().map(file => ({
             url: file.url,
             type: file.type,
@@ -1533,18 +1533,18 @@ function updateSendButton() {
 // Add regenerate button to a user message element (near the copy button)
 function addRegenerateButton(messageElement) {
     if (!messageElement) return;
-    
+
     // Don't add if already has a regenerate button
     if (messageElement.querySelector('.regen-btn')) return;
-    
+
     // Only add if we have a valid last message
     const hasMessage = lastUserMessage && lastUserMessage.trim() !== '';
     const hasFiles = lastUserFiles && lastUserFiles.length > 0;
     if (!hasMessage && !hasFiles) return;
-    
+
     const footer = messageElement.querySelector('.message-footer');
     if (!footer) return;
-    
+
     const regenBtn = document.createElement('button');
     regenBtn.className = 'copy-btn regen-btn';
     regenBtn.title = 'Regenerate response';
@@ -1555,7 +1555,7 @@ function addRegenerateButton(messageElement) {
         </svg>
         <span class="copy-text">Redo</span>
     `;
-    regenBtn.onclick = function(e) {
+    regenBtn.onclick = function (e) {
         e.stopPropagation();
         regenerate();
     };
@@ -2078,7 +2078,7 @@ function copyUserMessage(btn) {
     const contentDiv = messageDiv.querySelector('.message-content');
     // 用户消息包含文本和图片/文件，我们需要提取所有可复制的内容
     let textToCopy = '';
-    
+
     // 获取文本内容
     const textDiv = contentDiv.querySelector('div[style*="white-space: pre-wrap"]');
     if (textDiv && textDiv.textContent) {
@@ -2118,7 +2118,7 @@ function toggleThinkingExpand(btn) {
     const thinkingBlock = btn.closest('.thinking-message');
     const contentDiv = thinkingBlock.querySelector('.thinking-content');
     const isCollapsed = contentDiv.classList.contains('thinking-collapsed');
-    
+
     if (isCollapsed) {
         // Expand: remove collapsed class, page height grows naturally
         contentDiv.classList.remove('thinking-collapsed');
@@ -2131,7 +2131,7 @@ function toggleThinkingExpand(btn) {
         btn.title = 'Expand thinking';
         scrollThinkingContentToBottom(contentDiv);
     }
-    
+
     // Let layout settle, then smart-scroll to maintain correct position
     requestAnimationFrame(() => {
         smartScrollToBottom();
@@ -2202,6 +2202,30 @@ function addCopyButtonsToCodeBlocks(messageDiv) {
         const codeElement = pre.querySelector('code');
         const codeText = codeElement ? codeElement.innerText : pre.innerText;
 
+        // 检查是否为 HTML 代码块
+        const isHtml = isHtmlCodeBlock(codeElement);
+
+        // 创建 HTML 预览按钮（仅对 HTML 代码块显示）
+        if (isHtml) {
+            const previewBtn = document.createElement('button');
+            previewBtn.className = 'code-preview-btn';
+            previewBtn.innerHTML = `
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="15 3 21 3 21 9"></polyline>
+                    <polyline points="9 21 3 21 3 15"></polyline>
+                    <line x1="21" y1="3" x2="14" y2="10"></line>
+                    <line x1="3" y1="21" x2="10" y2="14"></line>
+                </svg>
+            `;
+            previewBtn.title = 'Preview HTML';
+            previewBtn.onclick = function (e) {
+                e.stopPropagation();
+                previewHtml(codeText);
+            };
+            pre.style.position = 'relative';
+            pre.appendChild(previewBtn);
+        }
+
         // 创建复制按钮
         const copyBtn = document.createElement('button');
         copyBtn.className = 'code-copy-btn';
@@ -2212,17 +2236,87 @@ function addCopyButtonsToCodeBlocks(messageDiv) {
             </svg>
         `;
         copyBtn.title = 'Copy code';
-
         // 添加点击事件
         copyBtn.onclick = function (e) {
             e.stopPropagation();
             copyCodeBlock(this, codeText);
         };
 
-        // 将按钮添加到 pre 元素
         pre.style.position = 'relative';
         pre.appendChild(copyBtn);
     });
+}
+
+// 检测代码块是否为 HTML
+function isHtmlCodeBlock(codeElement) {
+    if (!codeElement) return false;
+    // Check class list for language-html, language-xml, or language-htm
+    const classList = codeElement.classList;
+    for (let i = 0; i < classList.length; i++) {
+        const cls = classList[i];
+        if (cls === 'language-html' || cls === 'language-xml' || cls === 'language-htm') {
+            return true;
+        }
+    }
+    // Also check if the code looks like HTML content
+    const text = codeElement.innerText.trim();
+    if (text.length > 0) {
+        // Heuristic: starts with common HTML patterns
+        const firstChars = text.substring(0, 100).trim();
+        if (/^<!DOCTYPE\s+html/i.test(firstChars) ||
+            /^<html[\s>]/i.test(firstChars) ||
+            /^<(head|body|div|span|p|a|table|ul|ol|li|form|input|button|section|header|footer|nav|main|article|aside|style|script|link|meta|title|h[1-6])[\s>]/i.test(firstChars) ||
+            /^<!--/.test(firstChars)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// 预览 HTML 代码（iframe 弹框内预览）
+function previewHtml(htmlCode) {
+    const modal = document.getElementById('html-preview-modal');
+    const body = modal ? modal.querySelector('.html-preview-body') : null;
+    if (!modal || !body) return;
+
+    // 先清理旧 iframe 和 blob URL
+    hideHtmlPreview();
+
+    // 通过 Blob URL 加载 HTML 内容（替代 srcdoc，避免白屏）
+    // Blob URL 是临时的内存文件，sandbox 确保隔离
+    const blob = new Blob([htmlCode], { type: 'text/html' });
+    const blobUrl = URL.createObjectURL(blob);
+
+    const iframe = document.createElement('iframe');
+    iframe.id = 'html-preview-frame';
+    iframe.setAttribute('sandbox', 'allow-scripts');
+    iframe.style.cssText = 'width: 100%; height: 100%; border: none; border-radius: 0 0 12px 12px;';
+    iframe.src = blobUrl;
+    // 存储 blob URL 以便关闭时释放
+    iframe.dataset.blobUrl = blobUrl;
+    body.appendChild(iframe);
+
+    modal.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+}
+
+// 隐藏 HTML 预览弹框
+function hideHtmlPreview() {
+    const modal = document.getElementById('html-preview-modal');
+    if (!modal) return;
+
+    modal.style.display = 'none';
+    document.body.style.overflow = '';
+
+    // 移除旧 iframe，释放 blob URL 和内存
+    const iframe = document.getElementById('html-preview-frame');
+    if (iframe) {
+        if (iframe.dataset.blobUrl) {
+            URL.revokeObjectURL(iframe.dataset.blobUrl);
+        }
+        iframe.remove();
+    }
+
 }
 
 // 复制代码块内容
@@ -2583,7 +2677,7 @@ if (messageInput) {
     const messagesEl = document.getElementById('messages');
     if (!messagesEl) return;
 
-    messagesEl.addEventListener('touchstart', function(e) {
+    messagesEl.addEventListener('touchstart', function (e) {
         // Only handle single-finger taps
         if (e.touches.length !== 1) return;
         const touch = e.touches[0];
@@ -2592,7 +2686,7 @@ if (messageInput) {
         touchHasMoved = false;
     }, { passive: true });
 
-    messagesEl.addEventListener('touchmove', function(e) {
+    messagesEl.addEventListener('touchmove', function (e) {
         if (touchHasMoved) return;
         const touch = e.touches[0];
         const dx = Math.abs(touch.clientX - touchStartX);
@@ -2602,7 +2696,7 @@ if (messageInput) {
         }
     }, { passive: true });
 
-    messagesEl.addEventListener('touchend', function(e) {
+    messagesEl.addEventListener('touchend', function (e) {
         // Only on mobile devices
         if (!isMobileDevice()) return;
 
