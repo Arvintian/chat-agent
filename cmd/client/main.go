@@ -79,7 +79,7 @@ func (h *handler) OnSessionInit(_ *serve.SessionInitPayload) {
 
 func (h *handler) OnChatSelected(payload *serve.ChatSelectedPayload) {
 	if payload.MessageCount > 0 {
-		fmt.Printf("[Context restored from previous session: %d messages]\n", payload.MessageCount)
+		h.rawLine(fmt.Sprintf("[Context restored from previous session: %d messages]", payload.MessageCount))
 	}
 }
 
@@ -90,7 +90,7 @@ func (h *handler) OnChunk(payload *serve.ChunkPayload) {
 	defer h.mu.Unlock()
 
 	// Handle content type transitions (thinking → response)
-	if payload.ContentType != h.lastContentType && h.lastContentType != "" {
+	if payload.ContentType != h.lastContentType && h.lastContentType != "" && len(h.lastContent) > 0 {
 		if !strings.HasSuffix(h.lastContent, "\n") {
 			fmt.Println()
 		}
@@ -117,7 +117,7 @@ func (h *handler) OnChunk(payload *serve.ChunkPayload) {
 	}
 
 	if payload.Last {
-		if !strings.HasSuffix(h.lastContent, "\n") {
+		if len(h.lastContent) > 0 && !strings.HasSuffix(h.lastContent, "\n") {
 			fmt.Println()
 		}
 		h.lastContentType = ""
@@ -129,6 +129,8 @@ func (h *handler) OnChunk(payload *serve.ChunkPayload) {
 }
 
 func (h *handler) OnToolCall(payload *serve.ToolCallPayload) {
+	h.resetChunk()
+
 	h.mu.Lock()
 	// Accumulate incremental arguments for streaming tool calls
 	if payload.Streaming {
@@ -187,8 +189,8 @@ func (h *handler) OnToolCall(payload *serve.ToolCallPayload) {
 				args := h.streamingToolArgs[idx]
 				// Truncate the complete accumulated line
 				line, _ := chatbot.TruncateToTermWidth(fmt.Sprintf("ToolCall: (%s) %s", name, args))
-				lines = append(lines, "---")
 				lines = append(lines, line)
+				lines = append(lines, "---")
 			}
 			return lines
 		})
@@ -263,25 +265,25 @@ func (h *handler) OnStopped(_ *serve.StoppedPayload) {
 }
 
 func (h *handler) OnKept(_ *serve.KeptPayload) {
-	fmt.Println("Session keep hook executed successfully")
+	h.rawLine("Session keep hook executed successfully")
 	h.signalDone()
 }
 
 func (h *handler) OnCleared(_ *serve.ClearedPayload) {
-	fmt.Println("The conversation context is cleared")
+	h.rawLine("The conversation context is cleared")
 	h.signalDone()
 }
 
 func (h *handler) OnDisconnected(err error) {
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "[Disconnected] %v\n", err)
+		h.rawLine(fmt.Sprintf("[Disconnected] %v", err))
 	} else {
-		fmt.Fprintf(os.Stderr, "[Disconnected]\n")
+		h.rawLine("[Disconnected]")
 	}
 }
 
 func (h *handler) OnReconnected() {
-	fmt.Fprintf(os.Stderr, "[Reconnected]\n")
+	h.rawLine("[Reconnected]")
 	h.cli.SelectChat(h.chatName)
 }
 
@@ -326,6 +328,18 @@ func (h *handler) resetLiveTerm() {
 	h.activeToolIndices = nil
 	h.streamingToolArgs = make(map[string]string)
 	h.streamingToolNames = make(map[string]string)
+}
+
+func (h *handler) resetChunk() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.lastContentType = ""
+	h.lastContent = ""
+}
+
+func (h *handler) rawLine(line string) {
+	fmt.Print("\r\033[K")
+	fmt.Println(line)
 }
 
 func parseBasicAuth(raw string) (user, pass string) {
@@ -388,7 +402,7 @@ Examples:
 		h.chatName = chatName
 		client.SetEventHandler(h)
 
-		fmt.Printf("Connecting to %s ...\n", serverURL)
+		fmt.Printf("Connecting to %s\n", serverURL)
 		if err := client.Connect(); err != nil {
 			return fmt.Errorf("connect failed: %w", err)
 		}
@@ -397,6 +411,15 @@ Examples:
 		// Select the chat
 		if err := client.SelectChat(chatName); err != nil {
 			return fmt.Errorf("select chat failed: %w", err)
+		}
+
+		fmt.Printf("Connected to chat: %s\n", chatName)
+
+		for {
+			<-time.After(100 * time.Millisecond)
+			if client.IsConnected() {
+				break
+			}
 		}
 
 		// Initialize readline
@@ -425,8 +448,6 @@ Examples:
 				client.Stop()
 			}
 		}()
-
-		fmt.Printf("Connected to chat: %s\n", chatName)
 
 		var multiline bool
 		var sb strings.Builder
