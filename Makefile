@@ -9,7 +9,7 @@ vendor:
 	@bash scripts/download-vendor.sh
 
 .PHONY: build
-build: vendor
+build: vendor build-client
 	CGO_ENABLED=0 go build -v --ldflags="-w -X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME)" -o dist/chat-agent main.go
 
 .PHONY: build-all
@@ -50,6 +50,10 @@ release: build-all
 .PHONY: clean
 clean:
 	rm -rf dist
+
+.PHONY: build-client
+build-client:
+	CGO_ENABLED=0 go build -v --ldflags="-w -X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME)" -o dist/chat-agent-client ./cmd/client
 
 .PHONY: test
 test:
