@@ -28,6 +28,8 @@ var (
 
 // handler implements serve.EventHandler to display server events on the terminal.
 type handler struct {
+	cli                *serve.Client
+	chatName           string
 	mu                 sync.Mutex
 	thinking           bool
 	thinkingHeader     bool // whether the "Thinking:" header has been printed
@@ -280,6 +282,7 @@ func (h *handler) OnDisconnected(err error) {
 
 func (h *handler) OnReconnected() {
 	fmt.Fprintf(os.Stderr, "[Reconnected]\n")
+	h.cli.SelectChat(h.chatName)
 }
 
 // isAwaitingApproval returns true if we're waiting for an approval response.
@@ -381,6 +384,8 @@ Examples:
 		}
 
 		client := serve.NewClient(serverURL, opts...)
+		h.cli = client
+		h.chatName = chatName
 		client.SetEventHandler(h)
 
 		fmt.Printf("Connecting to %s ...\n", serverURL)
