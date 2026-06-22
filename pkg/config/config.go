@@ -79,8 +79,9 @@ type Provider struct {
 	APIKey  string `yaml:"apiKey,omitempty"`
 }
 
-// Model represents AI model configuration
-type Model struct {
+// ModelParams holds the common parameters for a model configuration.
+// It is used both as the top-level Model and as entries inside Mixed.
+type ModelParams struct {
 	Provider        string         `yaml:"provider"`
 	Model           string         `yaml:"model"`
 	Thinking        bool           `yaml:"thinking"`
@@ -90,6 +91,17 @@ type Model struct {
 	TopP            float64        `yaml:"topP,omitempty"`
 	TopK            int            `yaml:"topK,omitempty"`
 	ExtraBody       map[string]any `yaml:"extraBody"`
+}
+
+// Model represents AI model configuration
+type Model struct {
+	ModelParams `yaml:",inline"`
+	Mixed       []MixedModel `yaml:"mixed,omitempty"`
+}
+
+// MixedModel represents a model entry within a mixed model configuration
+type MixedModel struct {
+	ModelParams `yaml:",inline"`
 }
 
 // MCPServer represents MCP server configuration

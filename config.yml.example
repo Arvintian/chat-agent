@@ -6,6 +6,22 @@ providers:
     apiKey: sk-secret-token
 
 # Model configuration
+# Two modes are supported:
+# 1. Single provider - specify provider, model, and optional parameters:
+#    model-name:
+#      provider: <provider-name>
+#      model: <model-id>
+#      thinking: true/false
+# 2. Mixed (round-robin) - list multiple sub-models to alternate between them
+#    on each generation call:
+#    model-name:
+#      mixed:
+#        - provider: <provider-name>
+#          model: <model-id>
+#          thinking: true/false
+#        - provider: <other-provider>
+#          model: <other-model-id>
+#          thinking: true/false
 models:
   deepseek-chat:
     provider: deepseek
@@ -15,6 +31,14 @@ models:
     provider: deepseek
     model: deepseek-reasoner
     temperature: 0.8
+  # Example of a mixed (round-robin) model:
+  # my-mixed-model:
+  #   mixed:
+  #     - provider: deepseek
+  #       model: deepseek-chat
+  #     - provider: openai
+  #       model: gpt-4o
+  #       thinking: true
 
 # Chat preset configuration
 # Available fields:
