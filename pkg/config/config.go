@@ -192,6 +192,8 @@ func ResolveSystemPrompt(cfg *Config, prompt string) (string, error) {
 
 // normalizeNodeKeys recursively normalizes mapping node keys from snake_case to camelCase.
 // This provides backward compatibility: old configs with snake_case keys still work.
+// Keys inside extraBody / extra_body values are left untouched to preserve the original
+// field names that are passed through to the model API.
 func normalizeNodeKeys(node *yaml.Node) {
 	if node == nil {
 		return
@@ -207,7 +209,13 @@ func normalizeNodeKeys(node *yaml.Node) {
 			keyNode := node.Content[i]
 			valueNode := node.Content[i+1]
 			if keyNode.Kind == yaml.ScalarNode && keyNode.Tag == "!!str" {
-				keyNode.Value = snakeToCamel(keyNode.Value)
+				newKey := snakeToCamel(keyNode.Value)
+				keyNode.Value = newKey
+				// Skip normalization for extraBody values — they are passed
+				// through to the model API and must keep their original keys.
+				if newKey == "extraBody" {
+					continue
+				}
 			}
 			normalizeNodeKeys(valueNode)
 		}

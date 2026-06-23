@@ -427,6 +427,85 @@ func TestGetConfig(t *testing.T) {
 	}
 }
 
+func TestExtraBodyKeysPreserved(t *testing.T) {
+	// Verify that keys inside extraBody are NOT converted from snake_case to camelCase.
+	tmp := t.TempDir()
+	path := tmp + "/config.yml"
+	data := `
+models:
+  gpt4:
+    provider: openai
+    model: gpt-4
+    extra_body:
+      some_snake_key: value1
+      another_key: value2
+      camelKey: value3
+`
+	if err := os.WriteFile(path, []byte(data), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+
+	extraBody := cfg.Models["gpt4"].ExtraBody
+	if extraBody == nil {
+		t.Fatal("ExtraBody should not be nil")
+	}
+
+	// Keys should be preserved as-is, not converted
+	if _, ok := extraBody["some_snake_key"]; !ok {
+		t.Error("some_snake_key should be preserved")
+	}
+	if _, ok := extraBody["someSnakeKey"]; ok {
+		t.Error("someSnakeKey should NOT exist — key was incorrectly converted")
+	}
+	if _, ok := extraBody["another_key"]; !ok {
+		t.Error("another_key should be preserved")
+	}
+	if _, ok := extraBody["anotherKey"]; ok {
+		t.Error("anotherKey should NOT exist — key was incorrectly converted")
+	}
+	if _, ok := extraBody["camelKey"]; !ok {
+		t.Error("camelKey should be preserved")
+	}
+}
+
+func TestExtraBodyMixedCase(t *testing.T) {
+	// Verify extra_body (snake_case yaml key) also works and its inner keys are preserved.
+	tmp := t.TempDir()
+	path := tmp + "/config.yml"
+	data := `
+models:
+  gpt4:
+    provider: openai
+    model: gpt-4
+    extra_body:
+      nested_snake: hello
+`
+	if err := os.WriteFile(path, []byte(data), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+
+	extraBody := cfg.Models["gpt4"].ExtraBody
+	if extraBody == nil {
+		t.Fatal("ExtraBody should not be nil")
+	}
+	if v, ok := extraBody["nested_snake"]; !ok || v != "hello" {
+		t.Errorf("nested_snake should be 'hello', got %v", v)
+	}
+	if _, ok := extraBody["nestedSnake"]; ok {
+		t.Error("nestedSnake should NOT exist")
+	}
+}
+
 func TestResolveSystemPrompt(t *testing.T) {
 	cfg := &Config{
 		SystemPrompts: map[string]string{
