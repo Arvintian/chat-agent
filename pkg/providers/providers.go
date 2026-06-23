@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"time"
 
 	"github.com/Arvintian/chat-agent/pkg/config"
 	"github.com/eino-contrib/ollama/api"
@@ -35,6 +36,18 @@ func (f *Factory) createOpenAIModel(ctx context.Context, modelCfg *config.Model,
 	}
 	if effort != "" {
 		cfg.ReasoningEffort = effort
+	}
+
+	if providerCfg.Timeout > 0 {
+		cfg.Timeout = time.Duration(providerCfg.Timeout) * time.Second
+	}
+
+	if len(providerCfg.Headers) > 0 {
+		client := newHeaderClient(providerCfg.Headers)
+		if providerCfg.Timeout > 0 {
+			client.Timeout = time.Duration(providerCfg.Timeout) * time.Second
+		}
+		cfg.HTTPClient = client
 	}
 
 	if modelCfg.MaxTokens > 0 {

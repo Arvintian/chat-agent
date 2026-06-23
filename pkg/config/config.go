@@ -74,9 +74,11 @@ type Skill struct {
 
 // Provider represents AI provider configuration
 type Provider struct {
-	Type    string `yaml:"type"`
-	BaseURL string `yaml:"baseUrl,omitempty"`
-	APIKey  string `yaml:"apiKey,omitempty"`
+	Type    string            `yaml:"type"`
+	BaseURL string            `yaml:"baseUrl,omitempty"`
+	APIKey  string            `yaml:"apiKey,omitempty"`
+	Headers map[string]string `yaml:"headers,omitempty"`
+	Timeout int               `yaml:"timeout,omitempty"` // in seconds
 }
 
 // ModelParams holds the common parameters for a model configuration.

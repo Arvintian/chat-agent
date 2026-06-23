@@ -1,9 +1,22 @@
 # Model provider configuration
+# Available fields per provider:
+#   - type: provider type (openai, deepseek, claude, gemini, qwen, qianfan, ark, ollama, openrouter)
+#   - baseUrl: API base URL
+#   - apiKey: API key for authentication
+#   - headers: custom HTTP headers to include in every request (optional)
+#   - timeout: request timeout in seconds (optional, applies to openai provider)
 providers:
   deepseek:
     type: deepseek
     baseUrl: https://api.deepseek.com
     apiKey: sk-secret-token
+  # Example with custom headers:
+  # my-openai:
+  #   type: openai
+  #   baseUrl: https://api.openai.com/v1
+  #   apiKey: sk-secret-token
+  #   headers:
+  #     X-Custom-Header: custom-value
 
 # Model configuration
 # Two modes are supported:
