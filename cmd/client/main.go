@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -424,11 +425,16 @@ Examples:
 
 		// Initialize readline
 		placeholder := "Send a message (/h for help)"
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return err
+		}
+		historyPath := filepath.Join(homeDir, ".chat-agent", "client-history")
 		scanner, err := readline.New(readline.Prompt{
 			Prompt:      ">>> ",
 			AltPrompt:   "... ",
 			Placeholder: placeholder,
-		})
+		}, readline.WithHistoryFile(historyPath))
 		if err != nil {
 			return err
 		}

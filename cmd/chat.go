@@ -123,12 +123,17 @@ var RootCmd = &cobra.Command{
 
 		// init readline
 		placeholder := "Send a message (/h for help)"
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return err
+		}
+		historyPath := filepath.Join(homeDir, ".chat-agent", "history")
 		scanner, err := readline.New(readline.Prompt{
 			Prompt:         ">>> ",
 			AltPrompt:      "... ",
 			Placeholder:    placeholder,
 			AltPlaceholder: `Use """ to end multi-line input`,
-		})
+		}, readline.WithHistoryFile(historyPath))
 		if err != nil {
 			return err
 		}

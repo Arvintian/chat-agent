@@ -3,7 +3,7 @@ module github.com/Arvintian/chat-agent
 go 1.25.5
 
 require (
-	github.com/Arvintian/readline v0.0.0-20260304114544-c7c8d2e72445
+	github.com/Arvintian/readline v0.0.0-20260623063633-dce0889be477
 	github.com/bytedance/sonic v1.15.0
 	github.com/cloudwego/eino v0.9.2
 	github.com/cloudwego/eino-ext/components/model/ark v0.1.68
