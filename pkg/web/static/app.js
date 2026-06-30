@@ -2560,8 +2560,9 @@ function handleKeyDown(e) {
         if (window.InputHistory.getHistoryIndex() !== -1) {
             window.InputHistory.resetHistoryNavigation();
         }
-        // Hide regenerate button when user starts typing new message
-        removeRegenerateFromLastMessage();
+        // Note: regenerate button will be hidden when user actually sends a new message
+        // in sendMessage(), not when they just start typing. This allows the button
+        // to persist during interaction (like when typing but not sending).
     }
 }
 
