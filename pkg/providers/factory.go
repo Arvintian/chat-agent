@@ -49,6 +49,7 @@ func (f *Factory) createMixedModel(ctx context.Context, modelCfg *config.Model) 
 	}
 
 	models := make([]model.ToolCallingChatModel, 0, len(modelCfg.Mixed))
+	weights := make([]int, 0, len(modelCfg.Mixed))
 	for i, entry := range modelCfg.Mixed {
 		providerCfg, ok := f.cfg.Providers[entry.Provider]
 		if !ok {
@@ -65,9 +66,12 @@ func (f *Factory) createMixedModel(ctx context.Context, modelCfg *config.Model) 
 			return nil, fmt.Errorf("mixed model[%d]: %w", i, err)
 		}
 		models = append(models, cm)
+
+		// Collect weight, 0 means never selected
+		weights = append(weights, entry.Weight)
 	}
 
-	return NewMixedChatModel(models), nil
+	return NewMixedChatModel(models, weights), nil
 }
 
 // createSingleModel creates a ChatModel for a single provider configuration.

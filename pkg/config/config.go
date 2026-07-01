@@ -104,6 +104,7 @@ type Model struct {
 // MixedModel represents a model entry within a mixed model configuration
 type MixedModel struct {
 	ModelParams `yaml:",inline"`
+	Weight      int `yaml:"weight,omitempty"` // weight for weighted random selection (default: 1)
 }
 
 // MCPServer represents MCP server configuration

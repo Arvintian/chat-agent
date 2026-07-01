@@ -25,15 +25,18 @@ providers:
 #      provider: <provider-name>
 #      model: <model-id>
 #      thinking: true/false
-# 2. Mixed (round-robin) - list multiple sub-models to alternate between them
-#    on each generation call:
+# 2. Mixed (weighted) - list multiple sub-models to select between them
+#    on each generation call. Supports optional weight field for weighted
+#    random selection. When weights are equal (or omitted), uses round-robin.
 #    model-name:
 #      mixed:
 #        - provider: <provider-name>
 #          model: <model-id>
+#          weight: 3  # Higher weight = more likely to be selected (default: 1, 0 = never selected)
 #          thinking: true/false
 #        - provider: <other-provider>
 #          model: <other-model-id>
+#          weight: 1
 #          thinking: true/false
 models:
   deepseek-chat:
@@ -44,13 +47,15 @@ models:
     provider: deepseek
     model: deepseek-reasoner
     temperature: 0.8
-  # Example of a mixed (round-robin) model:
+  # Example of a mixed (weighted) model:
   # my-mixed-model:
   #   mixed:
   #     - provider: deepseek
   #       model: deepseek-chat
+  #       weight: 3  # 3x more likely to be selected
   #     - provider: openai
   #       model: gpt-4o
+  #       weight: 1  # default weight when not specified
   #       thinking: true
 
 # Chat preset configuration
