@@ -40,6 +40,13 @@ func (f *StreamFilter) Finish() *string {
 	return nil
 }
 
+// TrimLeadingWhitespace strips leading whitespace characters (space, tab, newline, carriage return)
+func TrimLeadingWhitespace(s string) string {
+	return strings.TrimLeftFunc(s, func(r rune) bool {
+		return r == ' ' || r == '\t' || r == '\n' || r == '\r'
+	})
+}
+
 func TruncateToTermWidth(s string) (string, bool) {
 	width, _, err := term.GetSize(int(os.Stdout.Fd()))
 	if err != nil || width <= 0 {

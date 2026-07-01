@@ -203,7 +203,9 @@ func (cb *ChatBot) StreamChat(ctx context.Context, userInput string) error {
 		toolMap := map[int][]*schema.Message{}
 		if event.Output.MessageOutput.MessageStream != nil {
 			reasoning, firstword := false, false
-			filter := NewStreamFilter()
+			// Use separate filters for thinking and response to avoid output interleaving
+			thinkingFilter := NewStreamFilter()
+			responseFilter := NewStreamFilter()
 			finalToolMap, toolStart, toolOutput, toolMu := map[int][]*schema.Message{}, false, strings.Builder{}, sync.Mutex{}
 			for {
 				message, err := event.Output.MessageOutput.MessageStream.Recv()
@@ -283,17 +285,24 @@ func (cb *ChatBot) StreamChat(ctx context.Context, userInput string) error {
 					// Skip whitespace-only chunks at the beginning (before any meaningful content)
 					if reasoningContent.Len() > 0 || strings.TrimSpace(decodedReasoning) != "" {
 						if reasoning && reasoningContent.Len() == 0 {
-							fmt.Print("Thinking:\n")
+							// Strip leading whitespace from the first meaningful thinking chunk
+							decodedReasoning = TrimLeadingWhitespace(decodedReasoning)
+							if decodedReasoning != "" {
+								fmt.Print("Thinking:\n")
+							}
 						}
-						if out := filter.Process(decodedReasoning); out != nil {
+						if out := thinkingFilter.Process(decodedReasoning); out != nil {
 							fmt.Print(*out)
 						}
+						reasoningContent.WriteString(decodedReasoning)
 					}
 				}
-				reasoningContent.WriteString(message.ReasoningContent)
 				if message.Content != "" && reasoning && !firstword {
-					// Only print separator if we actually printed some reasoning
+					// Transition from thinking to response: flush thinking filter first, then separator
 					if reasoningContent.Len() > 0 {
+						if out := thinkingFilter.Finish(); out != nil {
+							fmt.Print(*out)
+						}
 						fmt.Print("\n---\n")
 					}
 					firstword = true
@@ -301,14 +310,23 @@ func (cb *ChatBot) StreamChat(ctx context.Context, userInput string) error {
 				if message.Content != "" {
 					// Skip whitespace-only chunks at the beginning (before any meaningful content)
 					if response.Len() > 0 || strings.TrimSpace(message.Content) != "" {
-						if out := filter.Process(message.Content); out != nil {
+						content := message.Content
+						// Strip leading whitespace from the first meaningful response chunk
+						if response.Len() == 0 {
+							content = TrimLeadingWhitespace(content)
+						}
+						if out := responseFilter.Process(content); out != nil {
 							fmt.Print(*out)
 						}
+						response.WriteString(content)
 					}
 				}
-				response.WriteString(message.Content)
 			}
-			if out := filter.Finish(); out != nil {
+			// Flush remaining buffers at end
+			if out := thinkingFilter.Finish(); out != nil {
+				fmt.Print(*out)
+			}
+			if out := responseFilter.Finish(); out != nil {
 				fmt.Print(*out)
 			}
 			if toolStart {
@@ -592,10 +610,16 @@ func (cb *ChatBot) StreamChatWithHandler(ctx context.Context, userInput string, 
 					}
 					// Skip whitespace-only chunks at the beginning (before any meaningful content)
 					if reasoningContent.Len() > 0 || strings.TrimSpace(decodedReasoning) != "" {
-						cb.handler.SendChunk(decodedReasoning, firstChunk, false, "thinking")
-						firstChunk = false
+						// Strip leading whitespace from the first meaningful thinking chunk
+						if reasoningContent.Len() == 0 {
+							decodedReasoning = TrimLeadingWhitespace(decodedReasoning)
+						}
+						if decodedReasoning != "" {
+							cb.handler.SendChunk(decodedReasoning, firstChunk, false, "thinking")
+							firstChunk = false
+						}
+						reasoningContent.WriteString(decodedReasoning)
 					}
-					reasoningContent.WriteString(message.ReasoningContent)
 				}
 
 				// Transition from thinking to response content
@@ -607,10 +631,17 @@ func (cb *ChatBot) StreamChatWithHandler(ctx context.Context, userInput string, 
 				if message.Content != "" {
 					// Skip whitespace-only chunks at the beginning (before any meaningful content)
 					if response.Len() > 0 || strings.TrimSpace(message.Content) != "" {
-						cb.handler.SendChunk(message.Content, firstChunk, false, "response")
-						firstChunk = false
+						content := message.Content
+						// Strip leading whitespace from the first meaningful response chunk
+						if response.Len() == 0 {
+							content = TrimLeadingWhitespace(content)
+						}
+						if content != "" {
+							cb.handler.SendChunk(content, firstChunk, false, "response")
+							firstChunk = false
+						}
+						response.WriteString(content)
 					}
-					response.WriteString(message.Content)
 				}
 			}
 			// Send final chunk marker to indicate stream end
