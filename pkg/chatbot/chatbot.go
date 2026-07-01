@@ -110,13 +110,17 @@ func (cb *ChatBot) SetHandler(handler Handler) {
 
 // StreamChat performs streaming chat conversation with CLI output
 func (cb *ChatBot) StreamChat(ctx context.Context, userInput string) error {
-	cb.manager.IncRound()
-
-	// Add user message to context
-	cb.manager.AddMessage(ctx, schema.UserMessage(userInput))
-
 	// Get context messages
 	messages := cb.manager.GetMessages()
+
+	cb.manager.IncRound()
+
+	userMessage := schema.UserMessage(userInput)
+
+	// Add user message to context
+	cb.manager.AddMessage(ctx, userMessage)
+
+	messages = append(messages, userMessage)
 
 	// Generate streaming response
 	streamReader := cb.runner.Run(ctx, messages, adk.WithCheckPointID("local"))
@@ -408,21 +412,27 @@ func (cb *ChatBot) StreamChatWithHandler(ctx context.Context, userInput string, 
 		return fmt.Errorf("handler not set")
 	}
 
+	// Get context messages
+	messages := cb.manager.GetMessages()
+
 	cb.manager.IncRound()
+
+	var userMessage *schema.Message
 
 	// Add user message to context (with files if present)
 	if len(files) > 0 {
 		// Create multimodal message with text and files
-		cb.manager.AddMessage(ctx, createMultimodalUserMessage(userInput, files))
+		userMessage = createMultimodalUserMessage(userInput, files)
 	} else {
-		cb.manager.AddMessage(ctx, schema.UserMessage(userInput))
+		userMessage = schema.UserMessage(userInput)
 	}
+
+	cb.manager.AddMessage(ctx, userMessage)
 
 	// Send message count update after adding user message
 	cb.handler.SendMessageCount()
 
-	// Get context messages
-	messages := cb.manager.GetMessages()
+	messages = append(messages, userMessage)
 
 	// Generate streaming response
 	streamReader := cb.runner.Run(ctx, messages, adk.WithCheckPointID("web"))
