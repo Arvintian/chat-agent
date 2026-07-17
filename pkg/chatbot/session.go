@@ -190,6 +190,16 @@ func InitChatSession(ctx context.Context, cfg *config.Config, chatName string, s
 		toolSchemas = append(toolSchemas, schema)
 	}
 
+	// Resolve InitSystem prompt if configured
+	var initSystemPrompt string
+	if preset.InitSystem != "" {
+		var err error
+		initSystemPrompt, err = config.ResolveSystemPrompt(cfg, preset.InitSystem)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	// init agent
 	maxIterations := 20
 	if preset.MaxIterations > 0 {
@@ -220,7 +230,15 @@ func InitChatSession(ctx context.Context, cfg *config.Config, chatName string, s
 				}
 			}
 			msgs := make([]adk.Message, 0, len(input.Messages)+1)
-			rendered, err := renderSystemPrompt(instruction)
+			
+			// Determine which system prompt to use based on context
+			// Use initSystemPrompt only when there is exactly one user message (first round, no context)
+			promptToUse := instruction
+			if initSystemPrompt != "" && len(inputMessages) == 1 && inputMessages[0].Role == schema.User {
+				promptToUse = initSystemPrompt
+			}
+			
+			rendered, err := renderSystemPrompt(promptToUse)
 			if err != nil {
 				return nil, err
 			}

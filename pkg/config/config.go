@@ -32,6 +32,7 @@ func (c *Config) UnmarshalYAML(value *yaml.Node) error {
 type Chat struct {
 	Desc              string        `yaml:"desc"`
 	System            string        `yaml:"system"`
+	InitSystem        string        `yaml:"initSystem,omitempty"`      // System prompt for the first round (no context)
 	Model             string        `yaml:"model"`
 	MaxMessageRounds  int           `yaml:"maxMessageRounds"`
 	FullMessageRounds int           `yaml:"fullMessageRounds,omitempty"`
