@@ -5,7 +5,7 @@ go 1.25.5
 require (
 	github.com/Arvintian/readline v0.0.0-20260623063633-dce0889be477
 	github.com/bytedance/sonic v1.15.0
-	github.com/cloudwego/eino v0.9.2
+	github.com/cloudwego/eino v0.9.12
 	github.com/cloudwego/eino-ext/components/model/ark v0.1.68
 	github.com/cloudwego/eino-ext/components/model/claude v0.1.18
 	github.com/cloudwego/eino-ext/components/model/deepseek v0.1.6

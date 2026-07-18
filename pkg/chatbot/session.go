@@ -10,6 +10,7 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/Arvintian/chat-agent/pkg/chatbot/middleware"
 	"github.com/Arvintian/chat-agent/pkg/config"
 	"github.com/Arvintian/chat-agent/pkg/hook"
 	"github.com/Arvintian/chat-agent/pkg/logger"
@@ -190,7 +191,7 @@ func InitChatSession(ctx context.Context, cfg *config.Config, chatName string, s
 		toolSchemas = append(toolSchemas, schema)
 	}
 
-	// Resolve InitSystem prompt if configured
+	// Resolve InitSystem prompt if configured (used via middleware)
 	var initSystemPrompt string
 	if preset.InitSystem != "" {
 		var err error
@@ -209,6 +210,15 @@ func InitChatSession(ctx context.Context, cfg *config.Config, chatName string, s
 	if preset.MaxRetries > 0 {
 		maxRetries = preset.MaxRetries
 	}
+
+	// Build handlers for the agent
+	var agentHandlers []adk.ChatModelAgentMiddleware
+
+	// Add initSystemPrompt middleware if an init system prompt is configured
+	if initSystemPrompt != "" {
+		agentHandlers = append(agentHandlers, middleware.NewInitSystemPrompt(initSystemPrompt, systemPrompt, renderSystemPrompt))
+	}
+
 	agentConfig := &adk.ChatModelAgentConfig{
 		Name:        chatName,
 		Description: preset.Desc,
@@ -230,15 +240,8 @@ func InitChatSession(ctx context.Context, cfg *config.Config, chatName string, s
 				}
 			}
 			msgs := make([]adk.Message, 0, len(input.Messages)+1)
-			
-			// Determine which system prompt to use based on context
-			// Use initSystemPrompt only when there is exactly one user message (first round, no context)
-			promptToUse := instruction
-			if initSystemPrompt != "" && len(inputMessages) == 1 && inputMessages[0].Role == schema.User {
-				promptToUse = initSystemPrompt
-			}
-			
-			rendered, err := renderSystemPrompt(promptToUse)
+
+			rendered, err := renderSystemPrompt(instruction)
 			if err != nil {
 				return nil, err
 			}
@@ -253,6 +256,7 @@ func InitChatSession(ctx context.Context, cfg *config.Config, chatName string, s
 			msgs = append([]adk.Message{sp}, msgs...)
 			return msgs, nil
 		},
+		Handlers: agentHandlers,
 	}
 	// Only configure tools if there are any, to avoid "no tools to bind" error
 	// from models that don't accept empty tool lists
