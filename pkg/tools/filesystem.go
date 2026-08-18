@@ -64,14 +64,16 @@ func getFileSystemTools(ctx context.Context, params map[string]interface{}) ([]t
 		if inputSchema.Properties == nil {
 			params = nil
 		}
-		tools = append(tools, &toolHelper{
-			info: &schema.ToolInfo{
-				Name:        mcpTool.Tool.Name,
-				Desc:        mcpTool.Tool.Description,
-				ParamsOneOf: params,
-			},
-			handler: mcpTool.Handler,
-		})
+		info := &schema.ToolInfo{
+			Name:        mcpTool.Tool.Name,
+			Desc:        mcpTool.Tool.Description,
+			ParamsOneOf: params,
+		}
+		if pathKeys, ok := fileWriteToolPaths[mcpTool.Tool.Name]; ok {
+			tools = append(tools, &lockedToolHelper{info: info, handler: mcpTool.Handler, pathKeys: pathKeys})
+		} else {
+			tools = append(tools, &toolHelper{info: info, handler: mcpTool.Handler})
+		}
 	}
 	return tools, nil
 }
