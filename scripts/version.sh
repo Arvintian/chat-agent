@@ -12,7 +12,7 @@ echo "=================="
 
 # Get git version
 GIT_VERSION=$(git rev-parse --short HEAD)
-GIT_TAG=$(git describe --tags --always --dirty 2>/dev/null || echo "dev-${GIT_VERSION}")
+GIT_TAG=$(git describe --tags --always --dirty 2>/dev/null | sed 's/-g\([0-9a-f]\)/-\1/' || echo "dev-${GIT_VERSION}")
 
 echo -e "Git Version: ${YELLOW}${GIT_TAG}${NC}"
 echo -e "Commit Hash: ${YELLOW}${GIT_VERSION}${NC}"

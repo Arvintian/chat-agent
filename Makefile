@@ -1,5 +1,8 @@
 GIT_VERSION = $(shell git rev-parse --short HEAD)
-VERSION = $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev-$(GIT_VERSION)")
+VERSION = $(shell git describe --tags --always --dirty 2>/dev/null | sed 's/-g\([0-9a-f]\)/-\1/')
+ifeq ($(strip $(VERSION)),)
+VERSION = dev-$(GIT_VERSION)
+endif
 BUILD_TIME = $(shell date -u '+%Y-%m-%d_%H:%M:%S')
 
 .DEFAULT_GOAL := build
