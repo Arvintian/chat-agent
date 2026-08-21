@@ -3,7 +3,7 @@ VERSION = $(shell git describe --tags --always --dirty 2>/dev/null | sed 's/-g\(
 ifeq ($(strip $(VERSION)),)
 VERSION = dev-$(GIT_VERSION)
 endif
-BUILD_TIME = $(shell date -u '+%Y-%m-%d_%H:%M:%S')
+BUILD_TIME = $(shell date -u '+%Y-%m-%d_%H:%M:%S_%Z')
 
 .DEFAULT_GOAL := build
 
