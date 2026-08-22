@@ -196,16 +196,15 @@ chats:
       
       Current working directory: {{.Cwd}}
       Today's date: {{.Date}}
-      Current time: {{.Now.Format "2006-01-02 15:04:05"}}
       
       Please help the user with tasks in the current directory.
 ```
 
 **Available template variables:**
 - `{{.Cwd}}` - Current working directory
-- `{{.Date}}` - Today's date in YYYY-MM-DD format
-- `{{.Now}}` - Current time (time.Time object, can be formatted)
-  - Example: `{{.Now.Format "2006-01-02 15:04:05"}}`
+- `{{.Date}}` - Today's date in YYYY-MM-DD format (day-level only: no finer
+  time variables are provided, since time-varying content in the system prompt
+  would invalidate provider prompt caches)
 - `{{.User}}` - Current username
 - `{{.Home}}` - User's home directory
 - `{{env "VAR_NAME"}}` - Access environment variables

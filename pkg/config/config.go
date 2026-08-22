@@ -35,7 +35,7 @@ type Chat struct {
 	InitSystem        string        `yaml:"initSystem,omitempty"`      // System prompt for the first round (no context)
 	Model             string        `yaml:"model"`
 	MaxMessageRounds  int           `yaml:"maxMessageRounds"`
-	FullMessageRounds int           `yaml:"fullMessageRounds,omitempty"`
+	ContextMode       string        `yaml:"contextMode,omitempty"` // context overflow mode: "compress" (default) or "truncate"
 	MaxIterations     int           `yaml:"maxIterations"`
 	MaxRetries        int           `yaml:"maxRetries"`
 	MCPServers        []string      `yaml:"mcpServers,omitempty"`

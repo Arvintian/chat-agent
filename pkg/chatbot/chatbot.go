@@ -82,6 +82,10 @@ type ChatBot struct {
 	handler Handler
 }
 
+// compressionHint is shown to the user right before the (blocking) history
+// compression summary call pauses the request.
+const compressionHint = "[Context is being compressed, this may take a while...]"
+
 func NewChatBot(ctx context.Context, agent *adk.ChatModelAgent, manager *manager.Manager, scanner *readline.Instance, persistence *store.PersistenceStore) ChatBot {
 	var checkPointStore compose.CheckPointStore
 	if persistence != nil {
@@ -90,7 +94,7 @@ func NewChatBot(ctx context.Context, agent *adk.ChatModelAgent, manager *manager
 		checkPointStore = store.NewInMemoryStore()
 	}
 
-	return ChatBot{
+	cb := ChatBot{
 		ctx: ctx,
 		runner: adk.NewRunner(ctx, adk.RunnerConfig{
 			Agent:           agent,
@@ -101,19 +105,37 @@ func NewChatBot(ctx context.Context, agent *adk.ChatModelAgent, manager *manager
 		manager: manager,
 		scanner: scanner,
 	}
+
+	// CLI mode (readline scanner present): print the hint on stdout before the
+	// blocking compression summary call.
+	if scanner != nil {
+		manager.SetCompressionProgressCallback(func(ctx context.Context) {
+			fmt.Println(compressionHint)
+		})
+	}
+
+	return cb
 }
 
 // SetHandler sets the output handler for the chatbot
 func (cb *ChatBot) SetHandler(handler Handler) {
 	cb.handler = handler
+	// WebSocket/handler mode: push the hint to the client before the blocking
+	// compression summary call (overrides the CLI stdout hint if both are set).
+	cb.manager.SetCompressionProgressCallback(func(ctx context.Context) {
+		handler.SendChunk(compressionHint, true, true, "system")
+	})
 }
 
 // StreamChat performs streaming chat conversation with CLI output
 func (cb *ChatBot) StreamChat(ctx context.Context, userInput string) error {
+	// Start the new round first: this is where (blocking) history compression
+	// runs, so the context snapshot taken afterwards already reflects the
+	// compressed history and this request uses it directly.
+	cb.manager.IncRound(ctx)
+
 	// Get context messages
 	messages := cb.manager.GetMessages()
-
-	cb.manager.IncRound()
 
 	userMessage := schema.UserMessage(userInput)
 
@@ -412,10 +434,13 @@ func (cb *ChatBot) StreamChatWithHandler(ctx context.Context, userInput string, 
 		return fmt.Errorf("handler not set")
 	}
 
+	// Start the new round first: this is where (blocking) history compression
+	// runs, so the context snapshot taken afterwards already reflects the
+	// compressed history and this request uses it directly.
+	cb.manager.IncRound(ctx)
+
 	// Get context messages
 	messages := cb.manager.GetMessages()
-
-	cb.manager.IncRound()
 
 	var userMessage *schema.Message
 

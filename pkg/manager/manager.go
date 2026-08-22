@@ -19,61 +19,126 @@ type PersistenceCallback func(*schema.Message) error
 // This allows the caller to persist the modified messages (full overwrite mode)
 type CompressionCompleteCallback func([]*schema.Message) error
 
+// CompressionProgressCallback is invoked right before the blocking summary
+// model call so the caller can notify the user (e.g. print a hint on the CLI
+// or push a message over WebSocket) that the request will pause while the
+// history is compressed.
+type CompressionProgressCallback func(ctx context.Context)
+
+// Context overflow modes (chats.<name>.contextMode)
 const (
-	DefaultMaxMessageRound   int = 10
-	DefaultFullMessageRounds int = 1
-	// CompressionThreshold defines the minimum maxMessageRounds required for
-	// async compression. When maxMessageRounds is below this value, simple
-	// truncation is used instead to avoid issues like empty user queries or
-	// premature compression.
-	CompressionThreshold int = 8
+	// ContextModeCompress is the default mode: when the window exceeds
+	// maxMessageRounds, the oldest rounds are summarized by the chatmodel and
+	// atomically replaced by a single summary round (a blocking model call per
+	// compression event).
+	ContextModeCompress = "compress"
+	// ContextModeTruncate keeps the window within maxMessageRounds by dropping
+	// the oldest round(s) once the limit is reached. No model call is
+	// involved. The cap is enforced at snapshot time (GetMessages), so the
+	// history sent to the model can never exceed maxMessageRound rounds.
+	ContextModeTruncate = "truncate"
 )
 
-// Manager manages conversation context with intelligent context management capabilities
+const (
+	DefaultMaxMessageRound int = 10
+	// minCompressRounds is the minimum number of rounds a single compression
+	// event must summarize. Without it, a small maxMessageRound (e.g. 2-3)
+	// triggers a blocking summary model call on every user message (compressing
+	// 1-2 rounds, the window never dropping below max because the summary
+	// itself occupies a round). With a minimum batch the window is allowed to
+	// grow and is capped at max(2*minCompressRounds, maxMessageRound): with the
+	// halving strategy len/2 reaches the batch no later than len = 2*batch, so
+	// compression happens every ~batch user messages instead of every message.
+	minCompressRounds = 3
+)
+
+// Manager manages conversation context.
+//
+// Append-only principle: once a message has been added (and therefore may have
+// been sent to the model), it is never modified afterwards. The history only
+// grows by appending at the tail. The only operations that rewrite the head
+// are rare atomic events, both triggered when a new round starts:
+//   - compress mode (default): the oldest rounds are atomically replaced by
+//     a single summary round;
+//   - truncate mode: the oldest round(s) are dropped at snapshot time so the
+//     history sent to the model stays within maxMessageRound.
+//
+// In compress mode this keeps the longest common prefix of consecutive
+// requests stable, which is what provider prompt caches (OpenAI/DeepSeek/Ark/
+// Anthropic) match on: the head is rewritten only once per compression event
+// instead of per model call. Truncate mode trades this away for simplicity.
 type Manager struct {
-	// messages stores the conversation history (full messages, never modified)
+	// messages stores the conversation history (append-only, never modified
+	// except by the atomic head rewrite above)
 	messages [][]*schema.Message
 
 	// maxMessageRound limits the maximum number of message rounds in the context
 	maxMessageRound int
 
-	// fullMessageRounds specifies how many recent rounds to keep full messages
-	// older rounds will be simplified (first user message + last ai response)
-	fullMessageRounds int
+	// contextMode selects the overflow strategy: compress (default) or truncate.
+	// Set at construction only, so it is read lock-free after that.
+	contextMode string
 
 	round int
 
-	// chatmodel for compressing messages when threshold is reached
+	// chatmodel for compressing messages when the limit is exceeded
 	chatmodel model.ToolCallingChatModel
 
 	mu sync.Mutex
 
-	// compression related fields
-	compressing    bool                // indicates if compression is in progress
-	compressBuffer [][]*schema.Message // buffer for original messages waiting to be compressed
+	// compressing indicates if a synchronous compression is in progress
+	// (guards against re-entrant triggers)
+	compressing bool
+
+	// loading indicates the manager is being restored from persistence.
+	// Compression is skipped in this state: re-triggering compression during
+	// load would make the init block on a summary model call, and the
+	// compression-complete callback (which overwrites persistence) is wired up
+	// only after loading finishes. Truncate mode is unaffected: its cap is
+	// enforced at snapshot time, and no snapshot is taken while loading.
+	loading bool
 
 	// persistence callback for auto-saving messages
 	persistenceCallback PersistenceCallback
 
 	// compression complete callback for persisting modified messages after compression
 	compressionCompleteCallback CompressionCompleteCallback
+
+	// compression progress callback, invoked before the blocking summary call
+	compressionProgressCallback CompressionProgressCallback
 }
 
-// NewManager creates a new Manager instance
-func NewManager(maxMessageRound int) *Manager {
+// NewManager creates a new Manager instance.
+//
+// contextMode selects the overflow strategy (ContextModeCompress, default, or
+// ContextModeTruncate); any unrecognized value falls back to compress.
+func NewManager(maxMessageRound int, contextMode string) *Manager {
 	if maxMessageRound <= 0 {
 		maxMessageRound = DefaultMaxMessageRound
+	}
+	switch strings.ToLower(strings.TrimSpace(contextMode)) {
+	case ContextModeTruncate:
+		contextMode = ContextModeTruncate
+	default:
+		contextMode = ContextModeCompress
 	}
 	return &Manager{
 		messages:            make([][]*schema.Message, 0),
 		maxMessageRound:     maxMessageRound,
-		fullMessageRounds:   DefaultFullMessageRounds,
+		contextMode:         contextMode,
 		round:               0,
 		chatmodel:           nil,
 		compressing:         false,
-		compressBuffer:      make([][]*schema.Message, 0),
 		persistenceCallback: nil,
 	}
+}
+
+// SetLoading toggles the loading (restore-from-persistence) state.
+// While loading, IncRound skips compression.
+func (m *Manager) SetLoading(loading bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.loading = loading
 }
 
 // SetPersistenceCallback sets the callback for auto-saving messages
@@ -90,14 +155,12 @@ func (m *Manager) SetCompressionCompleteCallback(cb CompressionCompleteCallback)
 	m.compressionCompleteCallback = cb
 }
 
-// SetFullMessageRounds sets how many recent rounds to keep full messages
-func (m *Manager) SetFullMessageRounds(rounds int) {
-	if rounds < 1 {
-		rounds = DefaultFullMessageRounds
-	}
+// SetCompressionProgressCallback sets the callback that is invoked before the
+// blocking summary model call (to notify the user that compression is starting)
+func (m *Manager) SetCompressionProgressCallback(cb CompressionProgressCallback) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.fullMessageRounds = rounds
+	m.compressionProgressCallback = cb
 }
 
 // SetChatModel sets the chat model for message compression
@@ -113,8 +176,12 @@ func (m *Manager) GetChatModel() model.ToolCallingChatModel {
 	return m.chatmodel
 }
 
-// AddMessage adds a message to the context
-func (m *Manager) AddMessage(ctx context.Context, message *schema.Message) {
+// AddMessage adds a message to the context.
+//
+// Messages are only appended: compression is never triggered here, because the
+// current round is still in progress. It is triggered from IncRound, when a
+// new round starts and every existing round is complete.
+func (m *Manager) AddMessage(_ context.Context, message *schema.Message) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -126,10 +193,7 @@ func (m *Manager) AddMessage(ctx context.Context, message *schema.Message) {
 
 	m.messages[m.round] = append(m.messages[m.round], message)
 
-	// If the number of rounds exceeds the limit, trim messages
-	m.trimMessages(context.Background())
-
-	// Auto-save single message to persistence if callback is set (inside lock)
+	// Auto-save single message to persistence if callback is set
 	if m.persistenceCallback != nil {
 		if err := m.persistenceCallback(message); err != nil {
 			logger.Warn("manager", fmt.Sprintf("Failed to auto-save message: %v", err))
@@ -137,67 +201,54 @@ func (m *Manager) AddMessage(ctx context.Context, message *schema.Message) {
 	}
 }
 
-func (m *Manager) IncRound() {
+// IncRound starts a new round.
+//
+// This is the only place where compression is triggered: the just-finished
+// round is complete and the new round is empty, so any summary model call
+// here does not interfere with in-flight messages of the current round.
+// Compression is skipped while restoring from persistence.
+func (m *Manager) IncRound(ctx context.Context) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
-	// Validate and clean up mismatched tool messages and toolcalls in current round
-	if len(m.messages) > 0 {
-		currentRound := m.messages[m.round]
-		validMessages := m.validateAndCleanRound(currentRound)
-		m.messages[m.round] = validMessages
-	}
-
+	// Note: the finished round is not validated here. GetMessages — the single
+	// place every model-facing snapshot passes through — validates and cleans
+	// the stored rounds in place (idempotently) before returning.
 	m.messages = append(m.messages, make([]*schema.Message, 0))
 	m.round = len(m.messages) - 1
+	skip := m.loading
+	m.mu.Unlock()
+
+	// Compression performs a blocking model call (the caller/user waits by
+	// design) and must not hold m.mu while doing so.
+	// (Truncate mode needs no work here: its hard cap is enforced at the
+	// model boundary in GetMessages.)
+	if !skip && m.contextMode == ContextModeCompress {
+		m.compressIfNeeded(ctx)
+	}
 }
 
-// simplifyRound simplifies a single round to keep only first user message and last assistant message.
-// If the last assistant message has tool calls, the corresponding tool response messages are also preserved
-// to maintain tool call / tool result pairing integrity for API calls.
-func (m *Manager) simplifyRound(messages []*schema.Message) []*schema.Message {
-	if len(messages) == 0 {
-		return messages
+// truncateLocked drops the oldest rounds until the window is within
+// maxMessageRound. No model call is involved. The caller must hold m.mu.
+// Truncation is not prompt-cache friendly (the head shifts on every drop);
+// that is an accepted trade-off of this mode.
+func (m *Manager) truncateLocked() {
+	if len(m.messages) <= m.maxMessageRound {
+		return
 	}
-
-	var firstUserMsg *schema.Message
-	var lastAssistantMsg *schema.Message
-
-	for _, msg := range messages {
-		if msg.Role == schema.User && firstUserMsg == nil {
-			firstUserMsg = msg
-		}
-		if msg.Role == schema.Assistant {
-			lastAssistantMsg = msg
-		}
+	for len(m.messages) > m.maxMessageRound {
+		m.messages = m.messages[1:]
 	}
+	m.round = len(m.messages) - 1
 
-	result := make([]*schema.Message, 0)
-	if firstUserMsg != nil {
-		result = append(result, firstUserMsg)
-	}
-	if lastAssistantMsg != nil {
-		result = append(result, lastAssistantMsg)
-
-		// If the last assistant message has tool calls, preserve the corresponding
-		// tool response messages to maintain tool_call/tool_result pairing.
-		if len(lastAssistantMsg.ToolCalls) > 0 {
-			toolCallIDs := make(map[string]bool)
-			for _, tc := range lastAssistantMsg.ToolCalls {
-				if tc.ID != "" {
-					toolCallIDs[tc.ID] = true
-				}
-			}
-			// Append tool response messages that match the tool call IDs
-			for _, msg := range messages {
-				if msg.Role == schema.Tool && msg.ToolCallID != "" && toolCallIDs[msg.ToolCallID] {
-					result = append(result, msg)
-				}
-			}
+	// Persist the truncated history (full overwrite). Without this the JSONL
+	// file still contains the dropped rounds, so after a restart the restored
+	// history differs from what was last sent to the model (and would even
+	// exceed the window).
+	if m.compressionCompleteCallback != nil {
+		if err := m.compressionCompleteCallback(flattenRounds(m.messages)); err != nil {
+			logger.Warn("manager", fmt.Sprintf("Failed to persist messages after truncate: %v", err))
 		}
 	}
-
-	return result
 }
 
 // validateAndCleanRound validates that tool messages and toolcalls are paired correctly
@@ -262,13 +313,14 @@ func (m *Manager) validateAndCleanRound(messages []*schema.Message) []*schema.Me
 				// All toolcalls are unmatched, remove this assistant message
 				keep = false
 			} else if len(matchedToolCalls) < len(msg.ToolCalls) {
-				// Some toolcalls are unmatched, create a new message with only matched ones
-				newMsg := &schema.Message{
-					Role:      msg.Role,
-					Content:   msg.Content,
-					ToolCalls: matchedToolCalls,
-				}
-				validMessages = append(validMessages, newMsg)
+				// Some toolcalls are unmatched, create a new message with only matched ones.
+				// Copy the full struct (not just Role/Content/ToolCalls) so the
+				// message keeps every field the model may have seen (ReasoningContent,
+				// Name, Extra, multimodal content, ...), preserving byte-identical
+				// request prefixes for provider prompt caches.
+				newMsg := *msg
+				newMsg.ToolCalls = matchedToolCalls
+				validMessages = append(validMessages, &newMsg)
 			} else {
 				// All toolcalls are matched, keep the original message
 				validMessages = append(validMessages, msg)
@@ -290,115 +342,84 @@ func (m *Manager) validateAndCleanRound(messages []*schema.Message) []*schema.Me
 	return validMessages
 }
 
-// trimMessages trims the message history, preserving system messages and recent messages.
+// compressIfNeeded compresses the oldest rounds when the window exceeds
+// maxMessageRound.
 //
-// When maxMessageRound is below CompressionThreshold, simple truncation is used:
-// the oldest rounds are discarded directly to keep the window within the limit.
-// This avoids issues with async compression (e.g., empty user queries, premature
-// compression) when the window is small.
-//
-// When maxMessageRound >= CompressionThreshold, async compression is triggered at
-// ~70% of the limit, using the chatmodel to summarize older rounds.
-func (m *Manager) trimMessages(ctx context.Context) {
-	if m.maxMessageRound < CompressionThreshold {
-		// Simple truncation: keep only the most recent rounds within the limit.
-		// No compression model needed in this mode.
-		for len(m.messages) > m.maxMessageRound {
-			// Discard the oldest round
-			m.messages = m.messages[1:]
-			m.round = len(m.messages) - 1
-		}
+// The oldest rounds are summarized by the chatmodel synchronously (the caller
+// waits) and atomically replaced by a single summary round — one head rewrite
+// per compression event. If the summary call fails, the full history is kept
+// and the compression is retried on the next trigger.
+func (m *Manager) compressIfNeeded(ctx context.Context) {
+	m.mu.Lock()
+	if m.chatmodel == nil {
+		m.mu.Unlock()
 		return
 	}
-
-	// Start async compression early at ~70% of maxMessageRound threshold
-	// This gives time for compression to complete before hitting the hard limit
-	// Minimum threshold of 4 rounds to ensure at least 2 rounds get compressed
-	// (numToCompress = len/2 = 2), avoiding single-round compression
-	asyncCompressThreshold := int(float64(m.maxMessageRound) * 0.7)
-	if asyncCompressThreshold < 4 {
-		asyncCompressThreshold = 4
+	if len(m.messages) <= m.maxMessageRound || m.compressing {
+		m.mu.Unlock()
+		return
 	}
-	if len(m.messages) >= asyncCompressThreshold && !m.compressing && m.chatmodel != nil {
-		go m.compressMessagesAsync(ctx)
+	// Never compress the current (empty, just started) round
+	numToCompress := len(m.messages) / 2
+	if numToCompress > len(m.messages)-1 {
+		numToCompress = len(m.messages) - 1
 	}
-}
-
-// compressMessagesAsync performs asynchronous compression in a goroutine
-func (m *Manager) compressMessagesAsync(ctx context.Context) {
-	m.mu.Lock()
-	if m.compressing {
+	// Below the minimum batch, skip: a summary call for 1-2 rounds is rarely
+	// worth the latency it adds to the user's request. The window keeps
+	// growing until the halved size reaches the batch (bounded, see
+	// minCompressRounds), so compression is retried within a few rounds.
+	if numToCompress < minCompressRounds {
 		m.mu.Unlock()
 		return
 	}
 	m.compressing = true
-
-	// Calculate how many rounds to compress (half of the current window, excluding the most recent)
-	numToCompress := len(m.messages) / 2
-	if numToCompress < 1 {
-		numToCompress = 1
-	}
-
-	// Copy messages to compress buffer (original messages waiting to be compressed)
-	messagesToCompress := make([][]*schema.Message, 0)
-	for i := 0; i < numToCompress && i < len(m.messages)-1; i++ {
-		roundCopy := make([]*schema.Message, len(m.messages[i]))
-		copy(roundCopy, m.messages[i])
-		messagesToCompress = append(messagesToCompress, roundCopy)
-	}
-
-	// If prev compression not success
-	m.compressBuffer = append(m.compressBuffer, messagesToCompress...)
-	if len(m.compressBuffer) > m.maxMessageRound {
-		m.compressBuffer = m.compressBuffer[len(m.compressBuffer)-m.maxMessageRound:]
-	}
-
-	m.messages = m.messages[numToCompress:]
-	m.round = len(m.messages) - 1
+	oldRounds := m.messages[:numToCompress]
 	m.mu.Unlock()
 
-	// Flatten messages for compression
-	flatMessages := make([]*schema.Message, 0)
-	for _, round := range messagesToCompress {
-		flatMessages = append(flatMessages, round...)
+	// Notify the user that the request will pause for the (blocking) summary
+	// call. Invoked outside the lock so the callback may do I/O freely.
+	if m.compressionProgressCallback != nil {
+		m.compressionProgressCallback(ctx)
 	}
 
-	// Perform compression without holding the main lock
-	summary := ""
-	if len(flatMessages) > 0 {
-		summary = m.doCompression(ctx, flatMessages)
-	}
+	// Synchronous compression: the caller (and thus the user) waits for the
+	// summary model call. The lock is released while calling the model so that
+	// reader operations are not blocked for the whole compression.
+	summary := m.doCompression(ctx, flattenRounds(oldRounds))
 
-	// Mark compression as complete
 	m.mu.Lock()
-	defer func() {
-		m.compressing = false
-		m.mu.Unlock()
-	}()
+	defer m.mu.Unlock()
+	m.compressing = false
 
-	if summary != "" {
-		summaryMessage := schema.AssistantMessage(fmt.Sprintf("[Previous Conversation Summary]: %s", summary), nil)
-		if len(m.messages) > 0 && len(m.messages[0]) > 0 && strings.HasPrefix(m.messages[0][0].Content, "[Previous Conversation Summary]:") {
-			m.messages = m.messages[1:]
-		}
-		m.messages = append([][]*schema.Message{{summaryMessage}}, m.messages...)
-		m.round = len(m.messages) - 1
-		m.compressBuffer = make([][]*schema.Message, 0)
+	if summary == "" {
+		// Compression failed; keep the full history and retry on the next
+		// trigger (window may temporarily exceed the limit).
+		return
+	}
 
-		// Flatten m.messages to []*schema.Message for persistence (m.compressBuffer is already cleared)
-		allMessages := make([]*schema.Message, 0)
-		for _, round := range m.messages {
-			allMessages = append(allMessages, round...)
-		}
+	// Guard against concurrent Clear(): if the head has changed while the model
+	// call was in flight, do not apply the stale result.
+	if len(m.messages) < numToCompress || len(m.messages[0]) == 0 || len(oldRounds[0]) == 0 || m.messages[0][0] != oldRounds[0][0] {
+		return
+	}
 
-		// Persist modified messages after compression
-		if m.compressionCompleteCallback != nil {
-			if err := m.compressionCompleteCallback(allMessages); err != nil {
-				logger.Warn("manager", fmt.Sprintf("Failed to persist messages after compression: %v", err))
-			}
+	// Atomic head rewrite: drop the compressed rounds and insert the summary
+	// round. Any previous summary round is inside oldRounds and thus gets
+	// re-summarized/merged into the new one.
+	m.messages = append([][]*schema.Message{
+		{schema.AssistantMessage(fmt.Sprintf("[Previous Conversation Summary]: %s", summary), nil)},
+	}, m.messages[numToCompress:]...)
+	m.round = len(m.messages) - 1
+
+	// Persist modified messages after compression (full overwrite)
+	if m.compressionCompleteCallback != nil {
+		allMessages := flattenRounds(m.messages)
+		if err := m.compressionCompleteCallback(allMessages); err != nil {
+			logger.Warn("manager", fmt.Sprintf("Failed to persist messages after compression: %v", err))
 		}
 	}
 }
+
 
 // doCompression performs the actual compression logic
 func (m *Manager) doCompression(ctx context.Context, flatMessages []*schema.Message) string {
@@ -407,7 +428,7 @@ func (m *Manager) doCompression(ctx context.Context, flatMessages []*schema.Mess
 	}
 
 	// Generate summary using chatmodel with inherited context
-	summaryMsgs := []*schema.Message{}
+	summaryMsgs := make([]*schema.Message, 0, len(flatMessages)+1)
 	summaryMsgs = append(summaryMsgs, flatMessages...)
 	summaryMsgs = append(summaryMsgs, schema.UserMessage("Summarize the following conversation concisely while preserving key information, decisions, and context. Output only the summary."))
 
@@ -425,82 +446,50 @@ func (m *Manager) doCompression(ctx context.Context, flatMessages []*schema.Mess
 	return summaryContent
 }
 
-// getAllRounds returns all rounds including compressBuffer and messages
-func (m *Manager) getAllRounds() [][]*schema.Message {
-	allRounds := make([][]*schema.Message, 0, len(m.compressBuffer)+len(m.messages))
-	allRounds = append(allRounds, m.compressBuffer...)
-	allRounds = append(allRounds, m.messages...)
-	return allRounds
+// flattenRounds flattens rounds into a single message slice
+func flattenRounds(rounds [][]*schema.Message) []*schema.Message {
+	flat := make([]*schema.Message, 0)
+	for _, round := range rounds {
+		flat = append(flat, round...)
+	}
+	return flat
 }
 
-// GetMessages retrieves simplified messages in the current context
-// Old rounds are simplified (first user message + last assistant response)
+// GetMessages retrieves the messages in the current context.
+// All rounds are returned in full (append-only: no simplification of older
+// rounds), so the sequence of consecutive requests shares a stable, growing
+// prefix that provider prompt caches can match.
 // The returned messages are guaranteed to have proper tool_call / tool_result pairing.
 func (m *Manager) GetMessages() []*schema.Message {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	allRounds := m.getAllRounds()
-	simplifiedMessages := make([]*schema.Message, 0)
-
-	// Determine cutoff index based on total rounds
-	totalRounds := len(allRounds)
-	if totalRounds <= m.fullMessageRounds {
-		// All rounds are recent, return full messages
-		for _, round := range allRounds {
-			simplifiedMessages = append(simplifiedMessages, round...)
-		}
-		return m.validateAndCleanRound(simplifiedMessages)
+	// Truncate mode enforces its hard cap right here, at the model boundary:
+	// regardless of the caller's IncRound/AddMessage ordering, the history
+	// sent to the model can never exceed maxMessageRound rounds.
+	if m.contextMode == ContextModeTruncate {
+		m.truncateLocked()
 	}
 
-	cutoffIndex := totalRounds - m.fullMessageRounds
-
-	// Process each round
-	for i, round := range allRounds {
-		if len(round) == 0 {
-			continue
-		}
-
-		// Recent rounds: use full messages
-		if i >= cutoffIndex {
-			simplifiedMessages = append(simplifiedMessages, round...)
-			continue
-		}
-
-		// Old rounds: skip if already summarized
-		firstMsg := round[0]
-		if strings.HasPrefix(firstMsg.Content, "[Previous Conversation Summary]:") {
-			simplifiedMessages = append(simplifiedMessages, round...)
-			continue
-		}
-
-		// Simplify: keep first user message and last assistant message
-		simplifiedRound := m.simplifyRound(round)
-		if len(simplifiedRound) > 0 {
-			simplifiedMessages = append(simplifiedMessages, simplifiedRound...)
-		} else {
-			simplifiedMessages = append(simplifiedMessages, round...)
+	// Validate each round in place (idempotent). Unpaired tool_call/tool
+	// entries can only exist in a round left incomplete by an aborted request
+	// (error, cancellation, denied approval); cleaning here — the single place
+	// every model-facing snapshot passes through — both guarantees the returned
+	// history is clean and progressively repairs the stored rounds, so no
+	// caller needs a separate validation pass.
+	for i, round := range m.messages {
+		if len(round) > 0 {
+			m.messages[i] = m.validateAndCleanRound(round)
 		}
 	}
-
-	// Ensure tool call / tool result pairing is valid before returning to the caller.
-	// This catches any edge cases where simplification or compression left unpaired messages.
-	return m.validateAndCleanRound(simplifiedMessages)
+	return flattenRounds(m.messages)
 }
 
 // GetFullMessages retrieves all full messages in the current context
 // This includes all original messages without any simplification.
 // The returned messages are guaranteed to have proper tool_call / tool_result pairing.
 func (m *Manager) GetFullMessages() []*schema.Message {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	allRounds := m.getAllRounds()
-	fullMessages := make([]*schema.Message, 0)
-	for _, round := range allRounds {
-		fullMessages = append(fullMessages, round...)
-	}
-	return m.validateAndCleanRound(fullMessages)
+	return m.GetMessages()
 }
 
 // Clear clears the context (preserves system messages)
@@ -509,7 +498,6 @@ func (m *Manager) Clear() {
 	defer m.mu.Unlock()
 	m.round = 0
 	m.messages = make([][]*schema.Message, 0)
-	m.compressBuffer = make([][]*schema.Message, 0)
 }
 
 // RemoveLastRound removes the last round of messages from the context.
@@ -560,15 +548,14 @@ func (m *Manager) GetMessageCount() int {
 	for _, round := range m.messages {
 		count += len(round)
 	}
-	// Also count messages in compress buffer
-	for _, round := range m.compressBuffer {
-		count += len(round)
-	}
 	return count
 }
 
 // GetSummary generates a summary of the conversation
 func (m *Manager) GetSummary() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	if len(m.messages) == 0 {
 		return "Empty conversation"
 	}

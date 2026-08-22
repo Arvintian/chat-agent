@@ -284,11 +284,8 @@ func InitChatSession(ctx context.Context, cfg *config.Config, chatName string, s
 			return nil, err
 		}
 	}
-	manager := manager.NewManager(preset.MaxMessageRounds)
+	manager := manager.NewManager(preset.MaxMessageRounds, preset.ContextMode)
 	manager.SetChatModel(contextModel)
-	if preset.FullMessageRounds > 0 {
-		manager.SetFullMessageRounds(preset.FullMessageRounds)
-	}
 
 	// Only setup persistence callbacks and load messages if persistence is enabled
 	if contextPersistenceEnabled {
@@ -313,13 +310,18 @@ func InitChatSession(ctx context.Context, cfg *config.Config, chatName string, s
 
 			// Restore messages from persistence and reconstruct rounds based on user messages
 			// Each user message indicates a new round, so we need to call IncRound before adding it
+			// Loading state skips compression: the restored history may exceed the
+			// window, but re-compressing here would block session init on a summary
+			// model call, and the overwrite callback is wired up only after loading.
+			manager.SetLoading(true)
 			for i, msg := range persistedMessages {
 				// If this is a user message and not the first message, increment round
 				if msg.Role == schema.User && i > 0 {
-					manager.IncRound()
+					manager.IncRound(ctx)
 				}
 				manager.AddMessage(ctx, msg)
 			}
+			manager.SetLoading(false)
 			loadedMessageCount = len(persistedMessages)
 
 			// Re-enable persistence callback after loading
@@ -524,17 +526,20 @@ func renderSystemPrompt(systemPrompt string) (string, error) {
 		return "", fmt.Errorf("failed to parse system prompt template: %w", err)
 	}
 
-	// Prepare template data with built-in variables
+	// Prepare template data with built-in variables.
+	// Note: no sub-day time variable is provided on purpose. The system
+	// prompt sits at the very front of the request prefix, and any
+	// time-varying content would change the first token between model
+	// calls, invalidating provider prompt caches (OpenAI/DeepSeek/Ark/
+	// Anthropic all match on an exact prefix). Use .Date (day-level) instead.
 	data := struct {
 		Cwd  string
 		Date string
-		Now  time.Time
 		User string
 		Home string
 	}{
 		Cwd:  getCurrentWorkingDir(),
 		Date: time.Now().Format("2006-01-02"),
-		Now:  time.Now(),
 		User: getUserName(),
 		Home: getHomeDir(),
 	}

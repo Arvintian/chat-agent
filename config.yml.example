@@ -63,8 +63,13 @@ models:
 #   - model: model name to use
 #   - desc: description of the chat preset
 #   - system: system prompt for the assistant
-#   - maxMessageRounds: maximum number of message rounds to keep in context (default: 10)
-#   - fullMessageRounds: number of recent rounds to keep full messages, older rounds will be simplified (default: 1)
+#   - maxMessageRounds: number of message rounds to keep in context (default: 10)
+#   - contextMode: how to handle window overflow when a new round starts
+#     (default: compress)
+#     - compress: the oldest rounds are summarized synchronously (the request
+#       waits) and replaced by a single summary round
+#     - truncate: no model call; the history sent to the model is hard-capped
+#       at maxMessageRounds, oldest rounds dropped first
 #   - maxIterations: maximum iterations for tool calling (default: 20)
 #   - maxRetries: maximum retries for model generation (default: 5)
 #   - mcpServers: list of MCP servers to use
@@ -125,7 +130,6 @@ chats:
       Context information:
       - Current working directory: {{.Cwd}}
       - Today's date: {{.Date}}
-      - Current time: {{.Now.Format "2006-01-02 15:04:05"}}
       - Username: {{.User}}
       - Home directory: {{.Home}}
       - Environment USER: {{env "USER"}}
