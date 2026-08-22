@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"text/template"
@@ -182,6 +183,11 @@ func InitChatSession(ctx context.Context, cfg *config.Config, chatName string, s
 		hookMgr = hook.NewHookManager(preset.Hooks)
 	}
 
+	// Sort tools by name so the agent always receives a deterministic, ordered tool list
+	if err := sortToolsByName(ctx, tools); err != nil {
+		return nil, err
+	}
+
 	toolSchemas := make([]*schema.ToolInfo, 0, len(tools))
 	for _, tool := range tools {
 		schema, err := tool.Info(ctx)
@@ -355,6 +361,32 @@ func InitChatSession(ctx context.Context, cfg *config.Config, chatName string, s
 	}
 
 	return session, nil
+}
+
+// sortToolsByName sorts the given tools in-place by their tool names (ascending).
+func sortToolsByName(ctx context.Context, tools []tool.BaseTool) error {
+	names := make([]string, len(tools))
+	for i, t := range tools {
+		info, err := t.Info(ctx)
+		if err != nil {
+			return err
+		}
+		names[i] = info.Name
+	}
+	// Sort indices by name; use index as tiebreaker to keep the sort stable
+	indices := make([]int, len(tools))
+	for i := range indices {
+		indices[i] = i
+	}
+	sort.SliceStable(indices, func(a, b int) bool {
+		return names[indices[a]] < names[indices[b]]
+	})
+	sorted := make([]tool.BaseTool, len(tools))
+	for i, idx := range indices {
+		sorted[i] = tools[idx]
+	}
+	copy(tools, sorted)
+	return nil
 }
 
 // NewCleanupRegistry creates a new cleanup registry for the session
