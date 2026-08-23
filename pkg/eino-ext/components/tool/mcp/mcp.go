@@ -31,6 +31,13 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
+// sortedJSON marshals with sorted map keys so the tool parameter schemas keep
+// a stable property order across processes and requests. The order is preserved
+// all the way into the model request (jsonschema.Properties is an ordered map),
+// and tool schemas are part of the prompt prefix: a changing key order would
+// invalidate provider prompt caches between rounds.
+var sortedJSON = sonic.Config{SortMapKeys: true}.Froze()
+
 type Config struct {
 	// Cli is the MCP (Model Control Protocol) client, ref: https://github.com/mark3labs/mcp-go?tab=readme-ov-file#tools
 	// Notice: should Initialize with server before use
@@ -78,7 +85,7 @@ func GetTools(ctx context.Context, conf *Config) ([]tool.BaseTool, error) {
 			}
 		}
 
-		marshaledInputSchema, err := sonic.Marshal(t.InputSchema)
+		marshaledInputSchema, err := sortedJSON.Marshal(t.InputSchema)
 		if err != nil {
 			return nil, fmt.Errorf("conv mcp tool input schema fail(marshal): %w, tool name: %s", err, t.Name)
 		}

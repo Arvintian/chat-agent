@@ -11,6 +11,13 @@ import (
 	"github.com/mark3labs/mcp-filesystem-server/filesystemserver"
 )
 
+// sortedJSON marshals with sorted map keys so the tool parameter schemas keep
+// a stable property order across processes and requests. The order is preserved
+// all the way into the model request (jsonschema.Properties is an ordered map),
+// and tool schemas are part of the prompt prefix: a changing key order would
+// invalidate provider prompt caches between rounds.
+var sortedJSON = sonic.Config{SortMapKeys: true}.Froze()
+
 func getFileSystemTools(ctx context.Context, params map[string]interface{}) ([]tool.BaseTool, error) {
 	workDir, ok := params["workDir"]
 	if !ok {
@@ -51,7 +58,7 @@ func getFileSystemTools(ctx context.Context, params map[string]interface{}) ([]t
 		if excludeMap[mcpTool.Tool.Name] {
 			continue
 		}
-		marshaledInputSchema, err := sonic.Marshal(mcpTool.Tool.InputSchema)
+		marshaledInputSchema, err := sortedJSON.Marshal(mcpTool.Tool.InputSchema)
 		if err != nil {
 			return nil, fmt.Errorf("conv mcp tool input schema fail(marshal): %w, tool name: %s", err, mcpTool.Tool.Name)
 		}
