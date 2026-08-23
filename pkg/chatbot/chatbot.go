@@ -148,6 +148,11 @@ func (cb *ChatBot) StreamChat(ctx context.Context, userInput string) error {
 	streamReader := cb.runner.Run(ctx, messages, adk.WithCheckPointID("local"))
 
 	response, reasoningContent, debug := strings.Builder{}, strings.Builder{}, false
+	// raw* builders accumulate the unfiltered stream (no trimming, no
+	// decoding) so the messages persisted to the manager stay byte-identical
+	// to what the model produced and saw, keeping prompt-cache prefixes stable
+	// across rounds.
+	rawResponse, rawReasoning := strings.Builder{}, strings.Builder{}
 	if v, ok := cb.ctx.Value("debug").(bool); ok {
 		debug = v
 	}
@@ -226,6 +231,8 @@ func (cb *ChatBot) StreamChat(ctx context.Context, userInput string) error {
 
 		response.Reset()
 		reasoningContent.Reset()
+		rawResponse.Reset()
+		rawReasoning.Reset()
 		toolMap := map[int][]*schema.Message{}
 		if event.Output.MessageOutput.MessageStream != nil {
 			reasoning, firstword := false, false
@@ -303,6 +310,7 @@ func (cb *ChatBot) StreamChat(ctx context.Context, userInput string) error {
 					reasoning = true
 				}
 				if message.ReasoningContent != "" {
+					rawReasoning.WriteString(message.ReasoningContent)
 					//Decode JSON-encoded ReasoningContent (e.g. from OpenRouter)
 					decodedReasoning := message.ReasoningContent
 					if err := json.Unmarshal([]byte(message.ReasoningContent), &decodedReasoning); err != nil {
@@ -334,6 +342,7 @@ func (cb *ChatBot) StreamChat(ctx context.Context, userInput string) error {
 					firstword = true
 				}
 				if message.Content != "" {
+					rawResponse.WriteString(message.Content)
 					// Skip whitespace-only chunks at the beginning (before any meaningful content)
 					if response.Len() > 0 || strings.TrimSpace(message.Content) != "" {
 						content := message.Content
@@ -396,6 +405,8 @@ func (cb *ChatBot) StreamChat(ctx context.Context, userInput string) error {
 			fmt.Print(event.Output.MessageOutput.Message.Content)
 			response.WriteString(event.Output.MessageOutput.Message.Content)
 			reasoningContent.WriteString(event.Output.MessageOutput.Message.ReasoningContent)
+			rawResponse.WriteString(event.Output.MessageOutput.Message.Content)
+			rawReasoning.WriteString(event.Output.MessageOutput.Message.ReasoningContent)
 		}
 		if event.Output.MessageOutput.Role == schema.Tool {
 			fmt.Print("\n---\n")
@@ -404,8 +415,12 @@ func (cb *ChatBot) StreamChat(ctx context.Context, userInput string) error {
 			toolMsg := schema.Message{
 				Role:             schema.Assistant,
 				ToolCalls:        make([]schema.ToolCall, len(toolMap)),
-				Content:          response.String(),
-				ReasoningContent: reasoningContent.String(),
+				// Persist the raw (unfiltered) content: it must stay
+				// byte-identical to what the model produced, so the next
+				// round's prompt prefix matches the previous round's tail
+				// for prompt caches.
+				Content:          rawResponse.String(),
+				ReasoningContent: rawReasoning.String(),
 			}
 			for index, msgs := range toolMap {
 				m, err := schema.ConcatMessages(msgs)
@@ -421,8 +436,10 @@ func (cb *ChatBot) StreamChat(ctx context.Context, userInput string) error {
 	fmt.Print("\n")
 	cb.manager.AddMessage(ctx, &schema.Message{
 		Role:             schema.Assistant,
-		Content:          response.String(),
-		ReasoningContent: reasoningContent.String(),
+		// Raw (unfiltered) content, byte-identical to the model output, to
+		// keep prompt-cache prefixes stable across rounds.
+		Content:          rawResponse.String(),
+		ReasoningContent: rawReasoning.String(),
 	})
 
 	return nil
@@ -464,6 +481,11 @@ func (cb *ChatBot) StreamChatWithHandler(ctx context.Context, userInput string, 
 
 	response := strings.Builder{}
 	reasoningContent := strings.Builder{}
+	// raw* builders accumulate the unfiltered stream (no trimming, no
+	// decoding) so the messages persisted to the manager stay byte-identical
+	// to what the model produced and saw, keeping prompt-cache prefixes stable
+	// across rounds.
+	rawResponse, rawReasoning := strings.Builder{}, strings.Builder{}
 	firstChunk := true
 
 	for {
@@ -555,6 +577,8 @@ func (cb *ChatBot) StreamChatWithHandler(ctx context.Context, userInput string, 
 
 		response.Reset()
 		reasoningContent.Reset()
+		rawResponse.Reset()
+		rawReasoning.Reset()
 		toolMap := map[int][]*schema.Message{}
 		if event.Output.MessageOutput.MessageStream != nil {
 			reasoning, firstword := false, false
@@ -639,6 +663,7 @@ func (cb *ChatBot) StreamChatWithHandler(ctx context.Context, userInput string, 
 
 				// Decode JSON-encoded ReasoningContent (e.g. from OpenRouter)
 				if message.ReasoningContent != "" {
+					rawReasoning.WriteString(message.ReasoningContent)
 					decodedReasoning := message.ReasoningContent
 					if err := json.Unmarshal([]byte(message.ReasoningContent), &decodedReasoning); err != nil {
 						decodedReasoning = message.ReasoningContent
@@ -664,6 +689,7 @@ func (cb *ChatBot) StreamChatWithHandler(ctx context.Context, userInput string, 
 				}
 
 				if message.Content != "" {
+					rawResponse.WriteString(message.Content)
 					// Skip whitespace-only chunks at the beginning (before any meaningful content)
 					if response.Len() > 0 || strings.TrimSpace(message.Content) != "" {
 						content := message.Content
@@ -715,6 +741,8 @@ func (cb *ChatBot) StreamChatWithHandler(ctx context.Context, userInput string, 
 				firstChunk = false
 				response.WriteString(event.Output.MessageOutput.Message.Content)
 				reasoningContent.WriteString(event.Output.MessageOutput.Message.ReasoningContent)
+				rawResponse.WriteString(event.Output.MessageOutput.Message.Content)
+				rawReasoning.WriteString(event.Output.MessageOutput.Message.ReasoningContent)
 			}
 			// Send final chunk marker
 			cb.handler.SendChunk("", false, true, "response")
@@ -723,8 +751,12 @@ func (cb *ChatBot) StreamChatWithHandler(ctx context.Context, userInput string, 
 			toolMsg := schema.Message{
 				Role:             schema.Assistant,
 				ToolCalls:        make([]schema.ToolCall, len(toolMap)),
-				Content:          response.String(),
-				ReasoningContent: reasoningContent.String(),
+				// Persist the raw (unfiltered) content: it must stay
+				// byte-identical to what the model produced, so the next
+				// round's prompt prefix matches the previous round's tail
+				// for prompt caches.
+				Content:          rawResponse.String(),
+				ReasoningContent: rawReasoning.String(),
 			}
 			for index, msgs := range toolMap {
 				m, err := schema.ConcatMessages(msgs)
@@ -742,8 +774,10 @@ func (cb *ChatBot) StreamChatWithHandler(ctx context.Context, userInput string, 
 	cb.handler.SendComplete("")
 	cb.manager.AddMessage(ctx, &schema.Message{
 		Role:             schema.Assistant,
-		Content:          response.String(),
-		ReasoningContent: reasoningContent.String(),
+		// Raw (unfiltered) content, byte-identical to the model output, to
+		// keep prompt-cache prefixes stable across rounds.
+		Content:          rawResponse.String(),
+		ReasoningContent: rawReasoning.String(),
 	})
 
 	// Send message count update after assistant response is complete
