@@ -106,6 +106,17 @@ type Manager struct {
 
 	// compression progress callback, invoked before the blocking summary call
 	compressionProgressCallback CompressionProgressCallback
+
+	// systemPrompt is the same prompt template the runner (agent) prepends to
+	// every model request (see the agent's GenModelInput), and
+	// systemPromptRenderer expands it. The compression summary call reuses both
+	// so its request keeps the byte-identical head the runner's requests use,
+	// which is what provider prompt caches (OpenAI/DeepSeek/Ark/Anthropic)
+	// match on. Without it, the summary call — sent to the same model as a
+	// different prefix — always misses the cache and cold-prefills the full
+	// history it is about to compress.
+	systemPrompt         string
+	systemPromptRenderer func(string) (string, error)
 }
 
 // NewManager creates a new Manager instance.
@@ -174,6 +185,21 @@ func (m *Manager) GetChatModel() model.ToolCallingChatModel {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.chatmodel
+}
+
+// SetSystemPrompt shares the runner's system prompt with the manager.
+//
+// prompt is the same template passed to the agent's Instruction and renderer
+// the same function the agent's GenModelInput uses to expand it, so the
+// compression summary request leads with the exact same system message the
+// runner sends — keeping its prefix prompt-cache friendly. An empty prompt
+// or a nil renderer is a no-op: the summary call is then sent without a
+// system message (as before).
+func (m *Manager) SetSystemPrompt(prompt string, renderer func(string) (string, error)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.systemPrompt = prompt
+	m.systemPromptRenderer = renderer
 }
 
 // AddMessage adds a message to the context.
@@ -374,6 +400,10 @@ func (m *Manager) compressIfNeeded(ctx context.Context) {
 	}
 	m.compressing = true
 	oldRounds := m.messages[:numToCompress]
+	// Snapshot the shared system prompt under the lock; doCompression runs
+	// lock-free, so it must not read these fields directly.
+	sysPrompt := m.systemPrompt
+	sysRenderer := m.systemPromptRenderer
 	m.mu.Unlock()
 
 	// Notify the user that the request will pause for the (blocking) summary
@@ -385,7 +415,7 @@ func (m *Manager) compressIfNeeded(ctx context.Context) {
 	// Synchronous compression: the caller (and thus the user) waits for the
 	// summary model call. The lock is released while calling the model so that
 	// reader operations are not blocked for the whole compression.
-	summary := m.doCompression(ctx, flattenRounds(oldRounds))
+	summary := m.doCompression(ctx, flattenRounds(oldRounds), sysPrompt, sysRenderer)
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -421,15 +451,51 @@ func (m *Manager) compressIfNeeded(ctx context.Context) {
 }
 
 
-// doCompression performs the actual compression logic
-func (m *Manager) doCompression(ctx context.Context, flatMessages []*schema.Message) string {
+// doCompression performs the actual compression logic.
+//
+// systemPrompt/systemPromptRenderer are the runner's (the agent's
+// GenModelInput) system prompt template and its renderer. When set, the
+// summary request is built to mirror the runner's requests exactly:
+// [system message, compressed rounds..., summarize instruction]. Since the
+// runner's latest request was [system message, round1, round2, ...], this
+// prefix is byte-identical, so provider prompt caches hit through the whole
+// compressed history instead of cold-prefilling it.
+func (m *Manager) doCompression(ctx context.Context, flatMessages []*schema.Message, systemPrompt string, systemPromptRenderer func(string) (string, error)) string {
 	if len(flatMessages) == 0 {
 		return ""
 	}
 
 	// Generate summary using chatmodel with inherited context
 	summaryMsgs := make([]*schema.Message, 0, len(flatMessages)+1)
-	summaryMsgs = append(summaryMsgs, flatMessages...)
+
+	// Build the shared head: the rendered system prompt leads the request,
+	// absorbing any system-role messages from the history — the same merge the
+	// runner's GenModelInput performs, keeping the prefix byte-identical.
+	var sp *schema.Message
+	if systemPrompt != "" {
+		content := systemPrompt
+		if systemPromptRenderer != nil {
+			rendered, err := systemPromptRenderer(content)
+			if err != nil {
+				logger.GetDefaultLogger().Errorf("Context Manager: render system prompt failed: %v", err)
+				return ""
+			}
+			content = rendered
+		}
+		sp = schema.SystemMessage(content)
+	}
+
+	for _, msg := range flatMessages {
+		if sp != nil && msg.Role == schema.System {
+			sp.Content = fmt.Sprintf("%s\n%s", sp.Content, msg.Content)
+			continue
+		}
+		summaryMsgs = append(summaryMsgs, msg)
+	}
+	if sp != nil {
+		summaryMsgs = append([]*schema.Message{sp}, summaryMsgs...)
+	}
+
 	summaryMsgs = append(summaryMsgs, schema.UserMessage("Summarize the following conversation concisely while preserving key information, decisions, and context. Output only the summary."))
 
 	stream, err := m.chatmodel.Generate(ctx, summaryMsgs)

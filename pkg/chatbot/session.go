@@ -292,6 +292,11 @@ func InitChatSession(ctx context.Context, cfg *config.Config, chatName string, s
 	}
 	manager := manager.NewManager(preset.MaxMessageRounds, preset.ContextMode)
 	manager.SetChatModel(contextModel)
+	// Share the runner's system prompt with the context manager so the
+	// compression summary call leads with the same system message the agent
+	// sends on every request — keeping the summary request's prefix
+	// prompt-cache friendly instead of cold-prefilling the whole history.
+	manager.SetSystemPrompt(systemPrompt, renderSystemPrompt)
 
 	// Only setup persistence callbacks and load messages if persistence is enabled
 	if contextPersistenceEnabled {
