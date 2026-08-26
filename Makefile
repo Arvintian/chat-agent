@@ -11,6 +11,13 @@ BUILD_TIME = $(shell date -u '+%Y-%m-%d_%H:%M:%S_%Z')
 vendor:
 	@bash scripts/download-vendor.sh
 
+.PHONY: update-eino
+update-eino:
+	@echo "Updating eino and eino-ext components to latest..."
+	go get github.com/cloudwego/eino@latest
+	go get github.com/cloudwego/eino-ext/components/model/...@latest
+	go mod tidy
+
 .PHONY: build
 build: vendor build-client
 	CGO_ENABLED=0 go build -v --ldflags="-w -X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME)" -o dist/chat-agent main.go
