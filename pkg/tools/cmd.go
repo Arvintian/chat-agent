@@ -190,7 +190,7 @@ func (t *RunTerminalCommandTool) runInBackground(command, workdir string) (strin
 	if err != nil {
 		return "", fmt.Errorf("failed to start background task: %w", err)
 	}
-	return fmt.Sprintf("Background task started with ID: %s\nCommand: %s\nUse 'cmd_bg' with action='output' and task_id='%s' to check output", task.ID, command, task.ID), nil
+	return fmt.Sprintf("Background task started with ID: %s\nCommand: %s\nUse 'cmd_bg' with action='output' and task_id='%s' to check output\nUse 'cmd_bg' with action='show' and task_id='%s' to check status", task.ID, command, task.ID, task.ID), nil
 }
 
 // Ensure RunTerminalCommandTool implements tool.InvokableTool
