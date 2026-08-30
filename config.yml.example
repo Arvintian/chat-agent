@@ -4,7 +4,9 @@
 #   - baseUrl: API base URL
 #   - apiKey: API key for authentication
 #   - headers: custom HTTP headers to include in every request (optional)
-#   - timeout: request timeout in seconds (optional, applies to openai provider)
+#   - timeout: request timeout in seconds (optional)
+#   - idleTimeout: HTTP client connection pool idle timeout in seconds
+#     (optional, default 30)
 providers:
   deepseek:
     type: deepseek

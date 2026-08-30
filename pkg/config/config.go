@@ -30,20 +30,20 @@ func (c *Config) UnmarshalYAML(value *yaml.Node) error {
 }
 
 type Chat struct {
-	Desc              string        `yaml:"desc"`
-	System            string        `yaml:"system"`
-	InitSystem        string        `yaml:"initSystem,omitempty"`      // System prompt for the first round (no context)
-	Model             string        `yaml:"model"`
-	MaxMessageRounds  int           `yaml:"maxMessageRounds"`
-	ContextMode       string        `yaml:"contextMode,omitempty"` // context overflow mode: "compress" (default) or "truncate"
-	MaxIterations     int           `yaml:"maxIterations"`
-	MaxRetries        int           `yaml:"maxRetries"`
-	MCPServers        []string      `yaml:"mcpServers,omitempty"`
-	Skill             *Skill        `yaml:"skill,omitempty"`
-	Tools             []string      `yaml:"tools,omitempty"`
-	Default           bool          `yaml:"default"`
-	Hooks             *SessionHooks `yaml:"hooks,omitempty"`
-	Persistence       bool          `yaml:"persistence"`
+	Desc             string        `yaml:"desc"`
+	System           string        `yaml:"system"`
+	InitSystem       string        `yaml:"initSystem,omitempty"` // System prompt for the first round (no context)
+	Model            string        `yaml:"model"`
+	MaxMessageRounds int           `yaml:"maxMessageRounds"`
+	ContextMode      string        `yaml:"contextMode,omitempty"` // context overflow mode: "compress" (default) or "truncate"
+	MaxIterations    int           `yaml:"maxIterations"`
+	MaxRetries       int           `yaml:"maxRetries"`
+	MCPServers       []string      `yaml:"mcpServers,omitempty"`
+	Skill            *Skill        `yaml:"skill,omitempty"`
+	Tools            []string      `yaml:"tools,omitempty"`
+	Default          bool          `yaml:"default"`
+	Hooks            *SessionHooks `yaml:"hooks,omitempty"`
+	Persistence      bool          `yaml:"persistence"`
 }
 
 // SessionHooks represents session-related hooks configuration
@@ -79,7 +79,10 @@ type Provider struct {
 	BaseURL string            `yaml:"baseUrl,omitempty"`
 	APIKey  string            `yaml:"apiKey,omitempty"`
 	Headers map[string]string `yaml:"headers,omitempty"`
-	Timeout int               `yaml:"timeout,omitempty"` // in seconds
+	Timeout int               `yaml:"timeout,omitempty"` // request timeout in seconds
+	// IdleTimeout is the connection pool idle timeout in seconds for the
+	// shared HTTP client. Default is 30 seconds.
+	IdleTimeout int `yaml:"idleTimeout,omitempty"`
 }
 
 // ModelParams holds the common parameters for a model configuration.

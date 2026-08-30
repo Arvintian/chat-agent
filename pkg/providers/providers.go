@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"net/http"
 	"time"
 
 	"github.com/Arvintian/chat-agent/pkg/config"
@@ -17,7 +18,19 @@ import (
 	"github.com/cloudwego/eino-ext/components/model/qianfan"
 	"github.com/cloudwego/eino-ext/components/model/qwen"
 	"github.com/cloudwego/eino/components/model"
+	"google.golang.org/genai"
 )
+
+// providerHTTPClient builds the shared HTTP client for a provider, applying the
+// request timeout, the connection-pool idle timeout (default 30s) and any
+// custom headers. All providers use this to keep their HTTP behaviour aligned.
+func providerHTTPClient(providerCfg *config.Provider) *http.Client {
+	return newHTTPClient(
+		providerCfg.Headers,
+		time.Duration(providerCfg.Timeout)*time.Second,
+		time.Duration(providerCfg.IdleTimeout)*time.Second,
+	)
+}
 
 // createOpenAIModel creates OpenAI model
 func (f *Factory) createOpenAIModel(ctx context.Context, modelCfg *config.Model, providerCfg *config.Provider) (model.ToolCallingChatModel, error) {
@@ -38,17 +51,7 @@ func (f *Factory) createOpenAIModel(ctx context.Context, modelCfg *config.Model,
 		cfg.ReasoningEffort = effort
 	}
 
-	if providerCfg.Timeout > 0 {
-		cfg.Timeout = time.Duration(providerCfg.Timeout) * time.Second
-	}
-
-	if len(providerCfg.Headers) > 0 {
-		client := newHeaderClient(providerCfg.Headers)
-		if providerCfg.Timeout > 0 {
-			client.Timeout = time.Duration(providerCfg.Timeout) * time.Second
-		}
-		cfg.HTTPClient = client
-	}
+	cfg.HTTPClient = providerHTTPClient(providerCfg)
 
 	if modelCfg.MaxTokens > 0 {
 		cfg.MaxTokens = &modelCfg.MaxTokens
@@ -68,9 +71,10 @@ func (f *Factory) createOpenAIModel(ctx context.Context, modelCfg *config.Model,
 // createClaudeModel creates Claude model
 func (f *Factory) createClaudeModel(ctx context.Context, modelCfg *config.Model, providerCfg *config.Provider) (model.ToolCallingChatModel, error) {
 	cfg := &claude.Config{
-		Model:   modelCfg.Model,
-		BaseURL: &(providerCfg.BaseURL),
-		APIKey:  providerCfg.APIKey,
+		Model:      modelCfg.Model,
+		BaseURL:    &(providerCfg.BaseURL),
+		APIKey:     providerCfg.APIKey,
+		HTTPClient: providerHTTPClient(providerCfg),
 		Thinking: &claude.Thinking{
 			Enable: modelCfg.Thinking,
 		},
@@ -92,8 +96,20 @@ func (f *Factory) createClaudeModel(ctx context.Context, modelCfg *config.Model,
 
 // createGeminiModel creates Gemini model
 func (f *Factory) createGeminiModel(ctx context.Context, modelCfg *config.Model, providerCfg *config.Provider) (model.ToolCallingChatModel, error) {
+	geminiClient, err := genai.NewClient(ctx, &genai.ClientConfig{
+		APIKey:     providerCfg.APIKey,
+		HTTPClient: providerHTTPClient(providerCfg),
+		HTTPOptions: genai.HTTPOptions{
+			BaseURL: providerCfg.BaseURL,
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	cfg := &gemini.Config{
-		Model: modelCfg.Model,
+		Client: geminiClient,
+		Model:  modelCfg.Model,
 	}
 
 	// Gemini thinking support through thinking budget
@@ -125,6 +141,7 @@ func (f *Factory) createQwenModel(ctx context.Context, modelCfg *config.Model, p
 		BaseURL:        providerCfg.BaseURL,
 		APIKey:         providerCfg.APIKey,
 		EnableThinking: &modelCfg.Thinking,
+		HTTPClient:     providerHTTPClient(providerCfg),
 	}
 
 	if modelCfg.MaxTokens > 0 {
@@ -173,9 +190,10 @@ func (f *Factory) createQianfanModel(ctx context.Context, modelCfg *config.Model
 // createArkModel creates Ark model
 func (f *Factory) createArkModel(ctx context.Context, modelCfg *config.Model, providerCfg *config.Provider) (model.ToolCallingChatModel, error) {
 	cfg := &ark.ChatModelConfig{
-		Model:   modelCfg.Model,
-		BaseURL: providerCfg.BaseURL,
-		APIKey:  providerCfg.APIKey,
+		Model:      modelCfg.Model,
+		BaseURL:    providerCfg.BaseURL,
+		APIKey:     providerCfg.APIKey,
+		HTTPClient: providerHTTPClient(providerCfg),
 	}
 
 	if modelCfg.Thinking {
@@ -206,9 +224,10 @@ func (f *Factory) createArkModel(ctx context.Context, modelCfg *config.Model, pr
 // createDeepSeekModel creates DeepSeek model
 func (f *Factory) createDeepSeekModel(ctx context.Context, modelCfg *config.Model, providerCfg *config.Provider) (model.ToolCallingChatModel, error) {
 	cfg := &deepseek.ChatModelConfig{
-		Model:   modelCfg.Model,
-		BaseURL: providerCfg.BaseURL,
-		APIKey:  providerCfg.APIKey,
+		Model:      modelCfg.Model,
+		BaseURL:    providerCfg.BaseURL,
+		APIKey:     providerCfg.APIKey,
+		HTTPClient: providerHTTPClient(providerCfg),
 	}
 
 	if modelCfg.Thinking {
@@ -239,8 +258,9 @@ func (f *Factory) createDeepSeekModel(ctx context.Context, modelCfg *config.Mode
 // createOllamaModel creates Ollama model
 func (f *Factory) createOllamaModel(ctx context.Context, modelCfg *config.Model, providerCfg *config.Provider) (model.ToolCallingChatModel, error) {
 	cfg := &ollama.ChatModelConfig{
-		Model:   modelCfg.Model,
-		BaseURL: providerCfg.BaseURL,
+		Model:      modelCfg.Model,
+		BaseURL:    providerCfg.BaseURL,
+		HTTPClient: providerHTTPClient(providerCfg),
 		Thinking: &api.ThinkValue{
 			Value: modelCfg.Thinking,
 		},
@@ -269,9 +289,10 @@ func (f *Factory) createOpenRouterModel(ctx context.Context, modelCfg *config.Mo
 		effort = openrouter.EffortOfNone
 	}
 	cfg := &openrouter.Config{
-		Model:   modelCfg.Model,
-		BaseURL: providerCfg.BaseURL,
-		APIKey:  providerCfg.APIKey,
+		Model:      modelCfg.Model,
+		BaseURL:    providerCfg.BaseURL,
+		APIKey:     providerCfg.APIKey,
+		HTTPClient: providerHTTPClient(providerCfg),
 		Reasoning: &openrouter.Reasoning{
 			Effort:  effort,
 			Exclude: !modelCfg.Thinking,
