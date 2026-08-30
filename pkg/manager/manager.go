@@ -269,7 +269,10 @@ func (m *Manager) truncateLocked() {
 	// Persist the truncated history (full overwrite). Without this the JSONL
 	// file still contains the dropped rounds, so after a restart the restored
 	// history differs from what was last sent to the model (and would even
-	// exceed the window).
+	// exceed the window). Normalize first so the overwrite is byte-identical
+	// to the tool-call-ordered history the model actually saw (matters on the
+	// first turn after a restart, before any GetMessages has sorted in memory).
+	m.normalizeRoundsLocked()
 	if m.compressionCompleteCallback != nil {
 		if err := m.compressionCompleteCallback(flattenRounds(m.messages)); err != nil {
 			logger.Warn("manager", fmt.Sprintf("Failed to persist messages after truncate: %v", err))
@@ -368,6 +371,132 @@ func (m *Manager) validateAndCleanRound(messages []*schema.Message) []*schema.Me
 	return validMessages
 }
 
+// orderToolMessages reorders tool-result messages so that, for every
+// assistant message carrying tool_calls, the immediately following tool
+// messages appear in the same order as the tool_calls that produced them.
+//
+// Tool results are appended in parallel completion order (whichever tool
+// finished first), which is nondeterministic and can differ from the order
+// the model was actually fed. Normalizing here — at the single model-facing
+// boundary — keeps consecutive request prefixes byte-identical and stable
+// across restarts, which is what provider prompt caches match on.
+//
+// The function is idempotent and safe on incomplete rounds: tool messages
+// whose ID is not present in the preceding assistant message's tool_calls
+// (e.g. a truncated or aborted round) are preserved, appended in their
+// original relative order after the matched ones. Non-tool messages and
+// assistant/user messages are left in place; only the contiguous tool block
+// directly after a tool-calling assistant message is reordered.
+//
+// Fast path: a round that is already in canonical order is returned as-is
+// (no allocation, no copy). GetMessages writes the result back into
+// m.messages[i], so once a round is fixed it stays canonical and every later
+// snapshot only pays for the allocation-free scan in toolBlockNeedsReorder;
+// the allocating reorder runs at most once per round.
+func orderToolMessages(messages []*schema.Message) []*schema.Message {
+	if len(messages) < 2 {
+		return messages
+	}
+
+	if !toolBlockNeedsReorder(messages) {
+		return messages
+	}
+
+	result := make([]*schema.Message, 0, len(messages))
+	i := 0
+	for i < len(messages) {
+		msg := messages[i]
+		result = append(result, msg)
+
+		if msg.Role != schema.Assistant || len(msg.ToolCalls) == 0 {
+			i++
+			continue
+		}
+		i++
+
+		// Collect the contiguous block of tool messages following this
+		// assistant message.
+		var tools []*schema.Message
+		for i < len(messages) && messages[i].Role == schema.Tool {
+			tools = append(tools, messages[i])
+			i++
+		}
+		if len(tools) <= 1 {
+			result = append(result, tools...)
+			continue
+		}
+
+		byID := make(map[string]*schema.Message, len(tools))
+		placed := make(map[string]bool, len(tools))
+		for _, t := range tools {
+			if t.ToolCallID != "" {
+				byID[t.ToolCallID] = t
+			}
+		}
+
+		// Emit matched tools in tool-call order.
+		var ordered []*schema.Message
+		for _, tc := range msg.ToolCalls {
+			if t, ok := byID[tc.ID]; ok {
+				ordered = append(ordered, t)
+				placed[tc.ID] = true
+			}
+		}
+		// Preserve any unmatched tools (incomplete round) in original order.
+		for _, t := range tools {
+			if t.ToolCallID == "" || !placed[t.ToolCallID] {
+				ordered = append(ordered, t)
+			}
+		}
+
+		result = append(result, ordered...)
+	}
+	return result
+}
+
+// toolBlockNeedsReorder reports whether any tool-result block in the round is
+// out of the canonical tool-call order. It is a single allocation-free pass
+// (ID comparisons only) so it can run on every model-facing snapshot cheaply,
+// letting orderToolMessages skip the allocating reorder in the common
+// already-ordered case.
+//
+// Canonical target for a block: every matched tool in tool-call order first,
+// then any unmatched tools. Walking the block left-to-right while consuming
+// the assistant message's tool_calls in order, the first tool that is not the
+// next expected matched tool is acceptable only once all matched tools have
+// been placed (i.e. the rest are unmatched).
+func toolBlockNeedsReorder(messages []*schema.Message) bool {
+	i := 0
+	for i < len(messages) {
+		msg := messages[i]
+		i++
+		if msg.Role != schema.Assistant || len(msg.ToolCalls) == 0 {
+			continue
+		}
+		start := i
+		for i < len(messages) && messages[i].Role == schema.Tool {
+			i++
+		}
+		block := messages[start:i]
+		if len(block) <= 1 {
+			continue
+		}
+
+		k := 0
+		for _, t := range block {
+			if k < len(msg.ToolCalls) && t.ToolCallID == msg.ToolCalls[k].ID {
+				k++
+				continue
+			}
+			if k == len(msg.ToolCalls) {
+				continue // all matched tools placed; remaining are unmatched
+			}
+			return true // a matched tool is still due before this one
+		}
+	}
+	return false
+}
+
 // compressIfNeeded compresses the oldest rounds when the window exceeds
 // maxMessageRound.
 //
@@ -399,6 +528,13 @@ func (m *Manager) compressIfNeeded(ctx context.Context) {
 		return
 	}
 	m.compressing = true
+	// Normalize before snapshotting: the summary model call leads with
+	// flattenRounds(oldRounds) and the persistence below leads with
+	// flattenRounds(m.messages). Both must be byte-identical to the
+	// tool-call-ordered history the runner feeds the model so the summary call
+	// hits the prompt cache and the overwrite stays canonical. Matters on the
+	// first turn after a restart, before any GetMessages has sorted in memory.
+	m.normalizeRoundsLocked()
 	oldRounds := m.messages[:numToCompress]
 	// Snapshot the shared system prompt under the lock; doCompression runs
 	// lock-free, so it must not read these fields directly.
@@ -521,6 +657,26 @@ func flattenRounds(rounds [][]*schema.Message) []*schema.Message {
 	return flat
 }
 
+// normalizeRoundsLocked validates and sorts every round in place. The caller
+// must hold m.mu.
+//
+// It is idempotent and cheap in the steady state: a round that is already
+// clean and in canonical tool-call order passes through the allocation-free
+// fast paths untouched, so repeated calls cost only a scan. Because it writes
+// the normalized rounds back, a round stays canonical once fixed.
+//
+// Every path that reads m.messages for a model-facing snapshot (GetMessages)
+// or a persistence overwrite (compress/truncate) must normalize first, so the
+// result is byte-identical to the tool-call-ordered history the runner feeds
+// the model — this is what keeps provider prompt caches matching.
+func (m *Manager) normalizeRoundsLocked() {
+	for i, round := range m.messages {
+		if len(round) > 0 {
+			m.messages[i] = orderToolMessages(m.validateAndCleanRound(round))
+		}
+	}
+}
+
 // GetMessages retrieves the messages in the current context.
 // All rounds are returned in full (append-only: no simplification of older
 // rounds), so the sequence of consecutive requests shares a stable, growing
@@ -543,11 +699,14 @@ func (m *Manager) GetMessages() []*schema.Message {
 	// every model-facing snapshot passes through — both guarantees the returned
 	// history is clean and progressively repairs the stored rounds, so no
 	// caller needs a separate validation pass.
-	for i, round := range m.messages {
-		if len(round) > 0 {
-			m.messages[i] = m.validateAndCleanRound(round)
-		}
-	}
+	//
+	// Tool-result order is also normalized here (see normalizeRoundsLocked):
+	// tool messages are appended in parallel completion order while the model
+	// is fed them in the assistant message's tool-call order. The same call is
+	// made from the compression and truncate persistence paths so every
+	// model-facing snapshot and every persistence overwrite is byte-identical
+	// to the live request.
+	m.normalizeRoundsLocked()
 	return flattenRounds(m.messages)
 }
 
