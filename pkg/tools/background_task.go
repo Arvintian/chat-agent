@@ -66,7 +66,9 @@ func (tm *BackgroundTaskManager) generateID() string {
 	return fmt.Sprintf("%d", id)
 }
 
-func (tm *BackgroundTaskManager) StartTask(command, workdir string) (*BackgroundTask, error) {
+// StartTask starts a background task. env is the full environment for the
+// child process; if nil, the process environment is inherited.
+func (tm *BackgroundTaskManager) StartTask(command, workdir string, env []string) (*BackgroundTask, error) {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 
@@ -87,6 +89,9 @@ func (tm *BackgroundTaskManager) StartTask(command, workdir string) (*Background
 	p.setSysProcAttr(cmd)
 	task.platform = p
 
+	if len(env) > 0 {
+		cmd.Env = env
+	}
 	if workdir != "" {
 		cmd.Dir = workdir
 	}

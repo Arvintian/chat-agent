@@ -81,14 +81,31 @@ models:
 #   - hooks: session hooks configuration
 #   - default: whether this is the default chat preset
 #
-# tools section configuration:
-#   Each tool can have:
+# tools section configuration (top-level "tools:"):
+#   A dictionary mapping tool name to tool definition. Chats reference tools by
+#   name via the chat's "tools" list.
+#   Each tool definition can have:
 #   - category: tool category ("filesystem", "cmd", "smart_cmd")
-#   - params: parameters for the tool
-#     - workDir: working directory (required for filesystem and cmd tools)
-#     - exclude: list of tool names to exclude (optional, for filesystem category)
-#       Example filesystem tools that can be excluded: read_file, write_file, list_directory, etc.
+#   - params: a dictionary of tool parameters (keys depend on category):
+#       - workDir: working directory (required for filesystem and cmd tools)
+#       - exclude: list of tool names to exclude (optional, for filesystem category)
+#         Example filesystem tools that can be excluded: read_file, write_file, list_directory, etc.
+#       - timeout: command timeout in seconds (optional, for cmd/smart_cmd, default 5)
+#       - env: dictionary of environment variables applied to every executed
+#         command (optional, for cmd/smart_cmd). Overrides the corresponding
+#         process environment variables.
 #   - autoApproval: whether to auto-approve tool calls (default: false)
+#   - autoApprovalTools: list of specific tool names to auto-approve
+#   Example:
+# tools:
+#   shell:
+#     category: cmd
+#     params:
+#       workDir: /home/user
+#       timeout: 30
+#       env:
+#         http_proxy: http://127.0.0.1:7890
+#         https_proxy: http://127.0.0.1:7890
 chats:
   default:
     model: deepseek-chat

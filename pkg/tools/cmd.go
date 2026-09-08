@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -42,6 +44,7 @@ func getCommandTools(ctx context.Context, params map[string]interface{}) ([]tool
 	cmdTool := RunTerminalCommandTool{
 		WorkingDir:  cfg.WorkingDir,
 		Timeout:     time.Duration(cfg.Timeout) * time.Second,
+		Env:         cfg.Env,
 		TaskManager: tm,
 	}
 	cmdBgTool := RunBackgroundCommandTool{
@@ -53,6 +56,9 @@ func getCommandTools(ctx context.Context, params map[string]interface{}) ([]tool
 type RunTerminalCommandTool struct {
 	WorkingDir      string        `json:"workDir"`
 	Timeout         time.Duration `json:"timeout"`
+	// Env holds default environment variables (from tool config) applied to every
+	// command executed by this tool, e.g. http_proxy/https_proxy.
+	Env map[string]string `json:"env,omitempty"`
 	AllowedCommands []string
 	TaskManager     *BackgroundTaskManager
 }
@@ -61,6 +67,26 @@ type RunTerminalCommandArgs struct {
 	Command    string `json:"command"`
 	WorkingDir string `json:"working_dir,omitempty"`
 	Background bool   `json:"background,omitempty"`
+}
+
+// resolveEnv builds the final environment for command execution.
+// Precedence (lowest to highest): process environment, tool-level Env config.
+func (t *RunTerminalCommandTool) resolveEnv() []string {
+	merged := make(map[string]string)
+	for _, kv := range os.Environ() {
+		if k, v, ok := strings.Cut(kv, "="); ok {
+			merged[k] = v
+		}
+	}
+	for k, v := range t.Env {
+		merged[k] = v
+	}
+	env := make([]string, 0, len(merged))
+	for k, v := range merged {
+		env = append(env, k+"="+v)
+	}
+	sort.Strings(env)
+	return env
 }
 
 func (t *RunTerminalCommandTool) Info(ctx context.Context) (*schema.ToolInfo, error) {
@@ -120,8 +146,11 @@ func (t *RunTerminalCommandTool) InvokableRun(ctx context.Context, argumentsInJS
 		workingDir = args.WorkingDir
 	}
 
+	// Resolve environment variables (process env < tool config env)
+	cmdEnv := t.resolveEnv()
+
 	if args.Background {
-		return t.runInBackground(args.Command, workingDir)
+		return t.runInBackground(args.Command, workingDir, cmdEnv)
 	}
 
 	// Create command with timeout context
@@ -133,6 +162,7 @@ func (t *RunTerminalCommandTool) InvokableRun(ctx context.Context, argumentsInJS
 	platform := getTaskPlatform()
 	cmd = platform.createCommand(ctx, args.Command)
 	platform.setSysProcAttr(cmd)
+	cmd.Env = cmdEnv
 	if workingDir != "" {
 		cmd.Dir = workingDir
 	}
@@ -185,8 +215,8 @@ func (t *RunTerminalCommandTool) InvokableRun(ctx context.Context, argumentsInJS
 	return result.String(), nil
 }
 
-func (t *RunTerminalCommandTool) runInBackground(command, workdir string) (string, error) {
-	task, err := t.TaskManager.StartTask(command, workdir)
+func (t *RunTerminalCommandTool) runInBackground(command, workdir string, env []string) (string, error) {
+	task, err := t.TaskManager.StartTask(command, workdir, env)
 	if err != nil {
 		return "", fmt.Errorf("failed to start background task: %w", err)
 	}
