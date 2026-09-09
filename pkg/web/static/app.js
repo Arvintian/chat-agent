@@ -374,6 +374,8 @@ let lastUserMessageElement = null;  // DOM element of the last user message
 
 // Store chat configurations (name -> { hasKeepHook: boolean })
 const chatConfigs = {};
+// Chats already active in another tab of this session (name -> true), from /chats active_chats
+let activeChatsMap = {};
 
 // Scroll behavior is now handled by scroll-handler.js module
 
@@ -439,15 +441,33 @@ function saveTabChat(chatName) {
 }
 
 // Update clear button count display
-function updateClearBadge(count) {
-    const countEl = document.getElementById('clear-count');
-    if (!countEl) return;
+// Current message count of the active chat, shown on the header badge (mobile)
+// and on the sidebar item (desktop, where the header is hidden)
+let sidebarMsgCount = 0;
 
-    if (count !== undefined && count !== null && count > 0) {
-        countEl.textContent = `(${count})`;
-        countEl.style.display = 'inline';
-    } else {
-        countEl.style.display = 'none';
+function updateClearBadge(count) {
+    sidebarMsgCount = (count !== undefined && count !== null && count > 0) ? count : 0;
+
+    const countEl = document.getElementById('clear-count');
+    if (countEl) {
+        if (count !== undefined && count !== null && count > 0) {
+            countEl.textContent = `(${count})`;
+            countEl.style.display = 'inline';
+        } else {
+            countEl.style.display = 'none';
+        }
+    }
+
+    // Keep the sidebar count badge in sync (desktop)
+    const badge = document.querySelector('.chat-item-count');
+    if (badge) {
+        if (sidebarMsgCount > 0) {
+            badge.textContent = `(${sidebarMsgCount})`;
+            badge.style.display = 'inline-flex';
+        } else {
+            badge.textContent = '';
+            badge.style.display = 'none';
+        }
     }
 }
 
@@ -455,6 +475,131 @@ function updateClearBadge(count) {
 function isMobileDevice() {
     return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
         (window.innerWidth <= 768);
+}
+
+// ===== Desktop sidebar: chat list rendering and switching =====
+
+let sidebarChats = [];
+
+// Render the desktop chat list sidebar (no-op on mobile, it is hidden by CSS)
+function renderChatSidebar(chats, activeChats) {
+    sidebarChats = chats || [];
+    activeChatsMap = activeChats || {};
+    buildSidebarList();
+}
+
+// Build/refresh the sidebar list. The desktop header banner is hidden, so the
+// keep/clear actions of the current chat are rendered on its sidebar item.
+function buildSidebarList() {
+    const list = document.getElementById('chat-list');
+    if (!list) return;
+    list.innerHTML = '';
+    for (const chatInfo of sidebarChats) {
+        const chatName = chatInfo.name;
+        const locked = !!activeChatsMap[chatName];
+        const isActive = chatName === currentChat && !locked;
+
+        const item = document.createElement('div');
+        item.className = 'chat-list-item' + (locked ? ' locked' : '') + (isActive ? ' active' : '');
+        item.dataset.chat = chatName;
+
+        const label = document.createElement('span');
+        label.className = 'chat-item-label';
+        label.textContent = (locked ? '🔒 ' : '') + chatName;
+        item.appendChild(label);
+
+        if (isActive) {
+            const actions = document.createElement('span');
+            actions.className = 'chat-item-actions';
+            if (chatConfigs[chatName] && chatConfigs[chatName].hasKeepHook) {
+                const keepBtn = document.createElement('button');
+                keepBtn.className = 'chat-item-btn';
+                keepBtn.textContent = '💾';
+                keepBtn.title = 'Execute Keep Hook';
+                keepBtn.onclick = (e) => { e.stopPropagation(); keepSession(); };
+                actions.appendChild(keepBtn);
+            }
+            const clearBtn = document.createElement('button');
+            clearBtn.className = 'chat-item-btn';
+            clearBtn.textContent = '🗑️';
+            clearBtn.title = 'Clear conversation';
+            clearBtn.onclick = (e) => { e.stopPropagation(); showClearModal(); };
+            actions.appendChild(clearBtn);
+            // Context message count (kept in sync by updateClearBadge)
+            const countBadge = document.createElement('span');
+            countBadge.className = 'chat-item-count';
+            countBadge.textContent = sidebarMsgCount > 0 ? `(${sidebarMsgCount})` : '';
+            countBadge.style.display = sidebarMsgCount > 0 ? 'inline-flex' : 'none';
+            actions.appendChild(countBadge);
+            item.appendChild(actions);
+        }
+
+        if (locked) {
+            item.title = 'Already open in another tab of this session';
+        } else {
+            item.addEventListener('click', () => switchChatFromSidebar(chatName));
+        }
+        list.appendChild(item);
+    }
+}
+
+// Refresh the sidebar (active highlight + keep/clear buttons follow the current chat)
+function updateSidebarActive() {
+    if (sidebarChats.length > 0) {
+        buildSidebarList();
+    }
+}
+
+// Switch to another chat from the sidebar (desktop). The server keeps every
+// chat's state alive inside the session, so switching is a select_chat call.
+async function switchChatFromSidebar(chatName) {
+    if (!chatConfigs[chatName] || activeChatsMap[chatName]) return;
+    if (chatName === currentChat) {
+        const input = document.getElementById('message-input');
+        if (input && !isGenerating) input.focus();
+        return;
+    }
+    if (isGenerating) {
+        showToast('Stop the current response before switching chats', true);
+        return;
+    }
+    // Drop any pending approval for the chat being left
+    const approvalModal = document.getElementById('approval-modal');
+    if (approvalModal && approvalModal.style.display !== 'none') {
+        hideApprovalModal();
+    }
+
+    if (currentChat === null) {
+        // Entering chat from the placeholder page: swap panels like startChat
+        document.getElementById('login-panel').style.display = 'none';
+        const chatPanel = document.getElementById('chat-panel');
+        const vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+        chatPanel.style.height = vh + 'px';
+        chatPanel.style.display = 'flex';
+    } else {
+        // Reset chat area state for the new chat
+        const messages = document.getElementById('messages');
+        if (messages) messages.innerHTML = '';
+        const input = document.getElementById('message-input');
+        if (input) {
+            input.value = '';
+            input.disabled = false;
+        }
+        isGenerating = false;
+        updateSendButton();
+        removeRegenerateFromLastMessage();
+        lastUserMessage = '';
+        lastUserFiles = null;
+        lastUserMessageElement = null;
+        toolCalls = {};
+        pendingApprovals = {};
+        currentApprovalId = null;
+        if (window.InputHistory) window.InputHistory.resetHistoryNavigation();
+        if (window.ScrollHandler) window.ScrollHandler.setUserScrolling(false);
+        updateClearBadge(0);
+    }
+
+    await enterChat(chatName);
 }
 
 // Load session ID from localStorage
@@ -614,6 +759,9 @@ async function init() {
             }
         }
 
+        // Render the desktop sidebar chat list
+        renderChatSidebar(data.chats, activeChats);
+
         // Auto-start chat on initial page load:
         // Only auto-enter if there's a saved chat to restore (tab chat / last used)
         if (isInitialPageLoad && chatToSelect) {
@@ -635,6 +783,24 @@ async function startChat() {
         alert('Please select a chat');
         return;
     }
+    document.getElementById('login-header').textContent = chatName;
+    document.getElementById('login-panel').style.display = 'none';
+
+    // Ensure chat-panel has correct height before displaying (fixes PWA input-area hidden issue)
+    const chatPanel = document.getElementById('chat-panel');
+    if (chatPanel) {
+        const vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+        chatPanel.style.height = vh + 'px';
+    }
+    document.getElementById('chat-panel').style.display = 'flex';
+
+    await enterChat(chatName);
+}
+
+// Activate a chat: set current chat, update header/title/keep button, load local
+// history and (re)connect the WebSocket with a select_chat message.
+// Shared by startChat (selection page) and switchChatFromSidebar (desktop sidebar).
+async function enterChat(chatName) {
     currentChat = chatName;
     window.MessageHistory.setCurrentChat(chatName);
 
@@ -648,17 +814,6 @@ async function startChat() {
 
     // Update document title to reflect current chat name
     document.title = chatName;
-
-    document.getElementById('login-header').textContent = chatName;
-    document.getElementById('login-panel').style.display = 'none';
-
-    // Ensure chat-panel has correct height before displaying (fixes PWA input-area hidden issue)
-    const chatPanel = document.getElementById('chat-panel');
-    if (chatPanel) {
-        const vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
-        chatPanel.style.height = vh + 'px';
-    }
-    document.getElementById('chat-panel').style.display = 'flex';
 
     // Update agent header with chat name
     const agentHeader = document.getElementById('agent-header');
@@ -702,6 +857,16 @@ async function startChat() {
         // WebSocket not connected, establish new connection
         console.log('WebSocket not connected, establishing new connection');
         connectWebSocket();
+    }
+
+    updateSidebarActive();
+}
+
+// Header banner click: back to chat selection on mobile only.
+// On desktop the sidebar is the single switching entry, so the banner is static.
+function headerBack() {
+    if (isMobileDevice()) {
+        backToChatSelection();
     }
 }
 

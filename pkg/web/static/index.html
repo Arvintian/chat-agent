@@ -19,8 +19,16 @@
 </head>
 
 <body>
+    <!-- Desktop only: chat list sidebar (hidden on mobile) -->
+    <aside id="chat-sidebar" class="chat-sidebar">
+        <div class="sidebar-header"><span class="sidebar-title">💬 Chats</span></div>
+        <div id="chat-list" class="chat-list"></div>
+    </aside>
+
+    <div id="main-area" class="main-area">
     <div class="login-panel" id="login-panel">
         <h2 id="login-header">🤖 Chat-Agent</h2>
+        <p class="sidebar-hint">Select a chat from the sidebar</p>
         <div class="login-controls">
             <select id="chat-select">
                 <option value="">-- Select a chat --</option>
@@ -33,8 +41,7 @@
         <div class="header">
             <div class="header-left">
                 <button id="keep-btn" onclick="keepSession()" title="Execute Keep Hook">💾 Keep</button>
-                <span id="agent-header" onclick="backToChatSelection()" style="cursor: pointer;"
-                    title="Back to chat selection">
+                <span id="agent-header" onclick="headerBack()">
                     <span class="back-icon">←</span>
                     <span class="chat-name-text">🤖 Chat-Agent</span>
                 </span>
@@ -148,6 +155,7 @@
                 <button id="send-btn" onclick="sendMessage()" title="Send message">➤</button>
             </div>
         </div>
+    </div>
     </div>
 
 
