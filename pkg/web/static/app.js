@@ -482,6 +482,22 @@ function isMobileDevice() {
 let sidebarChats = [];
 
 // Render the desktop chat list sidebar (no-op on mobile, it is hidden by CSS)
+// Sidebar collapse state (desktop only), persisted across reloads.
+// When collapsed, the header banner is restored (mobile look).
+let sidebarCollapsed = false;
+
+function applySidebarCollapsed() {
+    document.body.classList.toggle('sidebar-collapsed', sidebarCollapsed);
+}
+
+function toggleSidebar() {
+    sidebarCollapsed = !sidebarCollapsed;
+    try {
+        localStorage.setItem('chatAgentSidebarCollapsed', sidebarCollapsed ? '1' : '0');
+    } catch (e) { /* ignore */ }
+    applySidebarCollapsed();
+}
+
 function renderChatSidebar(chats, activeChats) {
     sidebarChats = chats || [];
     activeChatsMap = activeChats || {};
@@ -657,6 +673,16 @@ async function init() {
 
     // Initialize quick phrases
     window.QuickPhrases.init();
+
+    // Restore sidebar collapsed state (desktop)
+    try {
+        sidebarCollapsed = localStorage.getItem('chatAgentSidebarCollapsed') === '1';
+    } catch (e) { /* ignore */ }
+    applySidebarCollapsed();
+    const collapseBtn = document.getElementById('collapse-sidebar-btn');
+    if (collapseBtn) collapseBtn.onclick = toggleSidebar;
+    const expandBtn = document.getElementById('expand-sidebar-btn');
+    if (expandBtn) expandBtn.onclick = toggleSidebar;
 
     // Load webui config from server
     try {
@@ -865,7 +891,9 @@ async function enterChat(chatName) {
 // Header banner click: back to chat selection on mobile only.
 // On desktop the sidebar is the single switching entry, so the banner is static.
 function headerBack() {
-    if (isMobileDevice()) {
+    // Mobile: banner chat name goes back to selection.
+    // Desktop with the sidebar collapsed: same behavior (banner is the only entry).
+    if (isMobileDevice() || sidebarCollapsed) {
         backToChatSelection();
     }
 }
