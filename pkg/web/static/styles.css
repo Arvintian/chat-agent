@@ -538,6 +538,7 @@ pre.code-block:hover .code-preview-btn {
 }
 
 #input-area {
+    position: relative; /* containing block for the scroll-to-bottom button */
     display: flex;
     flex-direction: column;
     gap: 10px;
@@ -1498,9 +1499,13 @@ pre.code-block:hover .code-preview-btn {
 
 /* Scroll to bottom button styles */
 .scroll-to-bottom-btn {
-    position: fixed;
-    right: calc(15% + 20px);
-    bottom: 90px;
+    /* Anchored above the send button (right edge of the input area),
+       nudged a few px to the left of the send button's right edge,
+       independent of viewport size and sidebar state */
+    position: absolute;
+    right: 22px;
+    bottom: 100%;
+    margin-bottom: 10px;
     width: 40px;
     height: 40px;
     border-radius: 50%;
@@ -2510,6 +2515,8 @@ pre.code-block:hover .code-preview-btn {
     body.sidebar-collapsed #agent-header:hover {
         color: #667eea;
     }
+
+
 }
 
 /* Mobile: banner chat name is clickable to go back to chat selection */
