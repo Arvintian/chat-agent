@@ -116,6 +116,11 @@ func (hm *HookManager) executeScriptHook(ctx context.Context, cfg *config.Sessio
 		scriptPath = filepath.Join(hm.baseDir, scriptPath)
 	}
 
+	// Ensure the base working directory exists, exec chdir fails otherwise
+	if err := os.MkdirAll(hm.baseDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create hooks directory %s: %w", hm.baseDir, err)
+	}
+
 	// Check if script exists
 	if _, err := os.Stat(scriptPath); os.IsNotExist(err) {
 		return nil, fmt.Errorf("hook script does not exist: %s", scriptPath)
