@@ -1268,6 +1268,8 @@ function handleMessage(msg) {
         case 'complete':
             // 只有在生成中才重置状态（避免重复处理）
             if (isGenerating) {
+                // 停止/异常时服务端可能不发 final chunk，兜底收尾（正常流程下已是幂等空操作）
+                finalizeStreaming(false);
                 // 重新启用输入框
                 const input = document.getElementById('message-input');
                 if (input) {
@@ -1297,6 +1299,8 @@ function handleMessage(msg) {
             }
             // 只有在生成中才重置状态
             if (isGenerating) {
+                // 出错时服务端不发 final chunk，手动收尾并重置流式状态
+                finalizeStreaming(false);
                 const inputErr = document.getElementById('message-input');
                 if (inputErr) {
                     inputErr.disabled = false;
@@ -1314,6 +1318,8 @@ function handleMessage(msg) {
         case 'stopped':
             // 只有在生成中才重置状态
             if (isGenerating) {
+                // 停止时服务端不发 final chunk，手动收尾并重置流式状态
+                finalizeStreaming(false);
                 isGenerating = false;
                 updateSendButton();
                 const inputStopped = document.getElementById('message-input');
@@ -1812,6 +1818,7 @@ function regenerate() {
     currentContentType = '';
     chunkElement = null;
     thinkingElement = null;
+    compressionHintElement = null;
 
     // Hide regenerate button
     removeRegenerateFromLastMessage();
@@ -2009,6 +2016,9 @@ function displayToolCall(name, args, index, streaming) {
             </div>
         `;
 
+        // 工具调用出现也视为回复开始：移除压缩提示
+        removeCompressionHint();
+
         document.getElementById('messages').appendChild(div);
         toolCall.element = div;
         toolCall.argsElement = div.querySelector('.tool-args pre');
@@ -2092,60 +2102,94 @@ let currentContentType = '';
 let thinkingBlock = null;
 let responseBlock = null;
 
+// 压缩提示消息（system 类型，思考/正文开始后自动移除）
+let compressionHintElement = null;
+
+function removeCompressionHint() {
+    if (compressionHintElement) {
+        compressionHintElement.remove();
+        compressionHintElement = null;
+    }
+}
+
 // Smart scroll to bottom - delegated to scroll-handler.js
 function smartScrollToBottom(force) {
     window.ScrollHandler.smartScrollToBottom(force);
 }
 
-function displayChunk(content, isFirst, isLast, contentType = 'response') {
-    // 检查是否是最后的 final chunk（空内容）
-    if (isLast && content === '') {
-        // 最终完成处理
-        // thinkingBlock: 纯 markdown，不添加 copy/footer，不处理 mermaid — nothing extra needed
+// 收尾一轮流式输出：补 footer/复制按钮、(可选)保存历史、重置流式状态。
+// final chunk 正常调用；stopped/error 时服务端不发 final chunk，也必须调用，
+// 否则 responseBlock 等状态残留，下一轮正文会被追加到上一轮的旧块后面。
+function finalizeStreaming(saveHistory) {
+    // 压缩提示仍未移除（思考/正文未开始，如出错/停止），在这里清掉
+    removeCompressionHint();
+    // thinkingBlock: 纯 markdown，不添加 copy/footer，不处理 mermaid — nothing extra needed
 
-        if (responseBlock) {
-            // 为回答消息添加 footer（如果没有）
-            if (!responseBlock.querySelector('.message-footer')) {
-                const footer = document.createElement('div');
-                footer.className = 'message-footer';
-                footer.innerHTML = `
-                    <button class="copy-btn" onclick="copyResponseMessage(this)" title="Copy response content">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                        </svg>
-                        <span class="copy-text">Copy</span>
-                    </button>
-                `;
-                responseBlock.appendChild(footer);
-            }
-            addCopyButtonsToCodeBlocks(responseBlock);
-            renderMermaidDiagrams(responseBlock);
+    if (responseBlock) {
+        // 为回答消息添加 footer（如果没有）
+        if (!responseBlock.querySelector('.message-footer')) {
+            const footer = document.createElement('div');
+            footer.className = 'message-footer';
+            footer.innerHTML = `
+                <button class="copy-btn" onclick="copyResponseMessage(this)" title="Copy response content">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                    </svg>
+                    <span class="copy-text">Copy</span>
+                </button>
+            `;
+            responseBlock.appendChild(footer);
         }
+        addCopyButtonsToCodeBlocks(responseBlock);
+        renderMermaidDiagrams(responseBlock);
+    }
 
-        // 保存完整消息到本地存储（包含思考内容和回答内容）
+    // 保存完整消息到本地存储（包含思考内容和回答内容）
+    if (saveHistory) {
         const fullContent = (currentAssistantMessage || '').trim();
         const thinkingContent = (currentThinkingChunk || '').trim();
         if (fullContent || thinkingContent) {
             window.MessageHistory.saveMessage(fullContent, 'assistant', null, thinkingContent);
         }
+    }
 
-        // 重置状态
-        thinkingBlock = null;
-        responseBlock = null;
-        currentChunk = '';
-        currentThinkingChunk = '';
-        currentAssistantMessage = '';
-        currentThinkingMessage = '';
-        currentContentType = '';
-        chunkElement = null;
-        thinkingElement = null;
+    // 重置状态
+    thinkingBlock = null;
+    responseBlock = null;
+    currentChunk = '';
+    currentThinkingChunk = '';
+    currentAssistantMessage = '';
+    currentThinkingMessage = '';
+    currentContentType = '';
+    chunkElement = null;
+    thinkingElement = null;
 
-        // Use smart scroll to avoid interrupting user reading
-        // The copy buttons and any subsequent tool calls will be visible if user is at bottom
+    // Use smart scroll to avoid interrupting user reading
+    // The copy buttons and any subsequent tool calls will be visible if user is at bottom
+    smartScrollToBottom();
+}
+
+function displayChunk(content, isFirst, isLast, contentType = 'response') {
+    // 检查是否是最后的 final chunk（空内容）
+    if (isLast && content === '') {
+        finalizeStreaming(true);
+        return;
+    }
+
+    // 处理 system 类型消息（如压缩提示），正文开始后自动移除
+    if (contentType === 'system') {
+        compressionHintElement = document.createElement('div');
+        compressionHintElement.className = 'message assistant system-message';
+        compressionHintElement.innerHTML = `<div class="system-message-content">${escapeHtml(content)}</div>`;
+        document.getElementById('messages').appendChild(compressionHintElement);
         smartScrollToBottom();
         return;
     }
+
+    // 收到任何实际内容（思考或正文，无论首个 chunk 的 first 标志如何），
+    // 都视为回复已开始，移除压缩提示
+    removeCompressionHint();
 
     // 处理实际内容
     if (contentType === 'thinking') {

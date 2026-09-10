@@ -308,6 +308,18 @@ body {
     gap: 4px;
 }
 
+/* System message styles (e.g. compression hint, auto-removed once response starts) */
+.system-message {
+    background-color: #fff8e1;
+    border-left: 3px solid #ffb300;
+}
+
+.system-message-content {
+    color: #795548;
+    font-size: 13px;
+    font-style: italic;
+}
+
 /* Response message styles */
 .response-message {
     background-color: #f5f5f5;
