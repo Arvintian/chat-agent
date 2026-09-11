@@ -147,15 +147,36 @@
     // Update scroll to bottom button visibility
     function updateScrollToBottomButton() {
         if (!scrollToBottomBtn) return;
-        
+
         // Show button when user is scrolling (not at bottom)
-        if (!isAtBottom) {
+        var show = !isAtBottom;
+
+        // 以容器实际状态为准：内容不足一屏（如清空本地内容后）没有可滚动空间，
+        // 此时不应显示按钮，即使 isAtBottom 因缺少 scroll 事件而未更新
+        if (show) {
+            var messages = document.getElementById('messages');
+            if (messages && (messages.scrollHeight - messages.scrollTop - messages.clientHeight) <= SCROLL_THRESHOLD) {
+                show = false;
+                isAtBottom = true;
+                isUserScrolling = false;
+            }
+        }
+
+        if (show) {
             scrollToBottomBtn.classList.add('visible');
             scrollToBottomBtn.style.display = 'flex';
         } else {
             scrollToBottomBtn.classList.remove('visible');
             scrollToBottomBtn.style.display = 'none';
         }
+    }
+
+    // Reset scroll state and hide the button (call when the message list is
+    // cleared or switched, since no scroll event will fire on its own)
+    function reset() {
+        isUserScrolling = false;
+        isAtBottom = true;
+        updateScrollToBottomButton();
     }
 
     // Global scroll to bottom function for button click
@@ -185,6 +206,7 @@
         isUserScrolling: getUserScrollingState,
         isAtBottom: getIsAtBottomState,
         setUserScrolling: setUserScrollingState,
-        setIsAtBottom: setIsAtBottomState
+        setIsAtBottom: setIsAtBottomState,
+        reset: reset
     };
 })();

@@ -596,6 +596,7 @@ async function switchChatFromSidebar(chatName) {
         // Reset chat area state for the new chat
         const messages = document.getElementById('messages');
         if (messages) messages.innerHTML = '';
+        if (window.ScrollHandler) window.ScrollHandler.reset();
         const input = document.getElementById('message-input');
         if (input) {
             input.value = '';
@@ -916,6 +917,8 @@ function backToChatSelection() {
     if (messagesContainer) {
         messagesContainer.innerHTML = '';
     }
+    // 清空后无 scroll 事件，重置滚动状态以隐藏"一键到底"按钮
+    if (window.ScrollHandler) window.ScrollHandler.reset();
 
     // Reset input area
     const input = document.getElementById('message-input');
@@ -2687,6 +2690,8 @@ async function confirmClear() {
         if (messagesContainer) {
             messagesContainer.innerHTML = '';
         }
+        // 清空后无 scroll 事件，重置滚动状态以隐藏"一键到底"按钮
+        if (window.ScrollHandler) window.ScrollHandler.reset();
         // 清除历史记录（IndexedDB + localStorage）
         await window.MessageHistory.clearHistory();
         // Badge will be updated when we receive cleared message from server
