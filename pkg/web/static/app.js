@@ -207,6 +207,18 @@ const mermaidExtension = {
 
 marked.use({ extensions: [mermaidExtension] });
 
+// Streaming-dedicated instance: identical to `marked` except it does NOT include
+// markedHighlight. hljs highlighting of the whole (growing) content on every
+// streaming chunk is the single biggest per-chunk cost, so highlighting is
+// deferred to the final full re-render in finalizeStreaming(). Everything else
+// (KaTeX, mermaid placeholders, breaks/gfm, link renderer) stays the same.
+const streamRenderer = new marked.Renderer();
+streamRenderer.link = renderer.link;
+const streamMarked = new marked.Marked({ renderer: streamRenderer, breaks: true, gfm: true });
+streamMarked.use(markedKatex({ throwOnError: false, nonStandard: true }));
+streamMarked.use({ extensions: [displayKatex, bracketLatexDisplay, bracketLatexInline] });
+streamMarked.use({ extensions: [mermaidExtension] });
+
 // Helper function to render mermaid diagrams in a container element.
 // Lazily loads mermaid.min.js on first use (~2MB, only fetched when needed).
 function renderMermaidDiagrams(container) {
@@ -1822,6 +1834,8 @@ function regenerate() {
     chunkElement = null;
     thinkingElement = null;
     compressionHintElement = null;
+    thinkingRenderPending = false;
+    responseRenderPending = false;
 
     // Hide regenerate button
     removeRegenerateFromLastMessage();
@@ -2105,6 +2119,70 @@ let currentContentType = '';
 let thinkingBlock = null;
 let responseBlock = null;
 
+// 流式渲染节流：同一帧内的多个 WS chunk 只触发一次全量重 parse。
+// 首个 chunk 立即渲染（0 延迟），追加内容最多滞后一帧（~16ms），不可感知。
+let thinkingRenderPending = false;
+let responseRenderPending = false;
+
+function renderThinkingNow() {
+    if (!thinkingElement) return;
+    try {
+        thinkingElement.innerHTML = thinkingMarked.parse(currentThinkingChunk);
+    } catch (e) {
+        thinkingElement.textContent = currentThinkingChunk;
+    }
+    thinkingElement.dataset.originalContent = currentThinkingChunk;
+    scrollThinkingContentToBottom(thinkingElement);
+}
+
+function scheduleThinkingRender() {
+    if (thinkingRenderPending) return;
+    thinkingRenderPending = true;
+    requestAnimationFrame(function () {
+        thinkingRenderPending = false;
+        if (thinkingElement && thinkingElement.isConnected) {
+            renderThinkingNow();
+        }
+        smartScrollToBottom();
+    });
+}
+
+function renderResponseNow() {
+    if (!chunkElement) return;
+    // 流式期间用不带语法高亮的轻量实例，高亮在 finalizeStreaming 统一补上
+    try {
+        chunkElement.innerHTML = streamMarked.parse(currentChunk);
+    } catch (e) {
+        chunkElement.textContent = currentChunk;
+    }
+    chunkElement.dataset.originalContent = currentChunk;
+}
+
+function scheduleResponseRender() {
+    if (responseRenderPending) return;
+    responseRenderPending = true;
+    requestAnimationFrame(function () {
+        responseRenderPending = false;
+        if (chunkElement && chunkElement.isConnected) {
+            renderResponseNow();
+        }
+        smartScrollToBottom();
+    });
+}
+
+// 收尾前同步刷掉 pending 的重渲染，避免 rAF 回调在补 footer/复制按钮之后
+// 又替换 innerHTML 导致按钮丢失
+function flushStreamingRenders() {
+    if (thinkingRenderPending) {
+        thinkingRenderPending = false;
+        renderThinkingNow();
+    }
+    if (responseRenderPending) {
+        responseRenderPending = false;
+        renderResponseNow();
+    }
+}
+
 // 压缩提示消息（system 类型，思考/正文开始后自动移除）
 let compressionHintElement = null;
 
@@ -2124,11 +2202,22 @@ function smartScrollToBottom(force) {
 // final chunk 正常调用；stopped/error 时服务端不发 final chunk，也必须调用，
 // 否则 responseBlock 等状态残留，下一轮正文会被追加到上一轮的旧块后面。
 function finalizeStreaming(saveHistory) {
+    // 先同步刷掉 pending 的流式重渲染，再补 footer/复制按钮
+    flushStreamingRenders();
     // 压缩提示仍未移除（思考/正文未开始，如出错/停止），在这里清掉
     removeCompressionHint();
     // thinkingBlock: 纯 markdown，不添加 copy/footer，不处理 mermaid — nothing extra needed
 
     if (responseBlock) {
+        // 收尾时用完整实例（含 markedHighlight 语法高亮）对全文做一次正式重渲染，
+        // 流式期间的高亮在此统一生效
+        if (chunkElement && currentChunk) {
+            try {
+                chunkElement.innerHTML = marked.parse(currentChunk);
+            } catch (e) {
+                chunkElement.textContent = currentChunk;
+            }
+        }
         // 为回答消息添加 footer（如果没有）
         if (!responseBlock.querySelector('.message-footer')) {
             const footer = document.createElement('div');
@@ -2226,19 +2315,9 @@ function displayChunk(content, isFirst, isLast, contentType = 'response') {
             }
             smartScrollToBottom();
         } else {
-            // 追加内容
+            // 追加内容（渲染合并到下一帧，避免每 chunk 全量重 parse）
             currentThinkingChunk += content;
-            // Update stored original content
-            thinkingElement.dataset.originalContent = currentThinkingChunk;
-            if (thinkingElement) {
-                try {
-                    thinkingElement.innerHTML = thinkingMarked.parse(currentThinkingChunk);
-                } catch (e) {
-                    thinkingElement.textContent = currentThinkingChunk;
-                }
-                scrollThinkingContentToBottom(thinkingElement);
-            }
-            smartScrollToBottom();
+            scheduleThinkingRender();
         }
     } else {
         // 处理回答消息
@@ -2258,27 +2337,19 @@ function displayChunk(content, isFirst, isLast, contentType = 'response') {
             document.getElementById('messages').appendChild(responseBlock);
 
             if (chunkElement) {
+                // 流式期间用不带语法高亮的轻量实例
                 try {
-                    chunkElement.innerHTML = marked.parse(content);
+                    chunkElement.innerHTML = streamMarked.parse(content);
                 } catch (e) {
                     chunkElement.textContent = content;
                 }
             }
             smartScrollToBottom();
         } else {
-            // 追加内容
+            // 追加内容（渲染合并到下一帧，避免每 chunk 全量重 parse）
             currentChunk += content;
             currentAssistantMessage += content;
-            // Update stored original content
-            chunkElement.dataset.originalContent = currentChunk;
-            if (chunkElement) {
-                try {
-                    chunkElement.innerHTML = marked.parse(currentChunk);
-                } catch (e) {
-                    chunkElement.textContent = currentChunk;
-                }
-            }
-            smartScrollToBottom();
+            scheduleResponseRender();
         }
     }
 }
