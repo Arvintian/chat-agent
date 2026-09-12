@@ -2746,6 +2746,39 @@ async function quickClearContext() {
     }
 }
 
+// Quick clear context + local data (Ctrl/Cmd+Shift+K shortcut) - clears server context AND local storage
+async function quickClearContextAndLocal() {
+    if (!currentChat) {
+        showToast('Please select a chat first', true);
+        return;
+    }
+
+    // Don't allow clearing while AI is generating a response
+    if (isGenerating) {
+        showToast('Cannot clear context while AI is replying', true);
+        return;
+    }
+
+    // Send clear message to server
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'clear', payload: {} }));
+    } else {
+        showToast('WebSocket not connected', true);
+        return;
+    }
+
+    // 清空消息展示区
+    const messagesContainer = document.getElementById('messages');
+    if (messagesContainer) {
+        messagesContainer.innerHTML = '';
+    }
+    // 清空后无 scroll 事件，重置滚动状态以隐藏"一键到底"按钮
+    if (window.ScrollHandler) window.ScrollHandler.reset();
+    // 清除本地存储（IndexedDB + localStorage）
+    await window.MessageHistory.clearHistory();
+    showToast('Conversation context and local data cleared', false);
+}
+
 async function confirmClear() {
     const clearAllRecords = document.getElementById('clear-all-records').checked;
 
@@ -2799,8 +2832,15 @@ function handleKeyDown(e) {
         if (handled) return;
     }
 
+    // Ctrl/Cmd+Shift+K = clear conversation context AND local data (localStorage + IndexedDB)
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        quickClearContextAndLocal();
+        return;
+    }
+
     // Ctrl+K / Cmd+K = clear conversation context (without deleting local data)
-    if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         quickClearContext();
         return;
