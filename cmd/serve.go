@@ -940,7 +940,8 @@ func (h *WebSocketHandler) handleChat(session *chatbot.WSSession, msg *chatbot.W
 	// Use pre-initialized ChatBot to process message with files
 	err := session.ChatBot.StreamChatWithHandler(ctx, req.Message, fileData)
 	if err != nil && !session.IsCancelled() {
-		session.SendError(err.Error())
+		// The error message has already been sent by StreamChatWithHandler via
+		// the handler; only handle side effects here (MCP reinit).
 		if strings.Contains(err.Error(), "failed to call mcp tool") && strings.Contains(err.Error(), "transport error") {
 			ctx := context.Background()
 			chatSession, err := chatbot.InitChatSession(ctx, h.cfg, session.ChatName, session.SessionID, false)
