@@ -254,13 +254,28 @@ function renderMermaidDiagrams(container) {
     });
 }
 
-// Add export button to a rendered mermaid diagram
+// Add copy/export buttons to a rendered mermaid diagram
 function addMermaidExportButton(preElement) {
     // Skip if already has export button
     if (preElement.querySelector('.mermaid-export-btn')) return;
 
     const svg = preElement.querySelector('svg');
     if (!svg) return;
+
+    const copyBtn = document.createElement('button');
+    copyBtn.className = 'mermaid-copy-btn';
+    copyBtn.title = 'Copy diagram to clipboard';
+    copyBtn.innerHTML = `
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+        </svg>
+    `;
+    copyBtn.onclick = function (e) {
+        e.stopPropagation();
+        e.preventDefault();
+        copyMermaidToClipboard(preElement, copyBtn);
+    };
 
     const exportBtn = document.createElement('button');
     exportBtn.className = 'mermaid-export-btn';
@@ -279,95 +294,147 @@ function addMermaidExportButton(preElement) {
     };
 
     preElement.style.position = 'relative';
+    preElement.appendChild(copyBtn);
     preElement.appendChild(exportBtn);
 }
 
-// Export mermaid diagram as PNG
-function exportMermaidToPNG(preElement) {
-    const svg = preElement.querySelector('svg');
-    if (!svg) {
-        showToast('No diagram to export', true);
-        return;
-    }
-
-    try {
-        // Clone the SVG to avoid modifying the displayed one
-        const svgClone = svg.cloneNode(true);
-
-        // Get SVG dimensions - prefer viewBox for accurate sizing
-        const viewBox = svg.viewBox?.baseVal;
-        let width, height;
-        if (viewBox && viewBox.width > 0 && viewBox.height > 0) {
-            width = viewBox.width;
-            height = viewBox.height;
-        } else {
-            const svgRect = svg.getBoundingClientRect();
-            width = svgRect.width || svg.getAttribute('width') || 800;
-            height = svgRect.height || svg.getAttribute('height') || 600;
+// Render the mermaid diagram SVG to a canvas (white background, 2x scale).
+// Resolves with the canvas so it can be used for download or clipboard copy.
+function renderMermaidToCanvas(preElement) {
+    return new Promise(function (resolve, reject) {
+        const svg = preElement.querySelector('svg');
+        if (!svg) {
+            reject(new Error('No diagram to render'));
+            return;
         }
 
-        // Set explicit dimensions and viewBox on clone for canvas rendering
-        svgClone.setAttribute('width', width);
-        svgClone.setAttribute('height', height);
-        svgClone.setAttribute('viewBox', `0 0 ${width} ${height}`);
+        try {
+            // Clone the SVG to avoid modifying the displayed one
+            const svgClone = svg.cloneNode(true);
 
-        // Ensure text elements have explicit fill color for proper canvas rendering
-        const textElements = svgClone.querySelectorAll('text');
-        textElements.forEach(el => {
-            if (!el.getAttribute('fill')) {
-                el.setAttribute('fill', '#333');
+            // Get SVG dimensions - prefer viewBox for accurate sizing
+            const viewBox = svg.viewBox?.baseVal;
+            let width, height;
+            if (viewBox && viewBox.width > 0 && viewBox.height > 0) {
+                width = viewBox.width;
+                height = viewBox.height;
+            } else {
+                const svgRect = svg.getBoundingClientRect();
+                width = svgRect.width || svg.getAttribute('width') || 800;
+                height = svgRect.height || svg.getAttribute('height') || 600;
             }
-        });
 
-        // Serialize SVG to string
-        const serializer = new XMLSerializer();
-        let svgString = serializer.serializeToString(svgClone);
+            // Set explicit dimensions and viewBox on clone for canvas rendering
+            svgClone.setAttribute('width', width);
+            svgClone.setAttribute('height', height);
+            svgClone.setAttribute('viewBox', `0 0 ${width} ${height}`);
 
-        // Prepend XML declaration for proper encoding
-        svgString = '<?xml version="1.0" encoding="UTF-8"?>\n' + svgString;
+            // Ensure text elements have explicit fill color for proper canvas rendering
+            const textElements = svgClone.querySelectorAll('text');
+            textElements.forEach(el => {
+                if (!el.getAttribute('fill')) {
+                    el.setAttribute('fill', '#333');
+                }
+            });
 
-        // Encode SVG string to base64 data URI to avoid tainted canvas issues
-        const svgBase64 = btoa(unescape(encodeURIComponent(svgString)));
-        const dataUri = 'data:image/svg+xml;base64,' + svgBase64;
+            // Serialize SVG to string
+            const serializer = new XMLSerializer();
+            let svgString = serializer.serializeToString(svgClone);
 
-        // Create canvas and draw
-        const canvas = document.createElement('canvas');
-        const scale = 2; // 2x for retina quality
-        canvas.width = width * scale;
-        canvas.height = height * scale;
-        const ctx = canvas.getContext('2d');
-        ctx.scale(scale, scale);
+            // Prepend XML declaration for proper encoding
+            svgString = '<?xml version="1.0" encoding="UTF-8"?>\n' + svgString;
 
-        // Set white background
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, width, height);
+            // Encode SVG string to base64 data URI to avoid tainted canvas issues
+            const svgBase64 = btoa(unescape(encodeURIComponent(svgString)));
+            const dataUri = 'data:image/svg+xml;base64,' + svgBase64;
 
-        const img = new Image();
-        // Set crossOrigin to anonymous to avoid tainting
-        img.crossOrigin = 'anonymous';
-        img.onload = function () {
-            ctx.drawImage(img, 0, 0, width, height);
+            // Create canvas and draw
+            const canvas = document.createElement('canvas');
+            const scale = 2; // 2x for retina quality
+            canvas.width = width * scale;
+            canvas.height = height * scale;
+            const ctx = canvas.getContext('2d');
+            ctx.scale(scale, scale);
 
-            // Trigger download
-            canvas.toBlob(function (blob) {
-                const downloadUrl = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = downloadUrl;
-                a.download = 'mermaid-diagram-' + new Date().toISOString().slice(0, 19).replace(/:/g, '-') + '.png';
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(downloadUrl);
-                showToast('Diagram exported as PNG', false);
-            }, 'image/png');
-        };
-        img.onerror = function () {
-            showToast('Failed to export diagram', true);
-        };
-        img.src = dataUri;
+            // Set white background
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, width, height);
+
+            const img = new Image();
+            // Set crossOrigin to anonymous to avoid tainting
+            img.crossOrigin = 'anonymous';
+            img.onload = function () {
+                ctx.drawImage(img, 0, 0, width, height);
+                resolve(canvas);
+            };
+            img.onerror = function () {
+                reject(new Error('Failed to render diagram image'));
+            };
+            img.src = dataUri;
+        } catch (e) {
+            reject(e);
+        }
+    });
+}
+
+// Export mermaid diagram as PNG (download)
+async function exportMermaidToPNG(preElement) {
+    let canvas;
+    try {
+        canvas = await renderMermaidToCanvas(preElement);
     } catch (e) {
         console.error('Mermaid export error:', e);
         showToast('Export failed: ' + (e.message || 'Unknown error'), true);
+        return;
+    }
+
+    canvas.toBlob(function (blob) {
+        if (!blob) {
+            showToast('Failed to export diagram', true);
+            return;
+        }
+        const downloadUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = downloadUrl;
+        a.download = 'mermaid-diagram-' + new Date().toISOString().slice(0, 19).replace(/:/g, '-') + '.png';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(downloadUrl);
+        showToast('Diagram exported as PNG', false);
+    }, 'image/png');
+}
+
+// Copy the mermaid diagram image to the clipboard as PNG.
+// Falls back to copying the SVG source as text when image clipboard is unavailable.
+async function copyMermaidToClipboard(preElement, btn) {
+    try {
+        const canvas = await renderMermaidToCanvas(preElement);
+        const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+        if (!blob) throw new Error('Failed to encode PNG');
+
+        if (navigator.clipboard && window.ClipboardItem) {
+            await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+            showToast('Diagram copied to clipboard', false);
+            if (btn) {
+                btn.classList.add('copied');
+                setTimeout(() => btn.classList.remove('copied'), 1500);
+            }
+            return;
+        }
+
+        // Fallback: no image clipboard support, copy SVG source as text instead
+        const svg = preElement.querySelector('svg');
+        if (svg && navigator.clipboard) {
+            await navigator.clipboard.writeText(new XMLSerializer().serializeToString(svg));
+            showToast('Image clipboard not supported, copied SVG source as text', false);
+            return;
+        }
+
+        throw new Error('Clipboard API not available in this browser');
+    } catch (e) {
+        console.error('Mermaid copy error:', e);
+        showToast('Copy failed: ' + (e.message || 'Unknown error'), true);
     }
 }
 

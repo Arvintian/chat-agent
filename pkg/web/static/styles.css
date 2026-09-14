@@ -2232,11 +2232,19 @@ pre.code-block:hover .code-preview-btn {
     font-size: 13px;
 }
 
-/* Mermaid export button - positioned at top-right corner like code copy button */
+/* Mermaid copy/export buttons - positioned at top-right corner like code copy button */
+.mermaid-copy-btn {
+    right: 34px;
+}
+
+.mermaid-export-btn {
+    right: 6px;
+}
+
+.mermaid-copy-btn,
 .mermaid-export-btn {
     position: absolute;
     top: 6px;
-    right: 6px;
     background: transparent;
     border: none;
     color: #999;
@@ -2256,22 +2264,26 @@ pre.code-block:hover .code-preview-btn {
     border-radius: 4px;
 }
 
+.markdown-body pre.mermaid:hover .mermaid-copy-btn,
 .markdown-body pre.mermaid:hover .mermaid-export-btn {
     opacity: 1;
 }
 
+.mermaid-copy-btn:hover,
 .mermaid-export-btn:hover {
     color: #333;
     background: rgba(0, 0, 0, 0.05);
 }
 
+.mermaid-copy-btn.copied,
 .mermaid-export-btn.copied {
     color: #4caf50;
     opacity: 1;
 }
 
-/* On mobile, always show the export button */
+/* On mobile, always show the copy/export buttons */
 @media (max-width: 480px) {
+    .mermaid-copy-btn,
     .mermaid-export-btn {
         opacity: 1;
     }
