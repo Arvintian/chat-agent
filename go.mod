@@ -27,6 +27,7 @@ require (
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/sys v0.43.0
 	golang.org/x/term v0.42.0
+	google.golang.org/genai v1.54.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -141,9 +142,10 @@ require (
 	golang.org/x/text v0.36.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 	google.golang.org/api v0.276.0 // indirect
-	google.golang.org/genai v1.54.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260420184626-e10c466a9529 // indirect
 	google.golang.org/grpc v1.80.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
+
+replace github.com/mark3labs/mcp-filesystem-server => github.com/Arvintian/mcp-filesystem-server v0.0.0-20260914092657-a40d9d3e46fe

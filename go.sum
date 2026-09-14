@@ -39,6 +39,8 @@ cloud.google.com/go/storage v1.6.0/go.mod h1:N7U0C8pVQ/+NIKOBQyamJIeKQKkZ+mxpohl
 cloud.google.com/go/storage v1.8.0/go.mod h1:Wv1Oy7z6Yz3DshWRJFhqM/UCfaWIRTdp0RXyy7KQOVs=
 cloud.google.com/go/storage v1.10.0/go.mod h1:FLPqc6j+Ki4BU591ie1oL6qBQGu2Bl/tZ9ullr3+Kg0=
 dmitri.shuralyov.com/gpu/mtl v0.0.0-20190408044501-666a987793e9/go.mod h1:H6x//7gZCb22OMCxBHrMx7a5I7Hp++hsVxbQ4BYO7hU=
+github.com/Arvintian/mcp-filesystem-server v0.0.0-20260914092657-a40d9d3e46fe h1:Cw51wG9Iggi0lmHsdcnbMEAZX6PWGPEcFFkzoDDg9Uc=
+github.com/Arvintian/mcp-filesystem-server v0.0.0-20260914092657-a40d9d3e46fe/go.mod h1:xDqJizVYWZ5a31Mt4xuYbVku2AR/kT56H3O0SbpANoQ=
 github.com/Arvintian/readline v0.0.0-20260623063633-dce0889be477 h1:LWosaBjdCjpzGX3keV1cxhiIFu8721kqaXIfpmL+bXU=
 github.com/Arvintian/readline v0.0.0-20260623063633-dce0889be477/go.mod h1:lID30rRwkINTzvMeoQf/OfLfljm+fHEWoLxovGG4nI4=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
@@ -457,8 +459,6 @@ github.com/lucasb-eyer/go-colorful v1.2.0 h1:1nnpGOrhyZZuNyfu1QjKiUICQ74+3FNCN69
 github.com/lucasb-eyer/go-colorful v1.2.0/go.mod h1:R4dSotOR9KMtayYi1e77YzuveK+i7ruzyGqttikkLy0=
 github.com/mailru/easyjson v0.9.2 h1:dX8U45hQsZpxd80nLvDGihsQ/OxlvTkVUXH2r/8cb2M=
 github.com/mailru/easyjson v0.9.2/go.mod h1:1+xMtQp2MRNVL/V1bOzuP3aP8VNwRW55fQUto+XFtTU=
-github.com/mark3labs/mcp-filesystem-server v0.11.1 h1:7uKIZRMaKWfgvtDj/uLAvo0+7Mwb8gxo5DJywhqFW88=
-github.com/mark3labs/mcp-filesystem-server v0.11.1/go.mod h1:xDqJizVYWZ5a31Mt4xuYbVku2AR/kT56H3O0SbpANoQ=
 github.com/mark3labs/mcp-go v0.43.2 h1:21PUSlWWiSbUPQwXIJ5WKlETixpFpq+WBpbMGDSVy/I=
 github.com/mark3labs/mcp-go v0.43.2/go.mod h1:YnJfOL382MIWDx1kMY+2zsRHU/q78dBg9aFb8W6Thdw=
 github.com/mattn/go-colorable v0.0.9/go.mod h1:9vuHe8Xs5qXnSaW/c/ABM9alt+Vo+STaOChaDxuIBZU=
