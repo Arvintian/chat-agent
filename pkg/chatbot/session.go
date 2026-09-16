@@ -226,10 +226,10 @@ func InitChatSession(ctx context.Context, cfg *config.Config, chatName string, s
 	}
 
 	agentConfig := &adk.ChatModelAgentConfig{
-		Name:        chatName,
-		Description: preset.Desc,
-		Instruction: systemPrompt,
-		Model:       model,
+		Name:          chatName,
+		Description:   preset.Desc,
+		Instruction:   systemPrompt,
+		Model:         model,
 		MaxIterations: maxIterations,
 		ModelRetryConfig: &adk.ModelRetryConfig{
 			MaxRetries:  maxRetries,
@@ -297,6 +297,11 @@ func InitChatSession(ctx context.Context, cfg *config.Config, chatName string, s
 	// sends on every request — keeping the summary request's prefix
 	// prompt-cache friendly instead of cold-prefilling the whole history.
 	manager.SetSystemPrompt(systemPrompt, renderSystemPrompt)
+	// Configure the token-based (window) overflow mode: the manager tracks
+	// the prompt tokens the model reports for each call and compresses when
+	// the context approaches the model's window (active only with
+	// contextMode "window").
+	manager.SetContextWindow(preset.MaxContextTokens, preset.ContextCompressRatio)
 
 	// Only setup persistence callbacks and load messages if persistence is enabled
 	if contextPersistenceEnabled {

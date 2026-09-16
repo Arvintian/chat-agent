@@ -30,20 +30,22 @@ func (c *Config) UnmarshalYAML(value *yaml.Node) error {
 }
 
 type Chat struct {
-	Desc             string        `yaml:"desc"`
-	System           string        `yaml:"system"`
-	InitSystem       string        `yaml:"initSystem,omitempty"` // System prompt for the first round (no context)
-	Model            string        `yaml:"model"`
-	MaxMessageRounds int           `yaml:"maxMessageRounds"`
-	ContextMode      string        `yaml:"contextMode,omitempty"` // context overflow mode: "compress" (default) or "truncate"
-	MaxIterations    int           `yaml:"maxIterations"`
-	MaxRetries       int           `yaml:"maxRetries"`
-	MCPServers       []string      `yaml:"mcpServers,omitempty"`
-	Skill            *Skill        `yaml:"skill,omitempty"`
-	Tools            []string      `yaml:"tools,omitempty"`
-	Default          bool          `yaml:"default"`
-	Hooks            *SessionHooks `yaml:"hooks,omitempty"`
-	Persistence      bool          `yaml:"persistence"`
+	Desc                 string        `yaml:"desc"`
+	System               string        `yaml:"system"`
+	InitSystem           string        `yaml:"initSystem,omitempty"` // System prompt for the first round (no context)
+	Model                string        `yaml:"model"`
+	MaxMessageRounds     int           `yaml:"maxMessageRounds"`
+	ContextMode          string        `yaml:"contextMode,omitempty"`          // context overflow mode: "compress" (default), "truncate" or "window"
+	MaxContextTokens     int           `yaml:"maxContextTokens,omitempty"`     // model context window size in tokens (window mode)
+	ContextCompressRatio float64       `yaml:"contextCompressRatio,omitempty"` // fraction of the window that triggers compression (window mode, default 0.8)
+	MaxIterations        int           `yaml:"maxIterations"`
+	MaxRetries           int           `yaml:"maxRetries"`
+	MCPServers           []string      `yaml:"mcpServers,omitempty"`
+	Skill                *Skill        `yaml:"skill,omitempty"`
+	Tools                []string      `yaml:"tools,omitempty"`
+	Default              bool          `yaml:"default"`
+	Hooks                *SessionHooks `yaml:"hooks,omitempty"`
+	Persistence          bool          `yaml:"persistence"`
 }
 
 // SessionHooks represents session-related hooks configuration

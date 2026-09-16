@@ -69,9 +69,19 @@ models:
 #   - contextMode: how to handle window overflow when a new round starts
 #     (default: compress)
 #     - compress: the oldest rounds are summarized synchronously (the request
-#       waits) and replaced by a single summary round
+#       waits) and replaced by a single summary round, once the round count
+#       exceeds maxMessageRounds
 #     - truncate: no model call; the history sent to the model is hard-capped
 #       at maxMessageRounds, oldest rounds dropped first
+#     - window: token-driven overflow, independent of maxMessageRounds. The
+#       context size is measured from the prompt tokens the model reports for
+#       each call; once it reaches contextCompressRatio of maxContextTokens,
+#       the oldest rounds are summarized (like compress). Use this for models
+#       with large windows where a single verbose round (e.g. big tool output)
+#       can exhaust the context. Requires maxContextTokens to be set.
+#   - maxContextTokens: model context window size in tokens (window mode)
+#   - contextCompressRatio: fraction of the window that triggers compression
+#     (window mode, default: 0.8)
 #   - maxIterations: maximum iterations for tool calling (default: 20)
 #   - maxRetries: maximum retries for model generation (default: 5)
 #   - mcpServers: list of MCP servers to use

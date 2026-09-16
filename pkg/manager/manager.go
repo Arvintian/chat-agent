@@ -37,6 +37,16 @@ const (
 	// involved. The cap is enforced at snapshot time (GetMessages), so the
 	// history sent to the model can never exceed maxMessageRound rounds.
 	ContextModeTruncate = "truncate"
+	// ContextModeWindow drives overflow by the model's context window instead
+	// of round count. The manager measures the context size from the prompt
+	// tokens the model reports for each call (ReportUsage) and, once the
+	// measurement reaches the configured threshold of the context window
+	// (SetContextWindow), summarizes the oldest rounds into a single summary
+	// round — the same mechanism as compress mode, but token-driven and
+	// independent of maxMessageRounds. This suits models with large windows
+	// where many short rounds fit comfortably but a single verbose round (e.g.
+	// huge tool output) can exhaust the window.
+	ContextModeWindow = "window"
 )
 
 const (
@@ -50,6 +60,11 @@ const (
 	// halving strategy len/2 reaches the batch no later than len = 2*batch, so
 	// compression happens every ~batch user messages instead of every message.
 	minCompressRounds = 3
+	// DefaultTokenThresholdRatio is the fraction of the context window at
+	// which window mode triggers compression. It is deliberately below 1: the
+	// reserved headroom must cover the model's completion tokens for the
+	// current round plus a safety margin for the estimate's error.
+	DefaultTokenThresholdRatio = 0.8
 )
 
 // Manager manages conversation context.
@@ -117,6 +132,25 @@ type Manager struct {
 	// history it is about to compress.
 	systemPrompt         string
 	systemPromptRenderer func(string) (string, error)
+
+	// Window mode (ContextModeWindow) state.
+	// maxContextTokens is the model's context window size in tokens;
+	// tokenThreshold is the prompt-token count that triggers compression.
+	// Both are configured once via SetContextWindow, before any round starts.
+	maxContextTokens int
+	tokenThreshold   int
+	// lastPromptTokens is the prompt token count of the most recent model
+	// call (ReportUsage). The prompt carries the full history, so this is the
+	// best available measurement of the current context size. The latest
+	// value always wins (not the max): after compression the next call's
+	// prompt is smaller again and must lower the measurement, otherwise the
+	// stale high value would immediately re-trigger a compression.
+	lastPromptTokens int
+	// Cumulative usage across all model calls of the session (statistics,
+	// exposed via GetTokenUsage; not used for triggering).
+	usedPromptTokens     int
+	usedCompletionTokens int
+	usedTotalTokens      int
 }
 
 // NewManager creates a new Manager instance.
@@ -130,6 +164,8 @@ func NewManager(maxMessageRound int, contextMode string) *Manager {
 	switch strings.ToLower(strings.TrimSpace(contextMode)) {
 	case ContextModeTruncate:
 		contextMode = ContextModeTruncate
+	case ContextModeWindow:
+		contextMode = ContextModeWindow
 	default:
 		contextMode = ContextModeCompress
 	}
@@ -202,6 +238,57 @@ func (m *Manager) SetSystemPrompt(prompt string, renderer func(string) (string, 
 	m.systemPromptRenderer = renderer
 }
 
+// SetContextWindow configures the token-based (window) overflow mode.
+//
+// maxContextTokens is the model's context window size in tokens and
+// thresholdRatio the fraction of it that triggers compression (a value <= 0
+// or >= 1 selects DefaultTokenThresholdRatio). Call it before the first
+// round when using ContextModeWindow; a non-positive maxContextTokens keeps
+// the manager in measurement-only state — usage is tracked and reportable
+// but no compression ever runs (there is no window to measure against).
+func (m *Manager) SetContextWindow(maxContextTokens int, thresholdRatio float64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if thresholdRatio <= 0 || thresholdRatio >= 1 {
+		thresholdRatio = DefaultTokenThresholdRatio
+	}
+	m.maxContextTokens = maxContextTokens
+	m.tokenThreshold = int(float64(maxContextTokens) * thresholdRatio)
+}
+
+// ReportUsage feeds the token usage of one completed model call back into the
+// manager. The caller takes it from the response message's
+// ResponseMeta.Usage; providers attach it to the final chunk of each call
+// (including intermediate tool-calling outputs). Call it for every assistant
+// model output.
+//
+// It updates the current context-size measurement (the call's prompt tokens —
+// the prompt carries the full history, so this reflects the size the next
+// request will have) and the session's cumulative usage counters.
+func (m *Manager) ReportUsage(u *schema.TokenUsage) {
+	if u == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if u.PromptTokens > 0 {
+		m.lastPromptTokens = u.PromptTokens
+	}
+	m.usedPromptTokens += u.PromptTokens
+	m.usedCompletionTokens += u.CompletionTokens
+	m.usedTotalTokens += u.TotalTokens
+}
+
+// GetTokenUsage returns the session's cumulative token usage across all model
+// calls (prompt/completion/total), plus the current context-size measurement
+// (prompt tokens of the most recent call) and the configured context window
+// size (0 when window mode is not configured).
+func (m *Manager) GetTokenUsage() (prompt, completion, total, contextTokens, window int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.usedPromptTokens, m.usedCompletionTokens, m.usedTotalTokens, m.lastPromptTokens, m.maxContextTokens
+}
+
 // AddMessage adds a message to the context.
 //
 // Messages are only appended: compression is never triggered here, because the
@@ -248,7 +335,7 @@ func (m *Manager) IncRound(ctx context.Context) {
 	// design) and must not hold m.mu while doing so.
 	// (Truncate mode needs no work here: its hard cap is enforced at the
 	// model boundary in GetMessages.)
-	if !skip && m.contextMode == ContextModeCompress {
+	if !skip && (m.contextMode == ContextModeCompress || m.contextMode == ContextModeWindow) {
 		m.compressIfNeeded(ctx)
 	}
 }
@@ -497,20 +584,40 @@ func toolBlockNeedsReorder(messages []*schema.Message) bool {
 	return false
 }
 
-// compressIfNeeded compresses the oldest rounds when the window exceeds
-// maxMessageRound.
+// compressIfNeeded compresses the oldest rounds when the active overflow
+// condition is met:
+//   - compress mode: the round count exceeds maxMessageRound;
+//   - window mode: the context-size measurement (lastPromptTokens, see
+//     ReportUsage) reaches the threshold of the configured context window.
 //
 // The oldest rounds are summarized by the chatmodel synchronously (the caller
 // waits) and atomically replaced by a single summary round — one head rewrite
 // per compression event. If the summary call fails, the full history is kept
 // and the compression is retried on the next trigger.
+//
+// In window mode the post-compression context size cannot be re-measured
+// until the next model call reports usage, so the batch stays the round-based
+// halving below: if one pass is not enough (e.g. a single verbose round that
+// alone exceeds the window), the condition simply stays true and the next
+// IncRound compresses further. It converges as long as the summary is
+// smaller than the rounds it replaces.
 func (m *Manager) compressIfNeeded(ctx context.Context) {
 	m.mu.Lock()
-	if m.chatmodel == nil {
+	if m.chatmodel == nil || m.compressing {
 		m.mu.Unlock()
 		return
 	}
-	if len(m.messages) <= m.maxMessageRound || m.compressing {
+	needed := false
+	switch m.contextMode {
+	case ContextModeCompress:
+		needed = len(m.messages) > m.maxMessageRound
+	case ContextModeWindow:
+		// Token-driven, independent of maxMessageRound. Without a configured
+		// window there is nothing to measure against: usage is still tracked
+		// and reportable, but no compression runs.
+		needed = m.maxContextTokens > 0 && m.lastPromptTokens >= m.tokenThreshold
+	}
+	if !needed {
 		m.mu.Unlock()
 		return
 	}
@@ -523,7 +630,16 @@ func (m *Manager) compressIfNeeded(ctx context.Context) {
 	// worth the latency it adds to the user's request. The window keeps
 	// growing until the halved size reaches the batch (bounded, see
 	// minCompressRounds), so compression is retried within a few rounds.
-	if numToCompress < minCompressRounds {
+	//
+	// Exception (window mode): once the measured context exceeds the FULL
+	// window (not just the threshold), the next model call is likely to fail
+	// outright. Waiting for enough rounds to batch is pointless in that state
+	// — compress whatever is available, down to a single oldest round.
+	minBatch := minCompressRounds
+	if m.contextMode == ContextModeWindow && m.lastPromptTokens >= m.maxContextTokens {
+		minBatch = 1
+	}
+	if numToCompress < minBatch {
 		m.mu.Unlock()
 		return
 	}
@@ -585,7 +701,6 @@ func (m *Manager) compressIfNeeded(ctx context.Context) {
 		}
 	}
 }
-
 
 // doCompression performs the actual compression logic.
 //
@@ -723,6 +838,12 @@ func (m *Manager) Clear() {
 	defer m.mu.Unlock()
 	m.round = 0
 	m.messages = make([][]*schema.Message, 0)
+	// Reset the token accounting: the measurements describe this conversation,
+	// so a cleared context must not start a new one already "over threshold".
+	m.lastPromptTokens = 0
+	m.usedPromptTokens = 0
+	m.usedCompletionTokens = 0
+	m.usedTotalTokens = 0
 }
 
 // RemoveLastRound removes the last round of messages from the context.
@@ -799,5 +920,9 @@ func (m *Manager) GetSummary() string {
 		}
 	}
 
-	return fmt.Sprintf("Conversation contains %d user messages, %d assistant, %d tool replies", userMessages, assistantMessages, toolMessages)
+	summary := fmt.Sprintf("Conversation contains %d user messages, %d assistant, %d tool replies", userMessages, assistantMessages, toolMessages)
+	if m.maxContextTokens > 0 {
+		summary += fmt.Sprintf(" | context: %d/%d tokens (threshold %d)", m.lastPromptTokens, m.maxContextTokens, m.tokenThreshold)
+	}
+	return summary
 }

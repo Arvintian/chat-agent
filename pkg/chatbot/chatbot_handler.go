@@ -211,6 +211,11 @@ func (cb *ChatBot) StreamChatWithHandler(ctx context.Context, userInput string, 
 					cb.handler.SendError(err.Error())
 					return err
 				}
+				// The final chunk of each model call carries the token usage;
+				// feed it to the manager so window mode can measure the context.
+				if message.ResponseMeta != nil && message.ResponseMeta.Usage != nil {
+					cb.manager.ReportUsage(message.ResponseMeta.Usage)
+				}
 
 				if len(message.ToolCalls) > 0 {
 					// Only send tool call notification at the start of tool invocation
@@ -331,6 +336,10 @@ func (cb *ChatBot) StreamChatWithHandler(ctx context.Context, userInput string, 
 				cb.handler.SendThinking(false)
 			}
 		} else if event.Output.MessageOutput.Message != nil {
+			// Non-streamed model output: usage is on the message itself.
+			if event.Output.MessageOutput.Message.ResponseMeta != nil && event.Output.MessageOutput.Message.ResponseMeta.Usage != nil {
+				cb.manager.ReportUsage(event.Output.MessageOutput.Message.ResponseMeta.Usage)
+			}
 			if len(event.Output.MessageOutput.Message.ToolCalls) > 0 {
 				for i, tc := range event.Output.MessageOutput.Message.ToolCalls {
 					index := tc.Index
