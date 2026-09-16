@@ -146,12 +146,15 @@ type Manager struct {
 	// Both are configured once via SetContextWindow, before any round starts.
 	maxContextTokens int
 	tokenThreshold   int
-	// lastPromptTokens is the prompt token count of the most recent model
-	// call (ReportUsage). The prompt carries the full history, so this is the
-	// best available measurement of the current context size. The latest
-	// value always wins (not the max): after compression the next call's
-	// prompt is smaller again and must lower the measurement, otherwise the
-	// stale high value would immediately re-trigger a compression.
+	// lastPromptTokens is the total token count (prompt + completion) of the
+	// most recent model call (ReportUsage). The NEXT request's prompt will
+	// carry the full history plus this call's completion (assistant reply and
+	// tool calls, before the tool results are appended), so the total — not
+	// just the prompt — is the best available estimate of the context size
+	// the next call will have. The latest value always wins (not the max):
+	// after compression the next call's context is smaller again and must
+	// lower the measurement, otherwise the stale high value would
+	// immediately re-trigger a compression.
 	lastPromptTokens int
 	// Cumulative usage across all model calls of the session (statistics,
 	// exposed via GetTokenUsage; not used for triggering).
@@ -278,17 +281,20 @@ func (m *Manager) SetContextWindow(maxContextTokens int, thresholdRatio float64)
 // (including intermediate tool-calling outputs). Call it for every assistant
 // model output.
 //
-// It updates the current context-size measurement (the call's prompt tokens —
-// the prompt carries the full history, so this reflects the size the next
-// request will have) and the session's cumulative usage counters.
+// It updates the current context-size measurement (the call's TOTAL tokens —
+// the next request's prompt will carry the history plus this call's
+// completion, so the total reflects the size the next request will have) and
+// the session's cumulative usage counters.
 func (m *Manager) ReportUsage(u *schema.TokenUsage) {
 	if u == nil {
 		return
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if u.PromptTokens > 0 {
-		m.lastPromptTokens = u.PromptTokens
+	// The next request's prompt will carry the history plus this call's
+	// completion, so the total is the estimate of its context size.
+	if u.TotalTokens > 0 {
+		m.lastPromptTokens = u.TotalTokens
 	}
 	m.usedPromptTokens += u.PromptTokens
 	m.usedCompletionTokens += u.CompletionTokens
@@ -329,8 +335,9 @@ func (m *Manager) notifyUsageLocked() {
 
 // GetTokenUsage returns the session's cumulative token usage across all model
 // calls (prompt/completion/total), plus the current context-size measurement
-// (prompt tokens of the most recent call) and the configured context window
-// size (0 when window mode is not configured).
+// (total tokens of the most recent call — the estimate of the context size
+// the next call will have) and the configured context window size (0 when
+// window mode is not configured).
 func (m *Manager) GetTokenUsage() (prompt, completion, total, contextTokens, window int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

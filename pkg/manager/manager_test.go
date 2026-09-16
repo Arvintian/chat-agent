@@ -291,10 +291,12 @@ func TestWindowMode_NoWindowNeverCompresses(t *testing.T) {
 		t.Fatal("compression ran without a configured window")
 	}
 
-	// Usage is still tracked and reportable.
+	// Usage is still tracked and reportable. The context measurement is the
+	// call's TOTAL tokens (prompt + completion): the next request's prompt
+	// will carry the history plus this call's completion.
 	_, _, total, contextTokens, window := m.GetTokenUsage()
-	if total != 1000000 || contextTokens != 999999 || window != 0 {
-		t.Fatalf("GetTokenUsage = (%d, %d, %d), want (1000000, 999999, 0)", total, contextTokens, window)
+	if total != 1000000 || contextTokens != 1000000 || window != 0 {
+		t.Fatalf("GetTokenUsage = (%d, %d, %d), want (1000000, 1000000, 0)", total, contextTokens, window)
 	}
 }
 
@@ -321,13 +323,13 @@ func TestWindowMode_LatestUsageWins(t *testing.T) {
 	m := NewManager(0, ContextModeWindow)
 	m.SetContextWindow(1000, 0.5)
 
-	m.ReportUsage(&schema.TokenUsage{PromptTokens: 900})
-	if _, _, _, cur, _ := m.GetTokenUsage(); cur != 900 {
-		t.Fatalf("contextTokens = %d, want 900", cur)
+	m.ReportUsage(&schema.TokenUsage{PromptTokens: 900, CompletionTokens: 5, TotalTokens: 905})
+	if _, _, _, cur, _ := m.GetTokenUsage(); cur != 905 {
+		t.Fatalf("contextTokens = %d, want 905 (total)", cur)
 	}
-	m.ReportUsage(&schema.TokenUsage{PromptTokens: 200})
-	if _, _, _, cur, _ := m.GetTokenUsage(); cur != 200 {
-		t.Fatalf("contextTokens = %d, want 200 (latest must win)", cur)
+	m.ReportUsage(&schema.TokenUsage{PromptTokens: 200, CompletionTokens: 2, TotalTokens: 202})
+	if _, _, _, cur, _ := m.GetTokenUsage(); cur != 202 {
+		t.Fatalf("contextTokens = %d, want 202 (latest must win)", cur)
 	}
 }
 
@@ -346,7 +348,7 @@ func TestWindowMode_OverfullWindowCompressesSmallBatch(t *testing.T) {
 
 	// Only above the threshold (500) but below the full window: NOT overfull,
 	// so the small batch is still skipped.
-	m.ReportUsage(&schema.TokenUsage{PromptTokens: 600})
+	m.ReportUsage(&schema.TokenUsage{PromptTokens: 590, CompletionTokens: 10, TotalTokens: 600})
 	m.IncRound(ctx) // 4 rounds, half = 2 < 3 → skip
 	if fm.generated {
 		t.Fatal("compressed a small batch that was only above the threshold")
@@ -354,7 +356,7 @@ func TestWindowMode_OverfullWindowCompressesSmallBatch(t *testing.T) {
 
 	// Now over the full window: the oldest round must be compressed even though
 	// the halved batch is below the normal minimum.
-	m.ReportUsage(&schema.TokenUsage{PromptTokens: 1200})
+	m.ReportUsage(&schema.TokenUsage{PromptTokens: 1190, CompletionTokens: 10, TotalTokens: 1200})
 	m.IncRound(ctx) // 5 rounds, half = 2; overfull → minBatch 1, compress 2
 	if !fm.generated {
 		t.Fatal("expected compression when over the full window")
@@ -399,16 +401,16 @@ func TestUsagePersistenceRoundTrip(t *testing.T) {
 		t.Fatalf("expected 2 callback invocations, got %d", cbCalls)
 	}
 	raw, ok := stored["tokenUsage"]
-	if !ok || raw != `{"prompt":150,"completion":30,"total":180,"lastPrompt":50}` {
+	if !ok || raw != `{"prompt":150,"completion":30,"total":180,"lastPrompt":60}` {
 		t.Fatalf("unexpected persisted usage: %q (ok=%v)", raw, ok)
 	}
 
 	// Restart: fresh manager, restore from the persisted value.
 	m2 := NewManager(0, ContextModeCompress)
-	m2.SetTokenUsage(150, 30, 180, 50)
+	m2.SetTokenUsage(150, 30, 180, 60)
 	p, c, tot, last, _ := m2.GetTokenUsage()
-	if p != 150 || c != 30 || tot != 180 || last != 50 {
-		t.Fatalf("restored usage = %d/%d/%d (last=%d), want 150/30/180 (last=50)", p, c, tot, last)
+	if p != 150 || c != 30 || tot != 180 || last != 60 {
+		t.Fatalf("restored usage = %d/%d/%d (last=%d), want 150/30/180 (last=60)", p, c, tot, last)
 	}
 
 	// New calls accumulate on top of the restored base and re-persist.
@@ -416,7 +418,7 @@ func TestUsagePersistenceRoundTrip(t *testing.T) {
 		_ = store("tokenUsage", []byte(fmt.Sprintf(`{"prompt":%d,"completion":%d,"total":%d,"lastPrompt":%d}`, p, c, t, last)))
 	})
 	m2.ReportUsage(&schema.TokenUsage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15})
-	if raw := stored["tokenUsage"]; raw != `{"prompt":160,"completion":35,"total":195,"lastPrompt":10}` {
+	if raw := stored["tokenUsage"]; raw != `{"prompt":160,"completion":35,"total":195,"lastPrompt":15}` {
 		t.Fatalf("post-restart persisted usage: %q", raw)
 	}
 }
