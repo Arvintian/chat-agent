@@ -2,6 +2,7 @@ package chatbot
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"slices"
@@ -33,6 +34,20 @@ import (
 
 // cleanupRegistry is a session-level cleanup registry for managing resources
 type cleanupRegistry = utils.CleanupRegistry
+
+// tokenUsageKey is the checkpoint key under which the session's cumulative
+// token usage is persisted.
+const tokenUsageKey = "tokenUsage"
+
+// tokenUsageData is the persisted form of the session's token usage (see
+// Manager.GetTokenUsage), including the last measured prompt token count so
+// the window-mode overflow check works across restarts.
+type tokenUsageData struct {
+	Prompt     int `json:"prompt"`
+	Completion int `json:"completion"`
+	Total      int `json:"total"`
+	LastPrompt int `json:"lastPrompt"`
+}
 
 // ChatSession represents a chat session with its configuration
 type ChatSession struct {
@@ -351,6 +366,26 @@ func InitChatSession(ctx context.Context, cfg *config.Config, chatName string, s
 
 		// Set compression complete callback after initialization
 		manager.SetCompressionCompleteCallback(compressionCompleteCallback)
+
+		// Restore the cumulative token usage from the last run and persist it
+		// on every change, so a restart does not reset the counters.
+		if raw, ok, err := persistence.Get(context.Background(), tokenUsageKey); err != nil {
+			logger.Warn("chatbot", fmt.Sprintf("Failed to load token usage: %v", err))
+		} else if ok {
+			var saved tokenUsageData
+			if json.Unmarshal(raw, &saved) == nil {
+				manager.SetTokenUsage(saved.Prompt, saved.Completion, saved.Total, saved.LastPrompt)
+			}
+		}
+		manager.SetUsageUpdateCallback(func(p, c, t, last int) {
+			data, err := json.Marshal(tokenUsageData{Prompt: p, Completion: c, Total: t, LastPrompt: last})
+			if err != nil {
+				return
+			}
+			if err := persistence.Set(context.Background(), tokenUsageKey, data); err != nil {
+				logger.Warn("chatbot", fmt.Sprintf("Failed to persist token usage: %v", err))
+			}
+		})
 	} else {
 		// Persistence is disabled, set nil callbacks
 		manager.SetPersistenceCallback(nil)

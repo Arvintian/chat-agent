@@ -25,6 +25,10 @@ type CompressionCompleteCallback func([]*schema.Message) error
 // history is compressed.
 type CompressionProgressCallback func(ctx context.Context)
 
+// UsageUpdateCallback is invoked (outside the manager lock) after the
+// session's cumulative token usage changes, so the caller can persist it.
+type UsageUpdateCallback func(promptTokens, completionTokens, totalTokens, lastPromptTokens int)
+
 // Context overflow modes (chats.<name>.contextMode)
 const (
 	// ContextModeCompress is the default mode: when the window exceeds
@@ -122,6 +126,9 @@ type Manager struct {
 	// compression progress callback, invoked before the blocking summary call
 	compressionProgressCallback CompressionProgressCallback
 
+	// usage update callback, invoked after cumulative usage changes (persistence)
+	usageUpdateCallback UsageUpdateCallback
+
 	// systemPrompt is the same prompt template the runner (agent) prepends to
 	// every model request (see the agent's GenModelInput), and
 	// systemPromptRenderer expands it. The compression summary call reuses both
@@ -217,6 +224,15 @@ func (m *Manager) SetChatModel(chatmodel model.ToolCallingChatModel) {
 	m.chatmodel = chatmodel
 }
 
+// SetUsageUpdateCallback sets the callback invoked after the session's
+// cumulative token usage changes (ReportUsage or SetTokenUsage), so the
+// caller can persist the counters. It is invoked outside the manager lock.
+func (m *Manager) SetUsageUpdateCallback(cb UsageUpdateCallback) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.usageUpdateCallback = cb
+}
+
 func (m *Manager) GetChatModel() model.ToolCallingChatModel {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -277,6 +293,38 @@ func (m *Manager) ReportUsage(u *schema.TokenUsage) {
 	m.usedPromptTokens += u.PromptTokens
 	m.usedCompletionTokens += u.CompletionTokens
 	m.usedTotalTokens += u.TotalTokens
+	m.notifyUsageLocked()
+}
+
+// SetTokenUsage restores the session's token usage, e.g. from persistence
+// after a restart: the cumulative counters plus the last measured prompt
+// token count (lastPrompt). Restoring lastPrompt keeps the window-mode
+// overflow check working across restarts: the restored history was the one
+// the model last saw, so if its measurement was over the threshold the next
+// IncRound compresses it instead of waiting for a fresh (possibly
+// window-exceeding) model call.
+func (m *Manager) SetTokenUsage(prompt, completion, total, lastPrompt int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.usedPromptTokens = prompt
+	m.usedCompletionTokens = completion
+	m.usedTotalTokens = total
+	if lastPrompt > 0 {
+		m.lastPromptTokens = lastPrompt
+	}
+	m.notifyUsageLocked()
+}
+
+// notifyUsageLocked invokes the usage update callback with the current
+// counters. The caller must hold m.mu; the callback runs outside it.
+func (m *Manager) notifyUsageLocked() {
+	if m.usageUpdateCallback == nil {
+		return
+	}
+	p, c, t, last := m.usedPromptTokens, m.usedCompletionTokens, m.usedTotalTokens, m.lastPromptTokens
+	m.mu.Unlock()
+	m.usageUpdateCallback(p, c, t, last)
+	m.mu.Lock()
 }
 
 // GetTokenUsage returns the session's cumulative token usage across all model

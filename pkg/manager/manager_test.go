@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/cloudwego/eino/components/model"
@@ -361,5 +362,82 @@ func TestWindowMode_OverfullWindowCompressesSmallBatch(t *testing.T) {
 	msgs := m.GetMessages()
 	if msgs[0].Role != schema.Assistant || !strings.HasPrefix(msgs[0].Content, "[Previous Conversation Summary]") {
 		t.Fatalf("first message is not the summary: %+v", msgs[0])
+	}
+}
+
+// TestUsagePersistenceRoundTrip simulates the restart flow: usage updates are
+// persisted via the callback into a (file-backed) store, a fresh manager
+// restores the counters with SetTokenUsage, and later usage keeps accumulating
+// on top of the restored base.
+func TestUsagePersistenceRoundTrip(t *testing.T) {
+		var (
+		mu       sync.Mutex
+		stored   map[string]string
+		cbCalls  int
+	)
+	store := func(key string, value []byte) error {
+		mu.Lock()
+		defer mu.Unlock()
+		if stored == nil {
+			stored = make(map[string]string)
+		}
+		stored[key] = string(value)
+		return nil
+	}
+
+	m := NewManager(0, ContextModeCompress)
+	m.SetUsageUpdateCallback(func(p, c, t, last int) {
+		mu.Lock()
+		cbCalls++
+		mu.Unlock()
+		_ = store("tokenUsage", []byte(fmt.Sprintf(`{"prompt":%d,"completion":%d,"total":%d,"lastPrompt":%d}`, p, c, t, last)))
+	})
+	m.ReportUsage(&schema.TokenUsage{PromptTokens: 100, CompletionTokens: 20, TotalTokens: 120})
+	m.ReportUsage(&schema.TokenUsage{PromptTokens: 50, CompletionTokens: 10, TotalTokens: 60})
+
+	if cbCalls != 2 {
+		t.Fatalf("expected 2 callback invocations, got %d", cbCalls)
+	}
+	raw, ok := stored["tokenUsage"]
+	if !ok || raw != `{"prompt":150,"completion":30,"total":180,"lastPrompt":50}` {
+		t.Fatalf("unexpected persisted usage: %q (ok=%v)", raw, ok)
+	}
+
+	// Restart: fresh manager, restore from the persisted value.
+	m2 := NewManager(0, ContextModeCompress)
+	m2.SetTokenUsage(150, 30, 180, 50)
+	p, c, tot, last, _ := m2.GetTokenUsage()
+	if p != 150 || c != 30 || tot != 180 || last != 50 {
+		t.Fatalf("restored usage = %d/%d/%d (last=%d), want 150/30/180 (last=50)", p, c, tot, last)
+	}
+
+	// New calls accumulate on top of the restored base and re-persist.
+	m2.SetUsageUpdateCallback(func(p, c, t, last int) {
+		_ = store("tokenUsage", []byte(fmt.Sprintf(`{"prompt":%d,"completion":%d,"total":%d,"lastPrompt":%d}`, p, c, t, last)))
+	})
+	m2.ReportUsage(&schema.TokenUsage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15})
+	if raw := stored["tokenUsage"]; raw != `{"prompt":160,"completion":35,"total":195,"lastPrompt":10}` {
+		t.Fatalf("post-restart persisted usage: %q", raw)
+	}
+}
+
+// TestWindowMode_RestoredUsageTriggersCompression verifies that a restored
+// lastPrompt measurement (over the threshold) makes the next IncRound
+// compress the restored history instead of waiting for a fresh model call.
+func TestWindowMode_RestoredUsageTriggersCompression(t *testing.T) {
+	ctx := context.Background()
+
+	m := NewManager(0, ContextModeWindow)
+	m.SetContextWindow(1000, 0.5) // threshold 500
+	buildRounds(m, ctx, 5)         // 6 rounds incl. empty current one
+
+	// Restart: no model call yet, only the persisted measurement.
+	m.SetTokenUsage(300, 80, 380, 600) // lastPrompt 600 >= threshold 500
+
+	fm := &fakeSummaryModel{reply: "summary text"}
+	m.SetChatModel(fm)
+	m.IncRound(ctx)
+	if !fm.generated {
+		t.Fatal("expected compression of the long restored history after restart")
 	}
 }
