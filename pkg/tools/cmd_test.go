@@ -199,10 +199,10 @@ func TestCmdToolBackgroundTaskEnvApplied(t *testing.T) {
 	if !ok {
 		t.Fatal("background task did not finish in time")
 	}
-	if task.Status != TaskStatusSuccess {
-		t.Fatalf("expected task success, got %s (output: %s)", task.Status, task.GetOutputString())
+	if task.getStatus() != TaskStatusSuccess {
+		t.Fatalf("expected task success, got %s (output: %s)", task.getStatus(), task.GetOutputString())
 	}
-	if !strings.Contains(task.Output.String(), "http://127.0.0.1:7890") {
+	if !strings.Contains(task.GetOutputString(), "http://127.0.0.1:7890") {
 		t.Fatalf("expected env value in background task output, got: %s", task.GetOutputString())
 	}
 }
@@ -218,10 +218,10 @@ func TestStartTaskNilEnvInheritsProcessEnv(t *testing.T) {
 	if !ok {
 		t.Fatal("background task did not finish in time")
 	}
-	if done.Status != TaskStatusSuccess {
-		t.Fatalf("expected task success, got %s", done.Status)
+	if done.getStatus() != TaskStatusSuccess {
+		t.Fatalf("expected task success, got %s", done.getStatus())
 	}
-	if !strings.Contains(done.Output.String(), "inherited") {
+	if !strings.Contains(done.GetOutputString(), "inherited") {
 		t.Fatalf("expected process env inherited when env is nil, got: %s", done.GetOutputString())
 	}
 }
@@ -251,7 +251,7 @@ func waitForTaskDone(tm *BackgroundTaskManager, taskID string, timeout time.Dura
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		task, ok := tm.GetTask(taskID)
-		if ok && task.Status != TaskStatusRunning {
+		if ok && task.getStatus() != TaskStatusRunning {
 			return task, true
 		}
 		time.Sleep(50 * time.Millisecond)

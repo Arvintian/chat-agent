@@ -44,16 +44,10 @@ type BackgroundTask struct {
 }
 
 type BackgroundTaskManager struct {
-	tasks    map[string]*BackgroundTask
-	taskID   atomic.Uint64
-	mu       sync.RWMutex
-	outputMu sync.Mutex
+	tasks  map[string]*BackgroundTask
+	taskID atomic.Uint64
+	mu     sync.RWMutex
 }
-
-var (
-	globalTaskManager *BackgroundTaskManager
-	taskManagerOnce   sync.Once
-)
 
 func NewBackgroundTaskManager() *BackgroundTaskManager {
 	return &BackgroundTaskManager{
@@ -135,9 +129,10 @@ func (tm *BackgroundTaskManager) monitorTask(ctx context.Context, task *Backgrou
 		defer wg.Done()
 		scanner := bufio.NewScanner(stdout)
 		for scanner.Scan() {
-			tm.outputMu.Lock()
-			task.Output.WriteString(scanner.Text() + "\n")
-			tm.outputMu.Unlock()
+			line := scanner.Text() + "\n"
+			task.mu.Lock()
+			task.Output.WriteString(line)
+			task.mu.Unlock()
 		}
 	}()
 
@@ -145,9 +140,10 @@ func (tm *BackgroundTaskManager) monitorTask(ctx context.Context, task *Backgrou
 		defer wg.Done()
 		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {
-			tm.outputMu.Lock()
-			task.Stderr.WriteString(scanner.Text() + "\n")
-			tm.outputMu.Unlock()
+			line := scanner.Text() + "\n"
+			task.mu.Lock()
+			task.Stderr.WriteString(line)
+			task.mu.Unlock()
 		}
 	}()
 
@@ -195,49 +191,9 @@ func (tm *BackgroundTaskManager) GetTask(id string) (*BackgroundTask, bool) {
 	return task, ok
 }
 
-func (tm *BackgroundTaskManager) killTaskInternal(id string) error {
-	task, ok := tm.tasks[id]
-	if !ok {
-		return fmt.Errorf("task not found: %s", id)
-	}
-
-	task.mu.Lock()
-	if task.Status != TaskStatusRunning {
-		task.mu.Unlock()
-		return fmt.Errorf("task is not running: %s", id)
-	}
-	task.mu.Unlock()
-
-	task.CancelFunc()
-
-	if task.Process != nil && task.Process.Process != nil {
-		task.platform.killProcess(task.Process)
-	}
-
-	return nil
-}
-
-func (tm *BackgroundTaskManager) removeTaskInternal(id string) error {
-	task, ok := tm.tasks[id]
-	if !ok {
-		return fmt.Errorf("task not found: %s", id)
-	}
-
-	task.mu.Lock()
-	if task.Status == TaskStatusRunning {
-		task.mu.Unlock()
-		return fmt.Errorf("cannot remove running task: %s", id)
-	}
-	task.mu.Unlock()
-
-	delete(tm.tasks, id)
-	return nil
-}
-
-func (tm *BackgroundTaskManager) KillTask(id string) error {
-	return tm.killTaskInternal(id)
-}
-
+// RemoveTask removes a task from the manager, killing it first if it is
+// still running. Lock order is always tm.mu -> task.mu, so it cannot
+// deadlock.
 func (tm *BackgroundTaskManager) RemoveTask(id string) error {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
@@ -247,15 +203,16 @@ func (tm *BackgroundTaskManager) RemoveTask(id string) error {
 		return fmt.Errorf("task not found: %s", id)
 	}
 
-	if task.Status == TaskStatusRunning {
-		tm.mu.Unlock()
-		if err := tm.killTaskInternal(id); err != nil {
-			return err
-		}
-		tm.mu.Lock()
-		task, ok = tm.tasks[id]
-		if !ok {
-			return nil
+	if task.getStatus() == TaskStatusRunning {
+		task.CancelFunc()
+
+		task.mu.Lock()
+		cmd := task.Process
+		platform := task.platform
+		task.mu.Unlock()
+
+		if cmd != nil && cmd.Process != nil {
+			platform.killProcess(cmd)
 		}
 	}
 
@@ -263,64 +220,25 @@ func (tm *BackgroundTaskManager) RemoveTask(id string) error {
 	return nil
 }
 
-func (tm *BackgroundTaskManager) GetTaskOutput(id string, follow bool) (<-chan string, error) {
-	task, ok := tm.GetTask(id)
-	if !ok {
-		return nil, fmt.Errorf("task not found: %s", id)
-	}
+// getStatus returns the task status under the task lock.
+func (t *BackgroundTask) getStatus() TaskStatus {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.Status
+}
 
-	ch := make(chan string, 100)
+// getEndTime returns the end time under the task lock (nil if still running).
+func (t *BackgroundTask) getEndTime() *time.Time {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.EndTime
+}
 
-	go func() {
-		defer close(ch)
-
-		stdoutPos := 0
-		stderrPos := 0
-		task.mu.Lock()
-		status := task.Status
-		task.mu.Unlock()
-
-		for {
-			task.mu.Lock()
-			stdoutLen := task.Output.Len()
-			stderrLen := task.Stderr.Len()
-			task.mu.Unlock()
-
-			if stdoutLen > stdoutPos {
-				task.mu.Lock()
-				stdoutContent := task.Output.String()[stdoutPos:]
-				task.mu.Unlock()
-				select {
-				case ch <- stdoutContent:
-					stdoutPos = stdoutLen
-				default:
-				}
-			}
-
-			if stderrLen > stderrPos {
-				task.mu.Lock()
-				stderrContent := task.Stderr.String()[stderrPos:]
-				task.mu.Unlock()
-				select {
-				case ch <- "STDERR: " + stderrContent:
-					stderrPos = stderrLen
-				default:
-				}
-			}
-
-			task.mu.Lock()
-			status = task.Status
-			task.mu.Unlock()
-
-			if status != TaskStatusRunning || !follow {
-				break
-			}
-
-			time.Sleep(100 * time.Millisecond)
-		}
-	}()
-
-	return ch, nil
+// getExitCode returns the exit code under the task lock (nil if not finished).
+func (t *BackgroundTask) getExitCode() *int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.ExitCode
 }
 
 func (t *BackgroundTask) GetDuration() string {

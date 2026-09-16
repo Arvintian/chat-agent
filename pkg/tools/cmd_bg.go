@@ -68,7 +68,7 @@ func (t *RunBackgroundCommandTool) InvokableRun(ctx context.Context, argumentsIn
 		result.WriteString("\n")
 
 		for _, task := range tasks {
-			status := string(task.Status)
+			status := string(task.getStatus())
 			duration := task.GetDuration()
 			command := task.Command
 			if len(command) > 30 {
@@ -76,8 +76,8 @@ func (t *RunBackgroundCommandTool) InvokableRun(ctx context.Context, argumentsIn
 			}
 
 			exitCode := "N/A"
-			if task.ExitCode != nil {
-				exitCode = fmt.Sprintf("%d", *task.ExitCode)
+			if ec := task.getExitCode(); ec != nil {
+				exitCode = fmt.Sprintf("%d", *ec)
 			}
 
 			result.WriteString(fmt.Sprintf("%-6s %-10s %-20s %-15s %-30s\n", task.ID, status, duration, exitCode, command))
@@ -108,7 +108,7 @@ func (t *RunBackgroundCommandTool) InvokableRun(ctx context.Context, argumentsIn
 		if err := t.TaskManager.RemoveTask(args.TaskID); err != nil {
 			return "", fmt.Errorf("failed to remove task: %w", err)
 		}
-		if task.Status == TaskStatusRunning {
+		if task.getStatus() == TaskStatusRunning {
 			return fmt.Sprintf("Task %s killed and removed", args.TaskID), nil
 		}
 		return fmt.Sprintf("Task %s removed", args.TaskID), nil
@@ -128,18 +128,18 @@ func (t *RunBackgroundCommandTool) formatTaskDetails(taskID string) (string, err
 
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("Task ID: %s\n", task.ID))
-	sb.WriteString(fmt.Sprintf("Status: %s\n", task.Status))
+	sb.WriteString(fmt.Sprintf("Status: %s\n", task.getStatus()))
 	sb.WriteString(fmt.Sprintf("Command: %s\n", task.Command))
 	sb.WriteString(fmt.Sprintf("Working Directory: %s\n", task.WorkingDir))
 	sb.WriteString(fmt.Sprintf("Start Time: %s\n", task.StartTime.Format("2006-01-02 15:04:05")))
-	if task.EndTime != nil {
-		sb.WriteString(fmt.Sprintf("End Time: %s\n", task.EndTime.Format("2006-01-02 15:04:05")))
+	if end := task.getEndTime(); end != nil {
+		sb.WriteString(fmt.Sprintf("End Time: %s\n", end.Format("2006-01-02 15:04:05")))
 		sb.WriteString(fmt.Sprintf("Duration: %s\n", task.GetDuration()))
 	} else {
 		sb.WriteString(fmt.Sprintf("Running for: %s\n", task.GetDuration()))
 	}
-	if task.ExitCode != nil {
-		sb.WriteString(fmt.Sprintf("Exit Code: %d\n", *task.ExitCode))
+	if ec := task.getExitCode(); ec != nil {
+		sb.WriteString(fmt.Sprintf("Exit Code: %d\n", *ec))
 	}
 
 	return sb.String(), nil

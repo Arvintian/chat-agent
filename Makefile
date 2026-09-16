@@ -67,7 +67,7 @@ build-client:
 
 .PHONY: test
 test:
-	go test ./...
+	go test -race ./...
 
 .PHONY: install
 install: build
