@@ -1330,7 +1330,7 @@ function handleMessage(msg) {
             setStatus(msg.payload.message || 'Connected', false);
             break;
         case 'chat_selected':
-            setStatus(msg.payload.message, false);
+            // 切换/恢复 chat 的提示消息不显示（Restored/Reactivated/Selected chat: xxx），只更新角标
             // Update badge with message count from server
             if (msg.payload.message_count !== undefined) {
                 updateClearBadge(msg.payload.message_count);
