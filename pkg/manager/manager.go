@@ -686,12 +686,13 @@ func (m *Manager) compressIfNeeded(ctx context.Context) {
 	// growing until the halved size reaches the batch (bounded, see
 	// minCompressRounds), so compression is retried within a few rounds.
 	//
-	// Exception (window mode): once the measured context exceeds the FULL
-	// window (not just the threshold), the next model call is likely to fail
-	// outright. Waiting for enough rounds to batch is pointless in that state
-	// — compress whatever is available, down to a single oldest round.
+	// Exception (window mode): reaching the check at all means the measured
+	// context is already over the THRESHOLD (80% of the window by default).
+	// Waiting for enough rounds to batch would let a verbose single-round
+	// tool loop exhaust the window before the next user message arrives —
+	// so compress whatever is available, down to a single oldest round.
 	minBatch := minCompressRounds
-	if m.contextMode == ContextModeWindow && m.lastPromptTokens >= m.maxContextTokens {
+	if m.contextMode == ContextModeWindow {
 		minBatch = 1
 	}
 	if numToCompress < minBatch {

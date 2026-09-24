@@ -333,11 +333,12 @@ func TestWindowMode_LatestUsageWins(t *testing.T) {
 	}
 }
 
-// TestWindowMode_OverfullWindowCompressesSmallBatch verifies that when the
-// measured context already exceeds the full window (not just the threshold),
-// window mode compresses even a single oldest round instead of waiting for
-// the normal minimum batch.
-func TestWindowMode_OverfullWindowCompressesSmallBatch(t *testing.T) {
+// TestWindowMode_OverThresholdCompressesSmallBatch verifies that once the
+// measured context is over the threshold, window mode compresses even a small
+// batch (a single oldest round) instead of waiting for the normal minimum
+// batch — a verbose single-round tool loop must not run into the window
+// before enough rounds accumulate.
+func TestWindowMode_OverThresholdCompressesSmallBatch(t *testing.T) {
 	m := NewManager(0, ContextModeWindow)
 	fm := &fakeSummaryModel{reply: "summary text"}
 	m.SetChatModel(fm)
@@ -346,20 +347,12 @@ func TestWindowMode_OverfullWindowCompressesSmallBatch(t *testing.T) {
 	ctx := context.Background()
 	buildRounds(m, ctx, 2) // 2 completed rounds + empty current = 3 (half = 1 < min batch 3)
 
-	// Only above the threshold (500) but below the full window: NOT overfull,
-	// so the small batch is still skipped.
+	// Above the threshold (500) but below the full window: the small batch
+	// must still be compressed — the threshold is the trigger line.
 	m.ReportUsage(&schema.TokenUsage{PromptTokens: 590, CompletionTokens: 10, TotalTokens: 600})
-	m.IncRound(ctx) // 4 rounds, half = 2 < 3 → skip
-	if fm.generated {
-		t.Fatal("compressed a small batch that was only above the threshold")
-	}
-
-	// Now over the full window: the oldest round must be compressed even though
-	// the halved batch is below the normal minimum.
-	m.ReportUsage(&schema.TokenUsage{PromptTokens: 1190, CompletionTokens: 10, TotalTokens: 1200})
-	m.IncRound(ctx) // 5 rounds, half = 2; overfull → minBatch 1, compress 2
+	m.IncRound(ctx) // 4 rounds, half = 2; over threshold → minBatch 1
 	if !fm.generated {
-		t.Fatal("expected compression when over the full window")
+		t.Fatal("expected compression once over the threshold")
 	}
 	msgs := m.GetMessages()
 	if msgs[0].Role != schema.Assistant || !strings.HasPrefix(msgs[0].Content, "[Previous Conversation Summary]") {
@@ -367,15 +360,16 @@ func TestWindowMode_OverfullWindowCompressesSmallBatch(t *testing.T) {
 	}
 }
 
+
 // TestUsagePersistenceRoundTrip simulates the restart flow: usage updates are
 // persisted via the callback into a (file-backed) store, a fresh manager
 // restores the counters with SetTokenUsage, and later usage keeps accumulating
 // on top of the restored base.
 func TestUsagePersistenceRoundTrip(t *testing.T) {
-		var (
-		mu       sync.Mutex
-		stored   map[string]string
-		cbCalls  int
+	var (
+		mu      sync.Mutex
+		stored  map[string]string
+		cbCalls int
 	)
 	store := func(key string, value []byte) error {
 		mu.Lock()
@@ -431,7 +425,7 @@ func TestWindowMode_RestoredUsageTriggersCompression(t *testing.T) {
 
 	m := NewManager(0, ContextModeWindow)
 	m.SetContextWindow(1000, 0.5) // threshold 500
-	buildRounds(m, ctx, 5)         // 6 rounds incl. empty current one
+	buildRounds(m, ctx, 5)        // 6 rounds incl. empty current one
 
 	// Restart: no model call yet, only the persisted measurement.
 	m.SetTokenUsage(300, 80, 380, 600) // lastPrompt 600 >= threshold 500
