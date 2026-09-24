@@ -206,6 +206,12 @@ func (c *Client) SendMessageWithFiles(text string, files []FilePayload) error {
 	return c.sendCommand(CmdChat, ChatRequest{Message: text, Files: files})
 }
 
+// SendChatMessage sends a text message to a specific chat (multi-chat mode).
+// The chat must have been selected (attached) via SelectChat first.
+func (c *Client) SendChatMessage(chatName, text string, files []FilePayload) error {
+	return c.sendCommand(CmdChat, ChatRequest{ChatName: chatName, Message: text, Files: files})
+}
+
 // Regenerate requests regeneration of the last response.
 func (c *Client) Regenerate() error {
 	return c.sendCommand(CmdRegenerate, ChatRequest{})
@@ -216,14 +222,34 @@ func (c *Client) Stop() error {
 	return c.sendCommand(CmdStop, nil)
 }
 
+// StopChat stops the ongoing response of the given chat.
+func (c *Client) StopChat(chatName string) error {
+	return c.sendCommand(CmdStop, ChatCommand{ChatName: chatName})
+}
+
 // Clear clears the conversation context for the current chat.
 func (c *Client) Clear() error {
 	return c.sendCommand(CmdClear, nil)
 }
 
+// ClearChat clears the conversation context of the given chat.
+func (c *Client) ClearChat(chatName string) error {
+	return c.sendCommand(CmdClear, ChatCommand{ChatName: chatName})
+}
+
 // Keep triggers the keep hook for the current session.
 func (c *Client) Keep() error {
 	return c.sendCommand(CmdKeep, nil)
+}
+
+// KeepChat triggers the keep hook of the given chat.
+func (c *Client) KeepChat(chatName string) error {
+	return c.sendCommand(CmdKeep, ChatCommand{ChatName: chatName})
+}
+
+// RegenerateChat requests regeneration of the last response of the given chat.
+func (c *Client) RegenerateChat(chatName string) error {
+	return c.sendCommand(CmdRegenerate, ChatCommand{ChatName: chatName})
 }
 
 // DeselectChat deselects the current chat and returns to the selection page.

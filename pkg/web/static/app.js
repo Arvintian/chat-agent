@@ -439,17 +439,48 @@ async function copyMermaidToClipboard(preElement, btn) {
 }
 
 let ws = null;
-let currentChat = null;
+let currentChat = null;   // name of the ACTIVE chat (null on the selection page)
 let sessionId = null;
 let reconnectAttempts = 0;
 const maxReconnectAttempts = 10;
 const reconnectBaseDelay = 1000;  // 1 second
 const reconnectMaxDelay = 15000; // 15 seconds
 let toastTimeout = null;
+// The globals below are always the LIVE STATE of the active chat. When the
+// user switches tabs, captureStreamToCtx() snapshots them into the outgoing
+// chat context and restoreStreamFromCtx() re-injects the incoming one.
 let isGenerating = false;
 let lastUserMessage = '';
 let lastUserFiles = null;
 let lastUserMessageElement = null;  // DOM element of the last user message
+
+// ===== Multi-chat workspace =====
+// Every chat opened on this connection (tab) has its own context. The single
+// #messages area always shows the active chat; background chats keep
+// streaming on the server and their events keep appending to ctx.stream
+// until the user switches back to them.
+const openChats = {};  // chatName -> chatCtx
+
+function newChatCtx(name) {
+    return {
+        name: name,
+        generating: false,       // response stream in flight
+        lastUserMessage: '',
+        lastUserFiles: null,
+        msgCount: 0,             // message count (for the clear badge)
+        unread: 0,               // background completion counter
+        draft: '',               // input draft while this chat is not active
+        stream: null             // in-flight stream buffer (snapshot + background accumulation)
+    };
+}
+
+function getChatCtx(name) {
+    return name ? (openChats[name] || null) : null;
+}
+
+function saveTabState() {
+    saveTabChat({ open: Object.keys(openChats), active: currentChat });
+}
 
 // Store chat configurations (name -> { hasKeepHook: boolean })
 const chatConfigs = {};
@@ -495,27 +526,44 @@ function saveLastChat(chatName) {
     }
 }
 
-// Load per-tab chat from sessionStorage (survives refresh, cleared on tab close)
+// Load the tab layout from sessionStorage (survives refresh, cleared on tab
+// close). Returns { open: [chatName...], active: chatName|null } or null.
+// Legacy values (a plain chat name string) are upgraded to the new shape.
 function loadTabChat() {
     try {
-        return sessionStorage.getItem(TAB_CHAT_KEY);
-    } catch (e) {
-        console.error('Failed to load tab chat:', e);
+        const raw = sessionStorage.getItem(TAB_CHAT_KEY);
+        if (!raw) return null;
+        const data = JSON.parse(raw);
+        if (data && typeof data === 'object' && Array.isArray(data.open)) {
+            return { open: data.open, active: data.active || null };
+        }
+        if (typeof data === 'string' && data) {
+            return { open: [data], active: data };
+        }
         return null;
+    } catch (e) {
+        // Fall back to the legacy plain-string format
+        try {
+            const legacy = sessionStorage.getItem(TAB_CHAT_KEY);
+            return legacy ? { open: [legacy], active: legacy } : null;
+        } catch (e2) {
+            console.error('Failed to load tab chat:', e);
+            return null;
+        }
     }
 }
 
-// Save per-tab chat to sessionStorage
-function saveTabChat(chatName) {
+// Save the tab layout to sessionStorage. `state` is { open, active } or null.
+function saveTabChat(state) {
     try {
-        if (chatName) {
-            sessionStorage.setItem(TAB_CHAT_KEY, chatName);
+        if (state) {
+            sessionStorage.setItem(TAB_CHAT_KEY, JSON.stringify(state));
         } else {
             sessionStorage.removeItem(TAB_CHAT_KEY);
         }
-        console.log('Tab chat saved:', chatName);
+        console.log('Tab layout saved:', state);
     } catch (e) {
-        console.error('Failed to save tab chat:', e);
+        console.error('Failed to save tab layout:', e);
     }
 }
 
@@ -585,17 +633,25 @@ function renderChatSidebar(chats, activeChats) {
 
 // Build/refresh the sidebar list. The desktop header banner is hidden, so the
 // keep/clear actions of the current chat are rendered on its sidebar item.
+// Multi-chat state: every chat opened in this connection is highlighted, with
+// a streaming spinner / unread dot and a close button.
 function buildSidebarList() {
     const list = document.getElementById('chat-list');
     if (!list) return;
     list.innerHTML = '';
     for (const chatInfo of sidebarChats) {
         const chatName = chatInfo.name;
-        const locked = !!activeChatsMap[chatName];
+        // Chats open in THIS connection are not "locked" — the lock only
+        // applies to chats opened in other browser tabs of the session.
+        const locked = !!activeChatsMap[chatName] && !openChats[chatName];
+        const isOpen = !!openChats[chatName];
         const isActive = chatName === currentChat && !locked;
 
         const item = document.createElement('div');
-        item.className = 'chat-list-item' + (locked ? ' locked' : '') + (isActive ? ' active' : '');
+        item.className = 'chat-list-item'
+            + (locked ? ' locked' : '')
+            + (isOpen ? ' open' : '')
+            + (isActive ? ' active' : '');
         item.dataset.chat = chatName;
 
         const label = document.createElement('span');
@@ -603,9 +659,24 @@ function buildSidebarList() {
         label.textContent = (locked ? '🔒 ' : '') + chatName;
         item.appendChild(label);
 
+        // Live status of an open chat: streaming spinner or unread dot
+        if (isOpen && !locked) {
+            const ctx = openChats[chatName];
+            if (ctx.generating) {
+                const spin = document.createElement('span');
+                spin.className = 'chat-item-status';
+                spin.textContent = '⏳';
+                item.appendChild(spin);
+            } else if (ctx.unread > 0) {
+                const dot = document.createElement('span');
+                dot.className = 'chat-item-unread';
+                item.appendChild(dot);
+            }
+        }
+
+        const actions = document.createElement('span');
+        actions.className = 'chat-item-actions';
         if (isActive) {
-            const actions = document.createElement('span');
-            actions.className = 'chat-item-actions';
             if (chatConfigs[chatName] && chatConfigs[chatName].hasKeepHook) {
                 const keepBtn = document.createElement('button');
                 keepBtn.className = 'chat-item-btn';
@@ -626,6 +697,8 @@ function buildSidebarList() {
             countBadge.textContent = sidebarMsgCount > 0 ? `(${sidebarMsgCount})` : '';
             countBadge.style.display = sidebarMsgCount > 0 ? 'inline-flex' : 'none';
             actions.appendChild(countBadge);
+        }
+        if (actions.childNodes.length > 0) {
             item.appendChild(actions);
         }
 
@@ -645,23 +718,21 @@ function updateSidebarActive() {
     }
 }
 
-// Switch to another chat from the sidebar (desktop). The server keeps every
-// chat's state alive inside the session, so switching is a select_chat call.
+// Switch to another chat from the sidebar (desktop). Every chat opened on
+// this connection stays attached and keeps streaming in the background, so
+// switching is a local view swap (plus a select_chat for a not-yet-open chat).
 async function switchChatFromSidebar(chatName) {
-    if (!chatConfigs[chatName] || activeChatsMap[chatName]) return;
+    if (!chatConfigs[chatName] || (activeChatsMap[chatName] && !openChats[chatName])) return;
     if (chatName === currentChat) {
         const input = document.getElementById('message-input');
         if (input && !isGenerating) input.focus();
         return;
     }
-    if (isGenerating) {
-        showToast('Stop the current response before switching chats', true);
+
+    // Already open as a tab: just switch the view (server chat stays attached)
+    if (openChats[chatName]) {
+        await switchToChat(chatName);
         return;
-    }
-    // Drop any pending approval for the chat being left
-    const approvalModal = document.getElementById('approval-modal');
-    if (approvalModal && approvalModal.style.display !== 'none') {
-        hideApprovalModal();
     }
 
     if (currentChat === null) {
@@ -671,28 +742,6 @@ async function switchChatFromSidebar(chatName) {
         const vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
         chatPanel.style.height = vh + 'px';
         chatPanel.style.display = 'flex';
-    } else {
-        // Reset chat area state for the new chat
-        const messages = document.getElementById('messages');
-        if (messages) messages.innerHTML = '';
-        if (window.ScrollHandler) window.ScrollHandler.reset();
-        const input = document.getElementById('message-input');
-        if (input) {
-            input.value = '';
-            input.disabled = false;
-        }
-        isGenerating = false;
-        updateSendButton();
-        removeRegenerateFromLastMessage();
-        lastUserMessage = '';
-        lastUserFiles = null;
-        lastUserMessageElement = null;
-        toolCalls = {};
-        pendingApprovals = {};
-        currentApprovalId = null;
-        if (window.InputHistory) window.InputHistory.resetHistoryNavigation();
-        if (window.ScrollHandler) window.ScrollHandler.setUserScrolling(false);
-        updateClearBadge(0);
     }
 
     await enterChat(chatName);
@@ -737,9 +786,13 @@ function clearSessionId() {
 // index -> { name, argsElement, argsText, complete }
 let toolCalls = {};
 
-// Track pending approval requests
+// Track pending approval requests (of the approval currently shown in the modal)
 let pendingApprovals = {};
 let currentApprovalId = null;
+let currentApprovalChat = null;
+// Queue of approval requests: several chats can request approvals concurrently,
+// the global modal walks the queue one entry at a time.
+let approvalQueue = [];
 
 // File upload functions are now in file-upload.js module
 // Access via window.FileUploadHandler
@@ -798,17 +851,20 @@ async function init() {
         // Determine which chat to auto-select
         let chatToSelect = null;
 
-        // Priority 1: Per-tab chat from sessionStorage (survives refresh)
-        // This keeps the tab stable when refreshing while multiple tabs are open
+        // Priority 1: Tab layout from sessionStorage (survives refresh)
+        // This keeps the tab stable when refreshing while multiple tabs are open.
+        // `chatsToOpen` holds all chats that should be restored as tabs.
+        let chatsToOpen = [];
         const tabChat = loadTabChat();
-        if (tabChat && data.chats.some(c => c.name === tabChat)) {
-            if (!activeChats[tabChat]) {
-                chatToSelect = tabChat;
-                console.log('Will restore tab chat:', chatToSelect);
+        if (tabChat && tabChat.open && tabChat.open.length > 0) {
+            chatsToOpen = tabChat.open.filter(name =>
+                data.chats.some(c => c.name === name) && !activeChats[name]);
+            if (chatsToOpen.length > 0) {
+                // Show the active chat first; fall back to the last opened one
+                chatToSelect = chatsToOpen.includes(tabChat.active) ? tabChat.active : chatsToOpen[chatsToOpen.length - 1];
+                console.log('Will restore tab layout:', chatToSelect, chatsToOpen);
             } else {
-                // Tab's chat is active in another tab - this shouldn't normally happen
-                // (could happen if the tab was closed and reopened very quickly)
-                console.log('Tab chat is already active in another tab, skipping:', tabChat);
+                console.log('No restorable tab chats (all locked by other tabs)');
             }
         }
 
@@ -832,13 +888,17 @@ async function init() {
             const option = document.createElement('option');
             option.value = chatName;
 
-            // If chat is already active in another tab, disable it and add indicator
-            if (activeChats[chatName]) {
+            // If chat is already active in another tab, disable it and add
+            // indicator (chats open in this tab are not locked)
+            if (activeChats[chatName] && !openChats[chatName]) {
                 option.textContent = '🔒 ' + chatName + ' (已在其他标签页打开)';
                 option.disabled = true;
                 option.style.color = '#999';
             } else {
-                option.textContent = chatName;
+                // ● marks the current chat; ⏳ marks an open chat generating
+                const ctx = openChats[chatName];
+                const mark = chatName === currentChat ? '● ' : (ctx && ctx.generating ? '⏳ ' : '');
+                option.textContent = mark + chatName;
             }
 
             select.appendChild(option);
@@ -873,6 +933,9 @@ async function init() {
         if (isInitialPageLoad && chatToSelect) {
             isAutoStarting = true;
             startChat();
+            // Other chats of the saved layout are NOT re-attached in the
+            // background: their in-flight streams died with the previous
+            // connection, and idle chats are only kept open while generating.
             isAutoStarting = false;
         }
 
@@ -903,69 +966,266 @@ async function startChat() {
     await enterChat(chatName);
 }
 
-// Activate a chat: set current chat, update header/title/keep button, load local
-// history and (re)connect the WebSocket with a select_chat message.
-// Shared by startChat (selection page) and switchChatFromSidebar (desktop sidebar).
-async function enterChat(chatName) {
-    currentChat = chatName;
-    window.MessageHistory.setCurrentChat(chatName);
-
-    // Always save per-tab chat (sessionStorage) for refresh stability
-    saveTabChat(chatName);
-
-    // Only save last used chat (localStorage) on explicit user selection, not auto-start
-    if (!isAutoStarting) {
-        saveLastChat(chatName);
-    }
-
-    // Update document title to reflect current chat name
+// Update header/keep button/title for the given chat (shared by enter/switch).
+function applyChatHeader(chatName) {
     document.title = chatName;
-
-    // Update agent header with chat name
     const agentHeader = document.getElementById('agent-header');
-    const chatNameText = agentHeader.querySelector('.chat-name-text');
+    const chatNameText = agentHeader ? agentHeader.querySelector('.chat-name-text') : null;
     if (chatNameText) {
         chatNameText.textContent = '💬 ' + chatName;
-    } else {
+    } else if (agentHeader) {
         agentHeader.textContent = '💬 ' + chatName;
     }
-
-    // Show or hide keep button based on chat configuration
     const keepBtn = document.getElementById('keep-btn');
     if (keepBtn) {
         const chatConfig = chatConfigs[chatName];
-        if (chatConfig && chatConfig.hasKeepHook) {
-            keepBtn.style.display = 'inline-block';
-        } else {
-            keepBtn.style.display = 'none';
-        }
+        keepBtn.style.display = (chatConfig && chatConfig.hasKeepHook) ? 'inline-block' : 'none';
+    }
+}
+
+// Reset the shared messages/input area before rendering another chat.
+function resetChatArea() {
+    const messages = document.getElementById('messages');
+    if (messages) messages.innerHTML = '';
+    if (window.ScrollHandler) {
+        window.ScrollHandler.reset();
+        window.ScrollHandler.setUserScrolling(false);
+    }
+    if (window.InputHistory) window.InputHistory.resetHistoryNavigation();
+    updateClearBadge(0);
+}
+
+// Open a chat as a NEW tab: create its context, attach it to this connection
+// via select_chat (the server keeps every attached chat alive, so previously
+// opened tabs keep streaming) and — unless activate:false — switch the view
+// to it. activate:false is used when restoring several tabs at once: only
+// the primary chat takes over the view, the rest are attached in the
+// background.
+async function enterChat(chatName, opts) {
+    const activate = !opts || opts.activate !== false;
+
+    let alreadyOpen = !!openChats[chatName];
+    if (!alreadyOpen) {
+        const ctx = newChatCtx(chatName);
+        openChats[chatName] = ctx;
+    }
+    if (alreadyOpen && activate) {
+        await switchToChat(chatName);
+        return;
     }
 
-    // Load message history from storage (IndexedDB or localStorage)
-    await loadMessageHistory();
+    if (activate) {
+        // Capture the outgoing chat's in-flight stream (if any) before the
+        // view switches, so its partial response survives the switch.
+        captureActiveChat();
 
-    // Badge will be updated when we receive chat_selected message from server
+        currentChat = chatName;
+        window.MessageHistory.setCurrentChat(chatName);
+        saveTabState();
+
+        // Only save last used chat (localStorage) on explicit user selection, not auto-start
+        if (!isAutoStarting) {
+            saveLastChat(chatName);
+        }
+
+        // Reset live (active chat) state
+        isGenerating = false;
+        lastUserMessage = '';
+        lastUserFiles = null;
+        lastUserMessageElement = null;
+        toolCalls = {};
+        updateSendButton();
+
+        // Reset the shared input: it may still hold the outgoing chat's draft
+        // (already captured into its ctx) and be disabled if that chat was
+        // generating. The new chat starts with an empty, enabled input.
+        const input = document.getElementById('message-input');
+        if (input) {
+            input.value = '';
+            input.disabled = false;
+        }
+
+        applyChatHeader(chatName);
+        resetChatArea();
+
+        // Load message history from storage (IndexedDB or localStorage);
+        // a stale render (fast switch) is dropped internally.
+        await loadMessageHistory(chatName);
+        // Replay terminal events captured while the load was in flight.
+        replayDeferredTerminals();
+    } else {
+        saveTabState();
+    }
 
     // Load base session ID from localStorage if not already set
     if (!sessionId) {
         sessionId = loadSessionId();
     }
 
-    // Initialize scroll detection for auto-scroll behavior
-    initScrollDetection();
+    if (activate) {
+        // Initialize scroll detection for auto-scroll behavior
+        initScrollDetection();
+    }
 
-    // Check if WebSocket is already connected
+    // Attach the chat to this connection (or establish the connection first;
+    // a connecting socket will select every open chat in onopen)
     if (ws && ws.readyState === WebSocket.OPEN) {
-        // WebSocket already connected, just send select_chat message
-        console.log('WebSocket already connected, sending select_chat for:', chatName);
         ws.send(JSON.stringify({ type: 'select_chat', payload: { chat_name: chatName } }));
     } else {
-        // WebSocket not connected, establish new connection
-        console.log('WebSocket not connected, establishing new connection');
         connectWebSocket();
     }
 
+    renderTabs();
     updateSidebarActive();
+}
+
+// Snapshot the live (in-flight) state of the currently active chat into its
+// context and reset the shared globals. Must be called before the view
+// changes to another chat, so the outgoing chat's partial response can be
+// re-injected when the user comes back.
+function captureActiveChat() {
+    const outgoing = getChatCtx(currentChat);
+    if (outgoing) {
+        const input = document.getElementById('message-input');
+        outgoing.draft = input ? input.value : '';
+        captureStreamToCtx(outgoing);
+        // Open-chat policy: a chat stays attached (keeps streaming in the
+        // background) only while it is generating. Leaving an idle chat
+        // deselects it directly.
+        if (!outgoing.generating) {
+            deselectChat(outgoing.name);
+        }
+    }
+    lastUserMessageElement = null;
+}
+
+// Switch the view to an ALREADY OPEN chat. The server-side chat stays
+// attached (background streaming continues); locally we capture the outgoing
+// chat's in-flight stream, re-render the incoming chat from local history and
+// re-inject its in-flight content if it is still generating.
+async function switchToChat(chatName) {
+    const incoming = getChatCtx(chatName);
+    if (!incoming || chatName === currentChat) return;
+
+    // 1) Capture the active chat's live state into its context
+    captureActiveChat();
+
+    // 2) Point the view + persistence at the incoming chat
+    currentChat = chatName;
+    incoming.unread = 0;
+    saveTabState();
+    window.MessageHistory.setCurrentChat(chatName);
+    applyChatHeader(chatName);
+    resetChatArea();
+
+    // 3) Restore the incoming chat's live state
+    isGenerating = incoming.generating;
+    lastUserMessage = incoming.lastUserMessage || '';
+    lastUserFiles = incoming.lastUserFiles || null;
+    updateSendButton();
+    const input = document.getElementById('message-input');
+    if (input) {
+        input.value = incoming.draft || '';
+        input.disabled = incoming.generating;
+    }
+
+    // 4) Re-render history, then re-inject in-flight content (if any).
+    //    A stale render (switched away again while the load was in flight)
+    //    is dropped, and so is the stream re-injection below it.
+    if (await loadMessageHistory(chatName)) {
+        if (incoming.generating && incoming.stream) {
+            restoreStreamFromCtx(incoming);
+        }
+    }
+    // Replay terminal events captured while the load was in flight; they now
+    // route to the correct active/background path.
+    replayDeferredTerminals();
+
+    // 5) Re-activate on the server so message_count/badge is refreshed
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'select_chat', payload: { chat_name: chatName } }));
+    }
+
+    renderTabs();
+    updateSidebarActive();
+}
+
+// Deselect a chat on the server (stops any in-flight stream) and drop its
+// local context.
+function deselectChat(chatName) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'deselect_chat', payload: { chat_name: chatName } }));
+    }
+    const ctx = openChats[chatName];
+    if (ctx) {
+        ctx.generating = false;
+        ctx.stream = null;
+    }
+    delete openChats[chatName];
+    saveTabState();
+    renderTabs();
+}
+
+// Refresh the sidebar: multi-chat state (which chats are open, which are
+// streaming / have unread results) is shown on the sidebar items.
+function renderTabs() {
+    updateSidebarActive();
+}
+
+// Snapshot the active chat's in-flight stream state into ctx, then reset the
+// stream globals (the #messages DOM is cleared on switch, so element
+// references are dropped with it).
+function captureStreamToCtx(ctx) {
+    ctx.generating = isGenerating;
+    ctx.lastUserMessage = lastUserMessage;
+    ctx.lastUserFiles = lastUserFiles;
+    if (isGenerating) {
+        ctx.stream = {
+            currentChunk: currentChunk,
+            currentThinkingChunk: currentThinkingChunk,
+            currentAssistantMessage: currentAssistantMessage,
+            currentThinkingMessage: currentThinkingMessage,
+            currentContentType: currentContentType,
+            toolCalls: toolCalls
+        };
+    } else {
+        ctx.stream = null;
+    }
+    thinkingBlock = null;
+    responseBlock = null;
+    currentChunk = '';
+    currentThinkingChunk = '';
+    currentAssistantMessage = '';
+    currentThinkingMessage = '';
+    currentContentType = '';
+    chunkElement = null;
+    thinkingElement = null;
+    compressionHintElement = null;
+    thinkingRenderPending = false;
+    responseRenderPending = false;
+    toolCalls = {};
+    segmentPersisted = false;
+}
+
+// Re-inject the in-flight stream captured by captureStreamToCtx. The
+// accumulated text is replayed as a fresh first chunk of each block, so
+// subsequent live chunks keep appending to the same block.
+function restoreStreamFromCtx(ctx) {
+    const st = ctx.stream;
+    ctx.stream = null;
+    ctx.heldFinal = false;
+    if (!st) return;
+    if (st.currentThinkingChunk) {
+        displayChunk(st.currentThinkingChunk, true, false, 'thinking');
+    }
+    if (st.currentChunk) {
+        displayChunk(st.currentChunk, true, false, 'response');
+    }
+    Object.keys(st.toolCalls || {}).forEach(function (idx) {
+        const tc = st.toolCalls[idx];
+        displayToolCall(tc.name, tc.argsText, idx, true);
+    });
+    scrollToBottom(true);
 }
 
 // Header banner click: back to chat selection on mobile only.
@@ -980,15 +1240,20 @@ function headerBack() {
 
 // Navigate back to chat selection page
 function backToChatSelection() {
-    // Send deselect message to server so the chat is marked as inactive
-    if (ws && ws.readyState === WebSocket.OPEN && currentChat) {
-        ws.send(JSON.stringify({ type: 'deselect_chat', payload: {} }));
+    // Detach ALL open chats from the server connection (stops in-flight streams)
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        for (const name of Object.keys(openChats)) {
+            ws.send(JSON.stringify({ type: 'deselect_chat', payload: { chat_name: name } }));
+        }
     }
+    Object.keys(openChats).forEach(function (k) { delete openChats[k]; });
+    deferredTerminals = [];
+    renderTabs();
 
     // Clear current chat state (but keep session ID and WebSocket connection)
     currentChat = null;
 
-    // Clear per-tab chat so next refresh shows selection page
+    // Clear the tab layout so next refresh shows selection page
     saveTabChat(null);
 
     // Clear messages display
@@ -1054,9 +1319,65 @@ function backToChatSelection() {
     init();
 }
 
-// Load and display message history from storage
-async function loadMessageHistory() {
+// View generation token: history rendering is async (IndexedDB read), so a
+// fast A→B→A switch could let the stale B render fire after the A view is up
+// and clobber it (mixed or "missing" messages, wrong last-user state). Every
+// view load bumps the token; the render step bails out when it is stale.
+let viewToken = 0;
+
+// Set while the active view's history load is in flight. Live chunk/tool
+// events of the active chat are buffered into its ctx.stream (replayed by
+// the post-render restore) so stored history and in-flight content keep
+// their stored → live order, and terminal events are deferred until after
+// the render + replay.
+let pendingViewLoad = false;
+let deferredTerminals = [];
+
+// Replay terminal events captured while a history load was in flight; they
+// now route to the correct active/background path.
+function replayDeferredTerminals() {
+    const deferred = deferredTerminals;
+    deferredTerminals = [];
+    for (const [type, payload] of deferred) {
+        handleMessage({ type: type, payload: payload });
+    }
+}
+
+// Release the final-content buffer a chat held while a (superseded) view
+// load was in flight: the chat is in the background again, so the held
+// buffer can no longer be replayed in its view (the content is already
+// saved to storage).
+function releaseHeldFinal(chatName) {
+    const ctx = openChats[chatName];
+    if (ctx && ctx.heldFinal) {
+        ctx.heldFinal = false;
+        ctx.stream = null;
+        ctx.generating = false;
+        ctx.unread++;
+        renderTabs();
+    }
+}
+
+// Load and display the history of expectedChat. Returns false when the render
+// was dropped as stale (the view moved on while the load was in flight).
+async function loadMessageHistory(expectedChat) {
+    const token = ++viewToken;
+    pendingViewLoad = true;
+
     const history = await window.MessageHistory.loadHistory();
+
+    // Superseded by a newer view load; the newer one manages the flag.
+    if (token !== viewToken) return false;
+
+    // The user switched away while this load was in flight: drop the stale
+    // render instead of clobbering the current view, and release the held
+    // final buffer of the (now background) chat.
+    if (currentChat !== expectedChat) {
+        releaseHeldFinal(expectedChat);
+        pendingViewLoad = false;
+        return false;
+    }
+    pendingViewLoad = false;
 
     // Update badge with locally loaded message count (will be refined by server's chat_selected)
     updateClearBadge(history.length);
@@ -1094,6 +1415,7 @@ async function loadMessageHistory() {
 
     // Scroll to bottom after loading history
     scrollToBottom(true);
+    return true;
 }
 
 // Display stored thinking and response message
@@ -1252,6 +1574,12 @@ function connectWebSocket() {
         wsUrl += '?session_id=' + encodeURIComponent(sessionId);
     }
 
+    // Guard: don't create a second socket while one is already opening/open
+    // (enterChat for several restored tabs all funnel through here).
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+        return;
+    }
+
     ws = new WebSocket(wsUrl);
 
     ws.onopen = function () {
@@ -1267,9 +1595,13 @@ function connectWebSocket() {
             input.disabled = false;
         }
 
-        // Auto-select current chat
-        if (currentChat) {
-            ws.send(JSON.stringify({ type: 'select_chat', payload: { chat_name: currentChat } }));
+        // (Re)attach the active chat and any open chat still generating;
+        // idle chats are not re-attached (open-chat policy: attached only
+        // while generating, or the current view).
+        for (const name of Object.keys(openChats)) {
+            if (name === currentChat || openChats[name].generating) {
+                ws.send(JSON.stringify({ type: 'select_chat', payload: { chat_name: name } }));
+            }
         }
     };
 
@@ -1295,6 +1627,23 @@ function connectWebSocket() {
 
     ws.onclose = function () {
         console.log('WebSocket disconnected');
+
+        // In-flight streams are dead with the connection (the server cancels
+        // them on disconnect): drop their state so inputs are re-enabled and
+        // stale spinner badges disappear.
+        for (const name of Object.keys(openChats)) {
+            const ctx = openChats[name];
+            if (ctx.generating) {
+                ctx.generating = false;
+                ctx.stream = null;
+                ctx.heldFinal = false;
+            }
+        }
+        deferredTerminals = [];
+        isGenerating = false;
+        updateSendButton();
+        renderTabs();
+
         // Disable input while disconnected
         const input = document.getElementById('message-input');
         if (input) {
@@ -1324,30 +1673,228 @@ function connectWebSocket() {
     };
 }
 
+// Route an event to its chat:
+// - no chat_name (legacy server): event goes to the active chat view;
+// - chat_name present: it must match a known chat (active or open in the
+//   background), otherwise the event is DROPPED (e.g. a stale event for a
+//   closed chat) so it can never leak into the current view.
+function routeEvent(payload) {
+    const cn = (payload && payload.chat_name) || currentChat;
+    if (!cn) return { name: null, background: false };
+    if (cn === currentChat) return { name: cn, background: false };
+    // Unknown/closed chat: drop the event (e.g. a 'stopped'/'error' that
+    // arrives after the chat was deselected) so it can never leak into the
+    // current view or touch its state.
+    if (!openChats[cn]) return { name: null, background: false };
+    return { name: cn, background: true };
+}
+
+// In-flight stream buffer of a background chat. captureStreamToCtx snapshots
+// the chat into ctx.stream when the user leaves it; every later chunk / tool
+// call of that chat keeps appending to the SAME buffer, so switching back
+// re-injects the full accumulated content without gaps.
+function backgroundStream(ctx) {
+    if (!ctx.stream) {
+        ctx.stream = {
+            currentChunk: '',
+            currentThinkingChunk: '',
+            currentAssistantMessage: '',
+            currentThinkingMessage: '',
+            currentContentType: '',
+            toolCalls: {}
+        };
+    }
+    return ctx.stream;
+}
+
+// Merge streaming tool-call arguments (backend sends accumulated updates).
+function mergeStreamArgs(prev, next) {
+    if (!prev) return next || '';
+    return (next || '').startsWith(prev) ? next : prev + (next || '');
+}
+
+// Persist a message to local history for a (background) chat: the
+// MessageHistory module is keyed by its current-chat pointer, so it is
+// temporarily switched to the target chat.
+function saveToChatHistory(chatName, message, type, toolData, thinkingContent) {
+    const prev = window.MessageHistory.getCurrentChat();
+    window.MessageHistory.setCurrentChat(chatName);
+    try {
+        window.MessageHistory.saveMessage(message, type, toolData, thinkingContent, null);
+    } finally {
+        window.MessageHistory.setCurrentChat(prev);
+    }
+}
+
+// Persist one background segment (thinking + response) to the chat's local
+// history, so a round keeps every piece: text → tool → text → ... → final.
+function saveSegmentToChatHistory(chatName, response, thinking) {
+    response = (response || '').trim();
+    thinking = (thinking || '').trim();
+    if (response || thinking) {
+        saveToChatHistory(chatName, response, 'assistant', null, thinking);
+    }
+}
+
+// Persist the accumulated background result (final chunk / defensive complete).
+function saveBackgroundResult(ctx) {
+    const s = ctx.stream;
+    if (!s) return;
+    const response = (s.currentChunk || '').trim();
+    const thinking = (s.currentThinkingChunk || '').trim();
+    if (response || thinking) {
+        saveToChatHistory(ctx.name, response, 'assistant', null, thinking);
+    }
+}
+
+// Accumulate a chunk of a background (non-active) chat into its stream buffer.
+function accumulateBackgroundChunk(ctx, payload) {
+    if (!ctx || !ctx.generating) return;
+    // Final chunk (empty content): persist and mark done
+    if (payload.last && payload.content === '') {
+        saveBackgroundResult(ctx);
+        if (ctx.name === currentChat && pendingViewLoad) {
+            // The current view's history load is still in flight: keep the
+            // buffer and the generating flag so the post-render restore can
+            // replay the final content in the right place; the deferred
+            // 'complete' event finalizes the globals afterwards.
+            ctx.heldFinal = true;
+            return;
+        }
+        ctx.stream = null;
+        ctx.generating = false;
+        ctx.unread++;
+        renderTabs();
+        return;
+    }
+    if (payload.content_type === 'system') return; // compression hints: not shown in background
+    const s = backgroundStream(ctx);
+    if (payload.content_type === 'thinking') {
+        s.currentThinkingChunk += (payload.content || '');
+        s.currentThinkingMessage += (payload.content || '');
+    } else {
+        s.currentChunk += (payload.content || '');
+        s.currentAssistantMessage += (payload.content || '');
+    }
+}
+
+// Accumulate a tool call of a background chat (only the final event persists).
+function accumulateBackgroundToolCall(ctx, payload) {
+    if (!ctx || !ctx.generating) return;
+    const s = backgroundStream(ctx);
+    if (payload.streaming === false) {
+        // Persist the segment so far BEFORE the tool call (same order as the
+        // active view keeps: text → tool), so the local history holds the full
+        // round: text → tool → text → ... → final.
+        if (s.currentChunk || s.currentThinkingChunk) {
+            saveSegmentToChatHistory(ctx.name, s.currentAssistantMessage, s.currentThinkingChunk);
+            s.currentChunk = '';
+            s.currentThinkingChunk = '';
+            s.currentAssistantMessage = '';
+            s.currentThinkingMessage = '';
+        }
+        // The final event normally carries the full arguments; fall back to
+        // the last streamed accumulation if it does not.
+        const inFlight = s.toolCalls[payload.index];
+        const args = payload.arguments || (inFlight && inFlight.argsText) || '';
+        saveToChatHistory(ctx.name, null, 'tool_call', {
+            name: payload.name,
+            arguments: args
+        });
+        // The final event is persisted; drop the in-flight tracking entry.
+        delete s.toolCalls[payload.index];
+    } else if (payload.streaming === true && payload.arguments) {
+        const inFlight = s.toolCalls[payload.index];
+        s.toolCalls[payload.index] = {
+            name: payload.name,
+            argsText: mergeStreamArgs(inFlight && inFlight.argsText, payload.arguments)
+        };
+    }
+}
+
+// Finish a background chat on complete/stopped/error (defensive: the final
+// chunk normally already handled persistence).
+function finishBackgroundChat(ctx, save) {
+    if (!ctx || !ctx.generating) return;
+    if (save) saveBackgroundResult(ctx);
+    ctx.stream = null;
+    ctx.generating = false;
+    ctx.unread++;
+    renderTabs();
+}
+
+// Reset the generating state of the (active) chat after a terminal event.
+function finalizeActiveChat() {
+    if (currentChat) {
+        const ctx = getChatCtx(currentChat);
+        if (ctx) {
+            ctx.generating = false;
+            ctx.lastUserMessage = lastUserMessage;
+            ctx.lastUserFiles = lastUserFiles;
+        }
+    }
+    renderTabs();
+}
+
 function handleMessage(msg) {
+    const payload = msg.payload || {};
     switch (msg.type) {
         case 'welcome':
             setStatus(msg.payload.message || 'Connected', false);
             break;
-        case 'chat_selected':
+        case 'chat_selected': {
             // 切换/恢复 chat 的提示消息不显示（Restored/Reactivated/Selected chat: xxx），只更新角标
-            // Update badge with message count from server
-            if (msg.payload.message_count !== undefined) {
-                updateClearBadge(msg.payload.message_count);
+            const cn = payload.chat_name;
+            const ctx = getChatCtx(cn);
+            if (ctx) {
+                ctx.msgCount = payload.message_count || 0;
+            }
+            if (!cn || cn === currentChat) {
+                updateClearBadge(payload.message_count);
             }
             break;
-        case 'chunk':
-            displayChunk(msg.payload.content, msg.payload.first, msg.payload.last, msg.payload.content_type);
+        }
+        case 'chunk': {
+            const r = routeEvent(payload);
+            if (!r.name) break; // stale event for an unknown/closed chat
+            // While the active view's history load is in flight, buffer the
+            // active chat's live events (replayed after the render).
+            const buffered = !r.background && pendingViewLoad && getChatCtx(r.name);
+            if (r.background || buffered) {
+                accumulateBackgroundChunk(getChatCtx(r.name), payload);
+            } else {
+                displayChunk(payload.content, payload.first, payload.last, payload.content_type);
+            }
             break;
-        case 'tool_call':
-            displayToolCall(
-                msg.payload.name,
-                msg.payload.arguments,
-                msg.payload.index,
-                msg.payload.streaming
-            );
+        }
+        case 'tool_call': {
+            const r = routeEvent(payload);
+            if (!r.name) break;
+            const bufferedTc = !r.background && pendingViewLoad && getChatCtx(r.name);
+            if (r.background || bufferedTc) {
+                accumulateBackgroundToolCall(getChatCtx(r.name), payload);
+            } else {
+                displayToolCall(
+                    payload.name,
+                    payload.arguments,
+                    payload.index,
+                    payload.streaming
+                );
+            }
             break;
-        case 'complete':
+        }
+        case 'complete': {
+            const r = routeEvent(payload);
+            if (!r.name) break;
+            if (r.background) {
+                finishBackgroundChat(openChats[r.name], true);
+                break;
+            }
+            if (pendingViewLoad) {
+                // Defer until the (active chat's) render + stream replay is done
+                deferredTerminals.push(['complete', payload]);
+                break;
+            }
             // 只有在生成中才重置状态（避免重复处理）
             if (isGenerating) {
                 // 停止/异常时服务端可能不发 final chunk，兜底收尾（正常流程下已是幂等空操作）
@@ -1366,13 +1913,25 @@ function handleMessage(msg) {
                 // Show regenerate button on the last user message after successful completion
                 addRegenerateButton(lastUserMessageElement);
             }
+            finalizeActiveChat();
             smartScrollToBottom(true);
-            //setStatus('Response completed', false);
             break;
-        case 'error':
-            setStatus(msg.payload.error, true);
+        }
+        case 'error': {
+            const r = routeEvent(payload);
+            if (!r.name) break;
+            if (r.background) {
+                finishBackgroundChat(openChats[r.name], false);
+                showToast('[' + r.name + '] ' + (payload.error || 'error'), true);
+                break;
+            }
+            if (pendingViewLoad) {
+                deferredTerminals.push(['error', payload]);
+                break;
+            }
+            setStatus(payload.error, true);
             // If error mentions "already open", refresh chat list and go back to selection
-            if (msg.payload.error && msg.payload.error.indexOf('already open') !== -1) {
+            if (payload.error && payload.error.indexOf('already open') !== -1) {
                 // Reset current chat state
                 currentChat = null;
                 // Go back to selection page to refresh the chat list
@@ -1396,8 +1955,20 @@ function handleMessage(msg) {
                 // Show regenerate button on error (for retry)
                 addRegenerateButton(lastUserMessageElement);
             }
+            finalizeActiveChat();
             break;
-        case 'stopped':
+        }
+        case 'stopped': {
+            const r = routeEvent(payload);
+            if (!r.name) break;
+            if (r.background) {
+                finishBackgroundChat(openChats[r.name], false);
+                break;
+            }
+            if (pendingViewLoad) {
+                deferredTerminals.push(['stopped', payload]);
+                break;
+            }
             // 只有在生成中才重置状态
             if (isGenerating) {
                 // 停止时服务端不发 final chunk，手动收尾并重置流式状态
@@ -1415,41 +1986,84 @@ function handleMessage(msg) {
                 // Show regenerate button after stop (partial response)
                 addRegenerateButton(lastUserMessageElement);
             }
+            finalizeActiveChat();
             break;
-        case 'cleared':
-            setStatus(msg.payload.message, false);
+        }
+        case 'cleared': {
+            const r = routeEvent(payload);
+            if (!r.name) break;
+            if (r.background) {
+                const ctx = openChats[r.name];
+                if (ctx) ctx.msgCount = payload.message_count || 0;
+                break;
+            }
+            setStatus(payload.message, false);
             // Update badge with message count from server (should be 0 after clear)
-            if (msg.payload.message_count !== undefined) {
-                updateClearBadge(msg.payload.message_count);
+            if (payload.message_count !== undefined) {
+                updateClearBadge(payload.message_count);
             }
             break;
-        case 'kept':
-            setStatus(msg.payload.message, false);
+        }
+        case 'kept': {
+            const r = routeEvent(payload);
+            if (!r.name) break;
+            if (r.background) break; // keep results of background chats are not toasted
+            setStatus(payload.message, false);
             break;
+        }
         case 'approval_request':
             handleApprovalRequest(msg.payload);
             break;
         case 'thinking':
             break;
-        case 'message_count':
+        case 'message_count': {
+            const r = routeEvent(payload);
+            if (!r.name) break;
+            if (r.background) {
+                const ctx = openChats[r.name];
+                if (ctx) ctx.msgCount = payload.count || 0;
+                break;
+            }
             // Update badge with message count from server
-            if (msg.payload.count !== undefined) {
-                updateClearBadge(msg.payload.count);
+            if (payload.count !== undefined) {
+                updateClearBadge(payload.count);
             }
             break;
+        }
         default:
             console.log('Unknown message type:', msg.type);
     }
 }
 
-// Handle approval request from server
+// Handle approval request from server. Requests from different chats are
+// queued and presented one at a time in the global modal.
 function handleApprovalRequest(payload) {
-    const { approval_id, targets } = payload;
-    currentApprovalId = approval_id;
+    approvalQueue.push({
+        chatName: payload.chat_name || currentChat,
+        approvalId: payload.approval_id,
+        targets: payload.targets || []
+    });
+    const modal = document.getElementById('approval-modal');
+    if (!modal || modal.style.display === 'none') {
+        showNextApproval();
+    }
+}
+
+// Present the next queued approval in the modal (no-op when the queue is empty).
+function showNextApproval() {
+    const modal = document.getElementById('approval-modal');
+    if (modal && modal.style.display !== 'none') {
+        hideApprovalModal();
+    }
+    const entry = approvalQueue.shift();
+    if (!entry) return;
+
+    currentApprovalId = entry.approvalId;
+    currentApprovalChat = entry.chatName;
 
     // Store targets for approval
     pendingApprovals = {};
-    targets.forEach(target => {
+    entry.targets.forEach(target => {
         pendingApprovals[target.id] = {
             tool: target.tool,
             details: target.details,
@@ -1459,11 +2073,11 @@ function handleApprovalRequest(payload) {
     });
 
     // Show approval modal
-    showApprovalModal(targets);
+    showApprovalModal(entry.targets, entry.chatName);
 }
 
 // Show approval modal with tool details
-function showApprovalModal(targets) {
+function showApprovalModal(targets, chatName) {
     const modal = document.getElementById('approval-modal');
     const container = document.getElementById('approval-targets');
     container.innerHTML = '';
@@ -1506,6 +2120,12 @@ function showApprovalModal(targets) {
 
     // Update modal header with count
     document.getElementById('approval-count').textContent = targets.length;
+
+    // Update the chat this approval belongs to
+    const chatNameEl = document.getElementById('approval-chat-name');
+    if (chatNameEl) {
+        chatNameEl.textContent = chatName || (currentApprovalChat || '');
+    }
 
     modal.style.display = 'flex';
     document.body.style.overflow = 'hidden'; // Prevent background scrolling
@@ -1668,7 +2288,11 @@ function submitApprovals() {
 
     // Reset state
     currentApprovalId = null;
+    currentApprovalChat = null;
     pendingApprovals = {};
+
+    // Present the next queued approval (if any)
+    showNextApproval();
 }
 
 // Hide approval modal
@@ -1703,12 +2327,12 @@ function cancelApprovals() {
 function sendMessage() {
     const input = document.getElementById('message-input');
 
-    // If currently generating, this is a stop action
+    // If currently generating, this is a stop action (scoped to the active chat)
     if (isGenerating) {
         if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({
                 type: 'stop',
-                payload: {}
+                payload: { chat_name: currentChat }
             }));
         } else {
             // WebSocket not available, reset state
@@ -1733,8 +2357,9 @@ function sendMessage() {
         window.InputHistory.saveToHistory(message);
     }
 
-    // Prepare message payload with optional files
+    // Prepare message payload with optional files (scoped to the active chat)
     const payload = {
+        chat_name: currentChat,
         message: message || ''
     };
 
@@ -1786,7 +2411,13 @@ function sendMessage() {
     // 禁用输入框，发送按钮保持可用（用于停止）
     input.disabled = true;
     isGenerating = true;
+    const ctx = getChatCtx(currentChat);
+    if (ctx) {
+        ctx.generating = true;
+        ctx.unread = 0;
+    }
     updateSendButton();
+    renderTabs();
 
     // Send message with files
     ws.send(JSON.stringify({
@@ -1856,11 +2487,11 @@ function removeRegenerateFromLastMessage() {
 // Regenerate response - resend the last user message
 function regenerate() {
     if (isGenerating) {
-        // If currently generating, stop first
+        // If currently generating, stop the active chat first
         if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({
                 type: 'stop',
-                payload: {}
+                payload: { chat_name: currentChat }
             }));
         }
         return;
@@ -1903,6 +2534,7 @@ function regenerate() {
     compressionHintElement = null;
     thinkingRenderPending = false;
     responseRenderPending = false;
+    segmentPersisted = false;
 
     // Hide regenerate button
     removeRegenerateFromLastMessage();
@@ -1910,8 +2542,9 @@ function regenerate() {
     // Remove old assistant/tool_call messages from local storage
     window.MessageHistory.removeMessagesAfterLastUser();
 
-    // Prepare payload
+    // Prepare payload (scoped to the active chat)
     const payload = {
+        chat_name: currentChat,
         message: lastUserMessage || ''
     };
     if (hasFiles) {
@@ -1928,7 +2561,13 @@ function regenerate() {
         input.disabled = true;
     }
     isGenerating = true;
+    const regenCtx = getChatCtx(currentChat);
+    if (regenCtx) {
+        regenCtx.generating = true;
+        regenCtx.unread = 0;
+    }
     updateSendButton();
+    renderTabs();
 
     // Send regenerate message
     ws.send(JSON.stringify({
@@ -2153,6 +2792,20 @@ function displayToolCall(name, args, index, streaming) {
                 toolCall.element.appendChild(completeDiv);
             }
 
+            // Persist the current segment (thinking + response of the model
+            // call that produced this tool call) BEFORE the tool call, so the
+            // local history keeps the full round in display order:
+            // text → tool → text → tool → ... → final.
+            if (!segmentPersisted && (currentAssistantMessage || currentThinkingChunk)) {
+                window.MessageHistory.saveMessage(
+                    currentAssistantMessage || '',
+                    'assistant',
+                    null,
+                    currentThinkingChunk || undefined
+                );
+                segmentPersisted = true;
+            }
+
             // Save tool call to local storage
             window.MessageHistory.saveMessage(null, 'tool_call', {
                 name: name,
@@ -2190,6 +2843,14 @@ let responseBlock = null;
 // 首个 chunk 立即渲染（0 延迟），追加内容最多滞后一帧（~16ms），不可感知。
 let thinkingRenderPending = false;
 let responseRenderPending = false;
+
+// True once the CURRENT model-call segment (its thinking + response text) has
+// been persisted to local history. A round is a sequence of segments
+// (text → tool calls → text → tool calls → ... → final); each segment is
+// persisted when the round moves on (tool-final flush) or ends
+// (finalizeStreaming), so the local history keeps every thinking/tool/content
+// piece in display order. Reset on every new segment.
+let segmentPersisted = false;
 
 function renderThinkingNow() {
     if (!thinkingElement) return;
@@ -2323,6 +2984,7 @@ function finalizeStreaming(saveHistory) {
     currentContentType = '';
     chunkElement = null;
     thinkingElement = null;
+    segmentPersisted = false;
 
     // Use smart scroll to avoid interrupting user reading
     // The copy buttons and any subsequent tool calls will be visible if user is at bottom
@@ -2354,6 +3016,9 @@ function displayChunk(content, isFirst, isLast, contentType = 'response') {
     if (contentType === 'thinking') {
         // 处理思考消息 — 纯 markdown，不处理公式、不处理绘图
         if (isFirst || !thinkingBlock) {
+            // New model-call segment starts: reset the persistence flag
+            // (the previous segment was persisted by the tool-final flush).
+            segmentPersisted = false;
             // 创建新的思考消息块
             thinkingBlock = document.createElement('div');
             thinkingBlock.className = 'message assistant thinking-message';
@@ -2389,6 +3054,9 @@ function displayChunk(content, isFirst, isLast, contentType = 'response') {
     } else {
         // 处理回答消息
         if (isFirst || !responseBlock) {
+            // New model-call segment starts: reset the persistence flag
+            // (the previous segment was persisted by the tool-final flush).
+            segmentPersisted = false;
             // 创建新的回答消息块
             responseBlock = document.createElement('div');
             responseBlock.className = 'message assistant response-message';
@@ -2806,7 +3474,7 @@ async function quickClearContext() {
 
     // Send clear message to server (only clears conversation context)
     if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'clear', payload: {} }));
+        ws.send(JSON.stringify({ type: 'clear', payload: { chat_name: currentChat } }));
         showToast('Conversation context cleared (local data preserved)', false);
     } else {
         showToast('WebSocket not connected', true);
@@ -2828,7 +3496,7 @@ async function quickClearContextAndLocal() {
 
     // Send clear message to server
     if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'clear', payload: {} }));
+        ws.send(JSON.stringify({ type: 'clear', payload: { chat_name: currentChat } }));
     } else {
         showToast('WebSocket not connected', true);
         return;
@@ -2851,7 +3519,7 @@ async function confirmClear() {
 
     // 发送 clear 消息到服务器（服务端不再携带 context）
     if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'clear', payload: {} }));
+        ws.send(JSON.stringify({ type: 'clear', payload: { chat_name: currentChat } }));
     }
 
     // 勾选时：清空消息展示 + 删除本地存储记录
@@ -2880,7 +3548,7 @@ function keepSession() {
     }
 
     if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'keep', payload: {} }));
+        ws.send(JSON.stringify({ type: 'keep', payload: { chat_name: currentChat } }));
         showToast('Executing keep hook...', false);
     } else {
         showToast('WebSocket not connected', true);

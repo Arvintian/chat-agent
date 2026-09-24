@@ -26,9 +26,15 @@
         return currentChat;
     }
 
-    // Save message to IndexedDB (for current chat)
+    // Save message to IndexedDB (for current chat).
+    // NOTE: the chat name is captured SYNCHRONOUSLY at entry — every
+    // persistence step below runs in a microtask (.then), by which time
+    // currentChat may have been switched to another chat (background saves
+    // temporarily swap it). Capturing up front keeps the write on the right
+    // chat's history.
     function saveMessageToStorage(message, type, toolData, thinkingContent, files) {
-        if (!currentChat) {
+        var chatName = currentChat;
+        if (!chatName) {
             return Promise.resolve();
         }
 
@@ -57,20 +63,20 @@
         // Save to IndexedDB
         return Promise.resolve().then(function() {
             if (global.ChatDB && global.ChatDB.isSupported()) {
-                return global.ChatDB.saveMessage(currentChat, messageObj)
+                return global.ChatDB.saveMessage(chatName, messageObj)
                     .then(function() {
                         // Also maintain a lightweight index in localStorage for quick access
-                        return updateHistoryIndex(currentChat, messageObj);
+                        return updateHistoryIndex(chatName, messageObj);
                     });
             } else {
                 // Fallback to localStorage if IndexedDB is not available
-                saveMessageToLocalStorageFallback(currentChat, messageObj);
+                saveMessageToLocalStorageFallback(chatName, messageObj);
                 return Promise.resolve();
             }
         }).catch(function(e) {
             console.error('Failed to save message to IndexedDB, trying fallback:', e);
             // Fallback to localStorage on error
-            saveMessageToLocalStorageFallback(currentChat, messageObj);
+            saveMessageToLocalStorageFallback(chatName, messageObj);
             return Promise.resolve();
         });
     }
@@ -197,40 +203,43 @@
         }
     }
 
-    // Load message history from IndexedDB (for current chat)
+    // Load message history from IndexedDB (for current chat).
+    // The chat name is captured synchronously at entry (the IndexedDB read
+    // runs in a microtask, by which time currentChat may have changed).
     function loadMessageHistoryFromStorage() {
-        if (!currentChat) {
+        var chatName = currentChat;
+        if (!chatName) {
             return Promise.resolve([]);
         }
 
         return Promise.resolve().then(function() {
             // Try IndexedDB first
             if (global.ChatDB && global.ChatDB.isSupported()) {
-                return global.ChatDB.loadMessages(currentChat)
+                return global.ChatDB.loadMessages(chatName)
                     .then(function(messages) {
                         if (messages && messages.length > 0) {
                             return messages;
                         }
                         // Fallback to localStorage
-                        return loadMessageHistoryFromLocalStorageFallback();
+                        return loadMessageHistoryFromLocalStorageFallback(chatName);
                     });
             }
 
             // Fallback to localStorage
-            return loadMessageHistoryFromLocalStorageFallback();
+            return loadMessageHistoryFromLocalStorageFallback(chatName);
         }).catch(function(e) {
             console.error('Failed to load message history from IndexedDB:', e);
-            return loadMessageHistoryFromLocalStorageFallback();
+            return loadMessageHistoryFromLocalStorageFallback(chatName);
         });
     }
 
     // Fallback to localStorage
-    function loadMessageHistoryFromLocalStorageFallback() {
-        if (!currentChat) {
+    function loadMessageHistoryFromLocalStorageFallback(chatName) {
+        if (!chatName) {
             return [];
         }
 
-        var key = getHistoryKey(currentChat);
+        var key = getHistoryKey(chatName);
         try {
             var stored = localStorage.getItem(key);
             if (stored) {
@@ -245,15 +254,18 @@
         return [];
     }
 
-    // Remove all messages after the last user message (used for regenerate)
+    // Remove all messages after the last user message (used for regenerate).
+    // Chat name captured synchronously (the async steps must not observe a
+    // switched currentChat).
     function removeMessagesAfterLastUser() {
-        if (!currentChat) {
+        var chatName = currentChat;
+        if (!chatName) {
             return Promise.resolve();
         }
 
         return Promise.resolve().then(function() {
             if (global.ChatDB && global.ChatDB.isSupported()) {
-                return global.ChatDB.loadMessages(currentChat)
+                return global.ChatDB.loadMessages(chatName)
                     .then(function(messages) {
                         if (!messages || messages.length === 0) {
                             return;
@@ -277,16 +289,16 @@
                         var deleteCount = messages.length - 1 - lastUserIndex;
                         var deletePromises = [];
                         for (var d = 0; d < deleteCount; d++) {
-                            deletePromises.push(global.ChatDB.deleteLastMessage(currentChat));
+                            deletePromises.push(global.ChatDB.deleteLastMessage(chatName));
                         }
                         return Promise.all(deletePromises);
                     })
                     .then(function() {
                         // Also update localStorage fallback
-                        return removeMessagesAfterLastUserFromLocalStorage();
+                        return removeMessagesAfterLastUserFromLocalStorage(chatName);
                     });
             } else {
-                return removeMessagesAfterLastUserFromLocalStorage();
+                return removeMessagesAfterLastUserFromLocalStorage(chatName);
             }
         }).catch(function(e) {
             console.error('Failed to remove messages after last user:', e);
@@ -294,12 +306,12 @@
     }
 
     // Remove messages after last user from localStorage fallback
-    function removeMessagesAfterLastUserFromLocalStorage() {
-        if (!currentChat) {
+    function removeMessagesAfterLastUserFromLocalStorage(chatName) {
+        if (!chatName) {
             return;
         }
         
-        var key = getHistoryKey(currentChat);
+        var key = getHistoryKey(chatName);
         try {
             var stored = localStorage.getItem(key);
             if (stored) {
@@ -326,18 +338,19 @@
         }
     }
 
-    // Clear message history for current chat
+    // Clear message history for current chat (chat name captured up front)
     function clearMessageHistory() {
-        if (!currentChat) {
+        var chatName = currentChat;
+        if (!chatName) {
             return Promise.resolve();
         }
 
-        var key = getHistoryKey(currentChat);
+        var key = getHistoryKey(chatName);
 
         return Promise.resolve().then(function() {
             // Clear from IndexedDB
             if (global.ChatDB && global.ChatDB.isSupported()) {
-                return global.ChatDB.deleteMessages(currentChat)
+                return global.ChatDB.deleteMessages(chatName)
                     .catch(function(e) {
                         console.error('Failed to clear message history from IndexedDB:', e);
                     });

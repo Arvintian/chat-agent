@@ -55,6 +55,7 @@ type ChatSelectedPayload struct {
 
 // ChunkPayload represents a streaming content chunk.
 type ChunkPayload struct {
+	ChatName    string `json:"chat_name,omitempty"`
 	Content     string `json:"content"`
 	First       bool   `json:"first"`
 	Last        bool   `json:"last"`
@@ -63,6 +64,7 @@ type ChunkPayload struct {
 
 // ToolCallPayload is sent when the model invokes a tool.
 type ToolCallPayload struct {
+	ChatName  string `json:"chat_name,omitempty"`
 	Name      string `json:"name"`
 	Arguments string `json:"arguments"`
 	Index     string `json:"index"`
@@ -71,17 +73,20 @@ type ToolCallPayload struct {
 
 // ThinkingPayload indicates whether the model is in a thinking/reasoning phase.
 type ThinkingPayload struct {
-	Status bool `json:"status"`
+	ChatName string `json:"chat_name,omitempty"`
+	Status   bool   `json:"status"`
 }
 
 // CompletePayload signals completion of a response.
 type CompletePayload struct {
-	Message string `json:"message"`
+	ChatName string `json:"chat_name,omitempty"`
+	Message  string `json:"message"`
 }
 
 // ErrorPayload carries an error message.
 type ErrorPayload struct {
-	Error string `json:"error"`
+	ChatName string `json:"chat_name,omitempty"`
+	Error    string `json:"error"`
 }
 
 // ApprovalTargetPayload describes a single target requiring approval.
@@ -93,18 +98,28 @@ type ApprovalTargetPayload struct {
 
 // ApprovalRequestPayload is sent when tool execution requires user approval.
 type ApprovalRequestPayload struct {
-	ApprovalID string                   `json:"approval_id"`
-	Targets    []ApprovalTargetPayload  `json:"targets"`
+	ApprovalID string                  `json:"approval_id"`
+	ChatName   string                  `json:"chat_name,omitempty"`
+	Targets    []ApprovalTargetPayload `json:"targets"`
 }
 
 // MessageCountPayload carries the current message count.
 type MessageCountPayload struct {
-	Count int `json:"count"`
+	ChatName string `json:"chat_name,omitempty"`
+	Count    int    `json:"count"`
 }
 
 // StoppedPayload is sent when a response is stopped by the user.
 type StoppedPayload struct {
-	Message string `json:"message"`
+	ChatName string `json:"chat_name,omitempty"`
+	Message  string `json:"message"`
+}
+
+// ChatCommand scopes a command (stop/clear/keep/regenerate) to a specific chat.
+// An empty ChatName makes the server fall back to the connection's current chat
+// (legacy single-chat behavior).
+type ChatCommand struct {
+	ChatName string `json:"chat_name,omitempty"`
 }
 
 // KeptPayload is sent after a keep hook execution.

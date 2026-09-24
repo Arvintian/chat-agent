@@ -2549,3 +2549,43 @@ pre.code-block:hover .code-preview-btn {
         cursor: pointer;
     }
 }
+.approval-chat {
+    margin: 4px 0 6px 0;
+    font-size: 14px;
+    color: #667eea;
+    font-weight: 600;
+}
+
+/* ===== Multi-chat state in the left sidebar ===== */
+/* The current chat gets the .active gradient background; other open chats
+   are marked with ⏳ (generating) / a red dot (unread results). */
+.chat-list-item.open {
+    background: #fdeeda;
+}
+
+/* The current chat is also .open; the gradient must win over the lighter
+   .open highlight above (same specificity, so order/specificity matters). */
+.chat-list-item.active,
+.chat-list-item.open.active {
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    color: #fff;
+    font-weight: 600;
+}
+
+/* Streaming spinner / unread dot for open chats */
+.chat-item-status {
+    font-size: 11px;
+    flex-shrink: 0;
+    margin-left: 2px;
+}
+
+.chat-item-unread {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #ff5f56;
+    display: inline-block;
+    flex-shrink: 0;
+    margin-left: 4px;
+}
+
