@@ -1,164 +1,256 @@
 // Scroll behavior control for chat messages
-// This module handles auto-scroll and user reading detection
+//
+// Sticky-scroll model:
+// - While "pinned", every content update (streaming chunks, tool calls,
+//   thinking blocks) keeps the view at the bottom on the next animation
+//   frame — no throttle, so fast streams cannot outrun the scroll.
+// - Pinning is only released by REAL user input (wheel / touch / keyboard).
+//   Content growth pushing the viewport away from the bottom does NOT count
+//   as user scrolling, and programmatic scrolls are ignored by the scroll
+//   handler entirely.
+// - The "scroll to bottom" button shows only after the user deliberately
+//   scrolled up, and disappears as soon as the view reaches the bottom.
 
 (function() {
-    // Scroll behavior control variables
-    var isUserScrolling = false;
-    var isAtBottom = true;
-    var scrollTimeout = null;
-    var SCROLL_THRESHOLD = 50; // pixels from bottom to consider "at bottom"
-    
+    var isUserScrolling = false;   // user deliberately scrolled up (reading history)
+    var isPinned = true;           // auto-follow the bottom (true unless user scrolled up)
+    var SCROLL_THRESHOLD = 50;     // pixels from bottom to consider "at bottom"
+
     // Scroll to bottom button element
     var scrollToBottomBtn = null;
 
-    // Throttle scroll during streaming to improve performance
-    var lastScrollTime = 0;
-    var SCROLL_THROTTLE_MS = 150;
-    var scrollPending = false;
+    // Coalesce multiple stick requests per frame
+    var stickFrame = 0;
 
-    // Initialize scroll detection after DOM is ready
-    function initScrollDetection() {
-        var messagesContainer = document.getElementById('messages');
+    function getMessages() {
+        return document.getElementById('messages');
+    }
+
+    function distanceFromBottom(el) {
+        return el.scrollHeight - el.scrollTop - el.clientHeight;
+    }
+
+    // Keep the view at the bottom. Runs on the next frame so freshly
+    // appended DOM (chunks, tool args, thinking) is measured correctly.
+    function stickToBottom() {
+        if (stickFrame) return;
+        stickFrame = requestAnimationFrame(function () {
+            stickFrame = 0;
+            // User may have broken the pin (wheel/touch) between the
+            // request and this frame — don't snap the view back.
+            if (isUserScrolling || !isPinned) return;
+            // Don't write scrollTop while a finger is down or right after it
+            // lifted (momentum): on mobile that fights the touch scroll.
+            if (touchActive || Date.now() - lastTouchEndTime < TOUCH_GRACE_MS) return;
+            var el = getMessages();
+            if (!el) return;
+            // Pinned state is set before any programmatic scrollTop write,
+            // and scroll events dispatch asynchronously — the scroll handler
+            // sees isPinned and ignores the event of our own scroll.
+            if (distanceFromBottom(el) > SCROLL_THRESHOLD) {
+                el.scrollTop = el.scrollHeight;
+            }
+            // The button hides itself as soon as the bottom is reachable
+            updateButton();
+        });
+    }
+
+    // Real user input. While pinned, any UPWARD input immediately breaks the
+    // pin — the browser has not scrolled yet at event time, so the
+    // threshold check would still say "at bottom" and the next frame's
+    // stick would snap the view back, fighting the user's scroll.
+    function breakPin() {
+        if (!isPinned) return;
+        isPinned = false;
+        isUserScrolling = true;
+        updateButton();
+    }
+
+    // The (innermost) NESTED scrollable element (e.g. the collapsed thinking
+    // content, tool args) that the event target sits inside, or null when the
+    // target is directly in the outer messages list.
+    function innermostScrollable(t, container) {
+        var el = t && t.nodeType === 1 ? t : null;
+        var found = null;
+        while (el && el !== container && el !== document.body) {
+            var cs = window.getComputedStyle(el);
+            var oy = cs.overflowY;
+            if ((oy === 'auto' || oy === 'scroll') && el.scrollHeight > el.clientHeight) {
+                found = el;
+            }
+            el = el.parentElement;
+        }
+        return found;
+    }
+
+    // True when the event target sits inside a NESTED scrollable element.
+    function isInnerScrollTarget(t, container) {
+        return innermostScrollable(t, container) !== null;
+    }
+
+    function onUserWheel(e) {
+        var el = getMessages();
+        if (!el) return;
+        if (isInnerScrollTarget(e.target, el)) return;
+        if (isPinned && e.deltaY < 0) breakPin();
+    }
+
+    // While a finger is down — and briefly after it lifts (momentum
+    // scrolling) — programmatic scrollTop writes fight the browser's touch
+    // scroll on mobile and interrupt momentum. Track the gesture so
+    // stickToBottom can stay out of the way.
+    var touchActive = false;
+    var lastTouchEndTime = 0;
+    var TOUCH_GRACE_MS = 400;
+
+    function onTouchStart(e) {
+        // Only track single-finger gestures; reset on pinch
+        lastTouchY = (e.touches.length === 1) ? e.touches[0].clientY : null;
+        touchActive = true;
+    }
+    function onTouchMove(e) {
+        if (e.touches.length !== 1) {
+            lastTouchY = null;
+            touchActive = true;
+            return;
+        }
+        var el = getMessages();
+        var y = e.touches[0].clientY;
+        if (el && lastTouchY !== null) {
+            var dy = y - lastTouchY;
+            // A NESTED scrollable element (collapsed thinking block, tool
+            // args) under the finger can ABSORB the swipe while the outer
+            // list does not move — that must not break the pin. But once the
+            // nested element reaches the swipe-direction boundary, the
+            // gesture chains to the outer list, so break the pin exactly
+            // like a real outer scroll (this is what makes the
+            // "scroll to bottom" button appear while streaming over the
+            // collapsed thinking block / tool args at the bottom).
+            if (dy !== 0) {
+                var inner = innermostScrollable(e.target, el);
+                if (inner) {
+                    var absorbs = dy > 0
+                        ? inner.scrollTop > 0
+                        : (inner.scrollTop + inner.clientHeight) < inner.scrollHeight;
+                    if (absorbs) {
+                        lastTouchY = y;
+                        return;
+                    }
+                }
+            }
+        }
+        // Finger moved down = scrolling up (reading history)
+        if (isPinned && lastTouchY !== null && y > lastTouchY) breakPin();
+        lastTouchY = y;
+    }
+    // On touchend, e.touches holds the fingers STILL down (the released one
+    // is in e.changedTouches); no fingers left means the gesture is over.
+    function onTouchEnd(e) {
+        lastTouchY = null;
+        if (e.touches.length === 0) {
+            touchActive = false;
+            lastTouchEndTime = Date.now();
+            // Gesture ended near the bottom (e.g. the user only peeked a
+            // little): re-attach the pin so streaming resumes following.
+            var el = getMessages();
+            if (el && !isPinned && distanceFromBottom(el) <= SCROLL_THRESHOLD) {
+                isUserScrolling = false;
+                isPinned = true;
+                updateButton();
+            }
+        }
+    }
+    function onUserKey(e) {
+        if (isPinned && (e.key === 'PageUp' || e.key === 'Home' || e.key === 'ArrowUp')) {
+            breakPin();
+        }
+    }
+
+    // Initialize scroll detection
+    function init() {
+        var messagesContainer = getMessages();
         if (!messagesContainer) return;
 
         // Get scroll to bottom button
         scrollToBottomBtn = document.getElementById('scroll-to-bottom-btn');
 
-        // Reset scroll state when starting a new chat
+        // Reset scroll state
         isUserScrolling = false;
-        isAtBottom = true;
+        isPinned = true;
+        updateButton();
 
-        // Hide button initially
-        updateScrollToBottomButton();
+        // While pinned we are already following the bottom (our own
+        // programmatic scrolls also arrive while pinned and are ignored
+        // here); only while UNPINNED can a real user scroll re-attach the
+        // pin — and only when scrolling DOWN back to the bottom.
+        var lastScrollTop = 0;
+        messagesContainer.addEventListener('scroll', function () {
+            var top = messagesContainer.scrollTop;
+            var scrollingDown = top >= lastScrollTop;
+            lastScrollTop = top;
 
-        // Listen for scroll events to detect user reading behavior
-        var scrollTimer = null;
-        messagesContainer.addEventListener('scroll', function() {
-            var scrollTop = messagesContainer.scrollTop;
-            var scrollHeight = messagesContainer.scrollHeight;
-            var clientHeight = messagesContainer.clientHeight;
-
-            // Check if user is at bottom (within threshold)
-            var wasAtBottom = isAtBottom;
-            isAtBottom = (scrollHeight - scrollTop - clientHeight) <= SCROLL_THRESHOLD;
-
-            // If user scrolled up from bottom, mark as scrolling
-            if (wasAtBottom && !isAtBottom) {
-                isUserScrolling = true;
-            }
-
-            // If user scrolled back to bottom, re-enable auto-scroll
-            if (!wasAtBottom && isAtBottom) {
+            if (isPinned) return;
+            if (scrollingDown && distanceFromBottom(messagesContainer) <= SCROLL_THRESHOLD) {
+                // User scrolled back down to the bottom: resume auto-follow
                 isUserScrolling = false;
+                isPinned = true;
             }
+            updateButton();
+        }, { passive: true });
 
-            // Update scroll to bottom button visibility
-            updateScrollToBottomButton();
-
-            // Clear existing timeout
-            if (scrollTimer) {
-                clearTimeout(scrollTimer);
-            }
-
-            // Set timeout to stabilize scrolling state
-            scrollTimer = setTimeout(function() {
-                scrollTimer = null;
-                // Re-check position after scrolling stops
-                var currentScrollTop = messagesContainer.scrollTop;
-                var currentScrollHeight = messagesContainer.scrollHeight;
-                var currentClientHeight = messagesContainer.clientHeight;
-                isAtBottom = (currentScrollHeight - currentScrollTop - currentClientHeight) <= SCROLL_THRESHOLD;
-
-                // If user is at bottom, re-enable auto-scroll
-                if (isAtBottom) {
-                    isUserScrolling = false;
-                }
-
-                // Update scroll to bottom button visibility
-                updateScrollToBottomButton();
-            }, 150);
-        });
+        // Detect deliberate user scrolling
+        messagesContainer.addEventListener('wheel', onUserWheel, { passive: true });
+        messagesContainer.addEventListener('touchstart', onTouchStart, { passive: true });
+        messagesContainer.addEventListener('touchmove', onTouchMove, { passive: true });
+        messagesContainer.addEventListener('keydown', onUserKey, { passive: true });
+        // End/cancel may happen outside the container — listen on document
+        document.addEventListener('touchend', onTouchEnd, { passive: true });
+        document.addEventListener('touchcancel', onTouchEnd, { passive: true });
     }
 
-    // Smart scroll to bottom - only scrolls if user is not reading history
-    function smartScrollToBottom(force) {
-        force = force || false;
-        
-        // Only scroll if user is not reading history or is at bottom
-        if (!isUserScrolling || isAtBottom) {
-            var now = Date.now();
-            if (force) {
-                requestAnimationFrame(function() {
-                    var messages = document.getElementById('messages');
-                    if (messages) {
-                        messages.scrollTop = messages.scrollHeight;
-                    }
-                    lastScrollTime = now;
-                    scrollPending = false;
-                });
-                return;
-            }
-            if (now - lastScrollTime > SCROLL_THROTTLE_MS && !scrollPending) {
-                scrollPending = true;
-                requestAnimationFrame(function() {
-                    var messages = document.getElementById('messages');
-                    if (messages) {
-                        messages.scrollTop = messages.scrollHeight;
-                    }
-                    lastScrollTime = now;
-                    scrollPending = false;
-                });
-            }
-        }
+    // Auto-follow the bottom; skipped while the user is reading history.
+    function smartScrollToBottom() {
+        if (isUserScrolling && !isPinned) return;
+        stickToBottom();
     }
 
-    // Force scroll to bottom
+    // Force scroll to bottom (e.g., when the user sends a message):
+    // also re-attaches the pin so subsequent streaming keeps following.
     function scrollToBottom(force) {
         force = force || false;
-        var messages = document.getElementById('messages');
-        if (!messages) return;
+        var el = getMessages();
+        if (!el) return;
 
-        // Force scroll (e.g., when user sends a message) or auto-scroll if not reading history
-        if (force || !isUserScrolling || isAtBottom) {
-            messages.scrollTop = messages.scrollHeight;
+        if (!force && isUserScrolling && !isPinned) return;
+
+        // Set state BEFORE writing scrollTop so the async scroll event of
+        // this write is classified as "ours" (pinned) and ignored.
+        isUserScrolling = false;
+        isPinned = true;
+        if (distanceFromBottom(el) > SCROLL_THRESHOLD) {
+            el.scrollTop = el.scrollHeight;
         }
-    }
-
-    // Check if user is currently scrolling (reading history)
-    function getUserScrollingState() {
-        return isUserScrolling;
-    }
-
-    // Check if user is at bottom
-    function getIsAtBottomState() {
-        return isAtBottom;
-    }
-
-    // Set user scrolling state (for external use)
-    function setUserScrollingState(state) {
-        isUserScrolling = state;
-    }
-
-    // Set is at bottom state (for external use)
-    function setIsAtBottomState(state) {
-        isAtBottom = state;
+        updateButton();
     }
 
     // Update scroll to bottom button visibility
-    function updateScrollToBottomButton() {
+    function updateButton() {
         if (!scrollToBottomBtn) return;
 
-        // Show button when user is scrolling (not at bottom)
-        var show = !isAtBottom;
+        // Show only when the user has deliberately scrolled up
+        var show = isUserScrolling && !isPinned;
 
-        // 以容器实际状态为准：内容不足一屏（如清空本地内容后）没有可滚动空间，
-        // 此时不应显示按钮，即使 isAtBottom 因缺少 scroll 事件而未更新
+        // No scrollable room at all (e.g. after clearing the list) — nothing
+        // to scroll back to, so the button must not appear. NOTE: must be the
+        // TOTAL overflow, not the distance from the bottom — at breakPin time
+        // the browser has not scrolled yet, so a short-list check on distance
+        // would silently re-pin the moment the user starts dragging up.
         if (show) {
-            var messages = document.getElementById('messages');
-            if (messages && (messages.scrollHeight - messages.scrollTop - messages.clientHeight) <= SCROLL_THRESHOLD) {
+            var el = getMessages();
+            if (el && (el.scrollHeight - el.clientHeight) <= SCROLL_THRESHOLD) {
                 show = false;
-                isAtBottom = true;
                 isUserScrolling = false;
+                isPinned = true;
             }
         }
 
@@ -175,38 +267,41 @@
     // cleared or switched, since no scroll event will fire on its own)
     function reset() {
         isUserScrolling = false;
-        isAtBottom = true;
-        updateScrollToBottomButton();
+        isPinned = true;
+        updateButton();
     }
 
     // Global scroll to bottom function for button click
     window.scrollToBottom = function() {
-        var messages = document.getElementById('messages');
-        if (!messages) return;
-        
-        // Force scroll to bottom (without smooth to ensure it works)
-        messages.scrollTop = messages.scrollHeight;
-        
-        // Reset scrolling state immediately
+        var el = getMessages();
+        if (!el) return;
+
+        // Re-attach auto-follow BEFORE writing scrollTop (see scrollToBottom),
+        // then force scroll (no smooth to ensure it works)
         isUserScrolling = false;
-        isAtBottom = true;
-        
-        // Hide button after clicking
-        if (scrollToBottomBtn) {
-            scrollToBottomBtn.classList.remove('visible');
-            scrollToBottomBtn.style.display = 'none';
-        }
+        isPinned = true;
+        el.scrollTop = el.scrollHeight;
+        updateButton();
     };
 
     // Expose functions to global scope
     window.ScrollHandler = {
-        init: initScrollDetection,
+        init: init,
         scrollToBottom: scrollToBottom,
         smartScrollToBottom: smartScrollToBottom,
-        isUserScrolling: getUserScrollingState,
-        isAtBottom: getIsAtBottomState,
-        setUserScrolling: setUserScrollingState,
-        setIsAtBottom: setIsAtBottomState,
+        stickToBottom: stickToBottom,
+        isUserScrolling: function () { return isUserScrolling; },
+        isAtBottom: function () { return isPinned; },
+        setUserScrolling: function (state) {
+            isUserScrolling = !!state;
+            if (!state) isPinned = true;
+            updateButton();
+        },
+        setIsAtBottom: function (state) {
+            isPinned = !!state;
+            if (state) isUserScrolling = false;
+            updateButton();
+        },
         reset: reset
     };
 })();

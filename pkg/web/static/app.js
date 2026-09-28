@@ -3656,6 +3656,11 @@ function handleKeyDown(e) {
 
 // Mobile keyboard adaptation
 let lastViewportHeight = window.innerHeight;
+// Track the keyboard state so we only act on the show/hide TRANSITION.
+// While the keyboard stays open, visualViewport fires 'scroll' events on
+// every user scroll of the message list; reacting to those with a forced
+// scroll-to-bottom fights the user's touch scroll.
+let keyboardWasShown = false;
 
 function handleViewportChange() {
     const viewport = window.visualViewport;
@@ -3673,7 +3678,7 @@ function handleViewportChange() {
     const heightDiff = lastViewportHeight - viewportHeight;
     const isKeyboardShown = heightDiff > 150; // Keyboard typically takes >150px
 
-    if (isKeyboardShown) {
+    if (isKeyboardShown && !keyboardWasShown) {
         // Keyboard is shown - scroll to make input visible
         const inputArea = document.getElementById('input-area');
         if (inputArea) {
@@ -3684,8 +3689,8 @@ function handleViewportChange() {
                 scrollToBottom(true);
             }, 100);
         }
-    } else if (viewportHeight > lastViewportHeight - 50) {
-        // Keyboard is hidden - restore layout
+    } else if (!isKeyboardShown && keyboardWasShown) {
+        // Keyboard just hidden - restore layout
         setTimeout(() => {
             const messages = document.getElementById('messages');
             if (messages) {
@@ -3694,6 +3699,7 @@ function handleViewportChange() {
         }, 100);
     }
 
+    keyboardWasShown = isKeyboardShown;
     lastViewportHeight = viewportHeight;
 }
 

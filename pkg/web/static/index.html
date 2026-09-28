@@ -160,7 +160,7 @@
             <!-- Scroll to bottom button: anchored above the send button,
                 regardless of sidebar state -->
             <button id="scroll-to-bottom-btn" class="scroll-to-bottom-btn" style="display: none;"
-                onclick="event.stopPropagation(); var messages = document.getElementById('messages'); if(messages) { messages.scrollTop = messages.scrollHeight; if(window.ScrollHandler) { window.ScrollHandler.setUserScrolling(false); window.ScrollHandler.setIsAtBottom(true); } this.style.display = 'none'; }"
+                onclick="event.stopPropagation(); if(window.ScrollHandler) window.ScrollHandler.scrollToBottom(true);"
                 title="Scroll to bottom">
                 ↓
             </button>
