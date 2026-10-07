@@ -15,12 +15,29 @@
     var isUserScrolling = false;   // user deliberately scrolled up (reading history)
     var isPinned = true;           // auto-follow the bottom (true unless user scrolled up)
     var SCROLL_THRESHOLD = 50;     // pixels from bottom to consider "at bottom"
+    // Snap-to-bottom tolerance while pinned. Must be SMALL: with a large
+    // value the view can rest tens of px above the bottom after the last
+    // chunk, and the last bubble's bottom edge gets clipped behind the
+    // input area (its gap to the input is only ~23px of padding/margin).
+    var STICK_THRESHOLD = 2;
 
     // Scroll to bottom button element
     var scrollToBottomBtn = null;
 
     // Coalesce multiple stick requests per frame
     var stickFrame = 0;
+
+    // Late-growth watchers (see init). init() runs again every time a chat is
+    // entered, so these must be created once per observed element instead of
+    // piling up one instance per switch.
+    var messagesObserver = null;
+    var messagesObserverTarget = null;
+
+    // Last seen scrollTop, used to tell "scrolling down" from "scrolling up".
+    // Lives here (not inside the scroll listener) so the listener can be a
+    // named function — repeated init() calls then reuse the SAME registration
+    // instead of stacking one anonymous listener per chat switch.
+    var lastScrollTop = 0;
 
     function getMessages() {
         return document.getElementById('messages');
@@ -47,7 +64,7 @@
             // Pinned state is set before any programmatic scrollTop write,
             // and scroll events dispatch asynchronously — the scroll handler
             // sees isPinned and ignores the event of our own scroll.
-            if (distanceFromBottom(el) > SCROLL_THRESHOLD) {
+            if (distanceFromBottom(el) > STICK_THRESHOLD) {
                 el.scrollTop = el.scrollHeight;
             }
             // The button hides itself as soon as the bottom is reachable
@@ -166,6 +183,42 @@
         }
     }
 
+    // While pinned we are already following the bottom (our own programmatic
+    // scrolls also arrive while pinned and are ignored here); only while
+    // UNPINNED can a real user scroll re-attach the pin — and only when
+    // scrolling DOWN back to the bottom.
+    function onMessagesScroll(e) {
+        var el = e.currentTarget;
+        if (!el) return;
+        var top = el.scrollTop;
+        var scrollingDown = top >= lastScrollTop;
+        lastScrollTop = top;
+
+        if (isPinned) return;
+        if (scrollingDown && distanceFromBottom(el) <= SCROLL_THRESHOLD) {
+            // User scrolled back down to the bottom: resume auto-follow
+            isUserScrolling = false;
+            isPinned = true;
+        }
+        updateButton();
+    }
+
+    // DOM grew/mutated inside the message list (mermaid SVG rendered, final
+    // re-render rewrote innerHTML, ...). Keep following only while pinned.
+    function onMessagesMutated() {
+        if (isPinned && !isUserScrolling) stickToBottom();
+    }
+
+    // An image inside a reply finishes loading: its height was 0 until now
+    // and no DOM mutation happens, so it needs its own hook. 'load' does not
+    // bubble, hence the capture-phase listener. Registered once (a named
+    // function, so a repeated addEventListener call is a no-op).
+    function onMessagesImageLoad(e) {
+        if (e.target && e.target.tagName === 'IMG' && isPinned && !isUserScrolling) {
+            stickToBottom();
+        }
+    }
+
     // Initialize scroll detection
     function init() {
         var messagesContainer = getMessages();
@@ -179,24 +232,33 @@
         isPinned = true;
         updateButton();
 
-        // While pinned we are already following the bottom (our own
-        // programmatic scrolls also arrive while pinned and are ignored
-        // here); only while UNPINNED can a real user scroll re-attach the
-        // pin — and only when scrolling DOWN back to the bottom.
-        var lastScrollTop = 0;
-        messagesContainer.addEventListener('scroll', function () {
-            var top = messagesContainer.scrollTop;
-            var scrollingDown = top >= lastScrollTop;
-            lastScrollTop = top;
+        // Reset the scroll-direction baseline (same as the old per-init
+        // closure variable did).
+        lastScrollTop = 0;
+        // Named function (see onMessagesScroll): re-registering the same
+        // listener on a repeated init() is a no-op, so listeners no longer
+        // pile up once per chat switch.
+        messagesContainer.addEventListener('scroll', onMessagesScroll, { passive: true });
 
-            if (isPinned) return;
-            if (scrollingDown && distanceFromBottom(messagesContainer) <= SCROLL_THRESHOLD) {
-                // User scrolled back down to the bottom: resume auto-follow
-                isUserScrolling = false;
-                isPinned = true;
-            }
-            updateButton();
-        }, { passive: true });
+        // The last message can grow AFTER the view has settled at the bottom:
+        // a mermaid SVG replaces its placeholder, the final re-render rewrites
+        // innerHTML, an image inside the reply loads (its height is 0 until
+        // 'load' fires). None of these re-triggers the per-chunk scroll, so
+        // the view would rest above the (new) bottom and the last bubble
+        // gets clipped behind the input area. Watch for DOM changes and keep
+        // following while the pin is attached; when the user has scrolled up
+        // (unpinned) the stick call is a no-op.
+        // init() is called again on every chat entry, so both hooks are kept
+        // idempotent: the observer only for the element it is not already
+        // watching, the listener as a named function (re-adding the same
+        // listener is a no-op).
+        if (typeof MutationObserver !== 'undefined' && messagesObserverTarget !== messagesContainer) {
+            if (messagesObserver) messagesObserver.disconnect();
+            messagesObserver = new MutationObserver(onMessagesMutated);
+            messagesObserver.observe(messagesContainer, { childList: true, subtree: true });
+            messagesObserverTarget = messagesContainer;
+        }
+        messagesContainer.addEventListener('load', onMessagesImageLoad, true);
 
         // Detect deliberate user scrolling
         messagesContainer.addEventListener('wheel', onUserWheel, { passive: true });
@@ -227,7 +289,7 @@
         // this write is classified as "ours" (pinned) and ignored.
         isUserScrolling = false;
         isPinned = true;
-        if (distanceFromBottom(el) > SCROLL_THRESHOLD) {
+        if (distanceFromBottom(el) > STICK_THRESHOLD) {
             el.scrollTop = el.scrollHeight;
         }
         updateButton();
