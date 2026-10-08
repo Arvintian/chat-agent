@@ -89,7 +89,44 @@ models:
 #   - persistence: whether to persist conversation context (default: false)
 #   - skill: skill configuration
 #   - hooks: session hooks configuration
+#   - cron: list of scheduled tasks (runs while the server is up)
 #   - default: whether this is the default chat preset
+#
+# cron task configuration (list items under a chat's "cron:"):
+#   A list of scheduled tasks. When a task's cron expression fires (5-field
+#   format: minute hour day-of-month month day-of-week), the task runs on a
+#   dedicated session named "cron":
+#   1. the task hook (same shape as session hooks: type script/http,
+#      scriptPath/url, timeout, env, ...) is executed first; its output MUST
+#      be a JSON object
+#   2. the task prompt is rendered as a Go template with the hook's JSON data
+#      (e.g. {{.task}}, {{.items}}; built-ins .Date/.User/.Cwd/.Home also work)
+#   3. the rendered prompt is sent to the agent as the user message to
+#      execute the scheduled task
+#   Example (script hook):
+#     cron:
+#       - expr: "* * * * *"
+#         prompt: |
+#           Execute the scheduled task: {{.task}}
+#         hook:
+#           enabled: true
+#           type: script
+#           scriptPath: ./cron-task.sh   # relative to ~/.chat-agent/hooks
+#           timeout: 30
+#   Example (http hook — session data is POSTed as a JSON request body, and
+#   the response body must be a JSON object):
+#     cron:
+#       - expr: "0 */6 * * *"
+#         prompt: |
+#           Execute the scheduled task: {{.task}}
+#         hook:
+#           enabled: true
+#           type: http
+#           url: http://localhost:9000/cron-task
+#           method: POST
+#           headers:
+#             Authorization: "Bearer your-token"
+#           timeout: 30
 #
 # tools section configuration (top-level "tools:"):
 #   A dictionary mapping tool name to tool definition. Chats reference tools by
@@ -164,6 +201,36 @@ chats:
       - Environment USER: {{env "USER"}}
       
       Please help the user with tasks in the current directory.
+
+  cron-example:
+    model: deepseek-chat
+    desc: "Chat with a scheduled task"
+    system: "You are a scheduled task executor."
+    # note: cron runs are always non-persistent, regardless of "persistence"
+    cron:
+      - expr: "0 9 * * *"   # every day at 09:00
+        prompt: |
+          Execute the scheduled task: {{.task}}
+        hook:
+          enabled: true
+          type: script
+          scriptPath: ./cron-task.sh
+          timeout: 30
+        # the hook above must print a JSON object to stdout, e.g.:
+        # {"task": "summarize today's news"}
+      - expr: "0 */6 * * *"  # every 6 hours
+        prompt: |
+          Execute the scheduled task: {{.task}}
+        hook:
+          enabled: true
+          type: http
+          url: http://localhost:9000/cron-task
+          method: POST
+          headers:
+            Authorization: "Bearer your-token"
+          timeout: 30
+        # the endpoint above must respond with a JSON object, e.g.:
+        # {"task": "check disk usage and report if over 90%"}
 
 # MCP server configuration
 # Available fields per MCP server:

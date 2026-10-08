@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -45,7 +46,19 @@ type Chat struct {
 	Tools                []string      `yaml:"tools,omitempty"`
 	Default              bool          `yaml:"default"`
 	Hooks                *SessionHooks `yaml:"hooks,omitempty"`
+	Cron                 []CronTask    `yaml:"cron,omitempty"`
 	Persistence          bool          `yaml:"persistence"`
+}
+
+// CronTask defines a scheduled task for a chat. When the cron expression
+// fires, the optional hook (script or http, same shape as session hooks) is
+// executed first; its output must be JSON. The task prompt is then rendered
+// as a Go template with the hook's JSON data and sent to the agent as the
+// user message to run the scheduled task.
+type CronTask struct {
+	Expr   string             `yaml:"expr"`
+	Prompt string             `yaml:"prompt"`
+	Hook   *SessionHookConfig `yaml:"hook,omitempty"`
 }
 
 // SessionHooks represents session-related hooks configuration
@@ -145,6 +158,22 @@ type Tool struct {
 	Params            map[string]interface{} `yaml:"params"`
 	AutoApproval      bool                   `yaml:"autoApproval"`
 	AutoApprovalTools []string               `yaml:"autoApprovalTools"`
+}
+
+// DeepCopy returns an independent deep copy of the configuration via a JSON
+// round-trip. Every field of Config is a plain value, a map or a slice of
+// such values (including map[string]any), so JSON round-tripping produces a
+// fully detached copy with no shared references.
+func (c *Config) DeepCopy() (*Config, error) {
+	data, err := json.Marshal(c)
+	if err != nil {
+		return nil, err
+	}
+	var copy Config
+	if err := json.Unmarshal(data, &copy); err != nil {
+		return nil, err
+	}
+	return &copy, nil
 }
 
 // LoadConfig loads configuration from file and saves to global variable

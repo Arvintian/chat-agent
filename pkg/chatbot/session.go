@@ -1,6 +1,7 @@
 package chatbot
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -587,6 +588,89 @@ func (s *ChatSession) OnGenModelInput(ctx context.Context, instruction string, i
 	}
 
 	return resultMessages, nil
+}
+
+// RunCronTask executes a configured cron task for this session:
+//  1. run the task hook (script or http) — its output must be JSON,
+//  2. render the task prompt as a Go template with the hook's JSON data,
+//  3. run the agent with the rendered prompt as the user message.
+func (s *ChatSession) RunCronTask(ctx context.Context, task config.CronTask, handler Handler) error {
+	data, err := s.runCronHook(ctx, task.Hook)
+	if err != nil {
+		return err
+	}
+
+	rendered, err := renderCronPrompt(task.Prompt, data)
+	if err != nil {
+		return err
+	}
+	if rendered == "" {
+		return fmt.Errorf("cron task prompt rendered empty")
+	}
+
+	cb := NewChatBot(ctx, s.Agent, s.Manager, nil, s.persistence)
+	cb.SetHandler(handler)
+	return cb.StreamChatWithHandler(ctx, rendered, nil)
+}
+
+// runCronHook executes the cron task hook (if configured) and returns its
+// output parsed as a JSON object. The hook output must be valid JSON.
+func (s *ChatSession) runCronHook(ctx context.Context, hookCfg *config.SessionHookConfig) (map[string]any, error) {
+	if hookCfg == nil {
+		return nil, nil
+	}
+
+	hm := s.hookManager
+	if hm == nil {
+		hm = hook.NewHookManager(nil)
+	}
+
+	output, err := hm.ExecuteHook(ctx, hookCfg, s.ID, s.Name, nil, "Cron hook")
+	if err != nil {
+		return nil, fmt.Errorf("cron hook failed: %w", err)
+	}
+	if len(bytes.TrimSpace(output)) == 0 {
+		return nil, nil
+	}
+
+	var data map[string]any
+	if err := json.Unmarshal(output, &data); err != nil {
+		return nil, fmt.Errorf("cron hook output is not valid JSON: %w", err)
+	}
+	return data, nil
+}
+
+// renderCronPrompt renders a cron task prompt as a Go template. Template data
+// is the JSON object returned by the task hook, merged on top of the built-in
+// variables (Date/User/Cwd/Home), so prompts can reference hook values like
+// {{.task}} or {{.items}} as well as {{.Date}}.
+func renderCronPrompt(prompt string, hookData map[string]any) (string, error) {
+	if prompt == "" {
+		return "", nil
+	}
+
+	data := map[string]any{
+		"Cwd":  getCurrentWorkingDir(),
+		"Date": time.Now().Format("2006-01-02"),
+		"User": getUserName(),
+		"Home": getHomeDir(),
+	}
+	for k, v := range hookData {
+		data[k] = v
+	}
+
+	tmpl, err := template.New("cronPrompt").Funcs(template.FuncMap{
+		"env": os.Getenv,
+	}).Parse(prompt)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse cron prompt template: %w", err)
+	}
+
+	var buf strings.Builder
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return "", fmt.Errorf("failed to execute cron prompt template: %w", err)
+	}
+	return buf.String(), nil
 }
 
 // renderSystemPrompt renders system prompt using Go template with built-in variables

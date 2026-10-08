@@ -62,11 +62,21 @@ func NewHookManager(hooksConfig *config.SessionHooks) *HookManager {
 	homeDir, _ := os.UserHomeDir()
 	baseDir := filepath.Join(homeDir, ".chat-agent", "hooks")
 
-	return &HookManager{
-		sessionKeep:   hooksConfig.Keep,
-		genModelInput: hooksConfig.GenModelInput,
-		baseDir:       baseDir,
+	hm := &HookManager{
+		baseDir: baseDir,
 	}
+	if hooksConfig != nil {
+		hm.sessionKeep = hooksConfig.Keep
+		hm.genModelInput = hooksConfig.GenModelInput
+	}
+	return hm
+}
+
+// ExecuteHook runs the given hook configuration (script or http) and returns
+// its raw output. It is shared by the session hooks and the cron tasks (whose
+// hook output must be JSON).
+func (hm *HookManager) ExecuteHook(ctx context.Context, cfg *config.SessionHookConfig, sessionID string, sessionName string, messages []*schema.Message, logPrefix string) ([]byte, error) {
+	return hm.executeHook(ctx, cfg, sessionID, sessionName, messages, logPrefix)
 }
 
 // executeHookScript executes a hook script or HTTP request with the given configuration and session data

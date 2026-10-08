@@ -19,6 +19,7 @@ import (
 
 	"github.com/Arvintian/chat-agent/pkg/chatbot"
 	"github.com/Arvintian/chat-agent/pkg/config"
+	cronsched "github.com/Arvintian/chat-agent/pkg/cron"
 	"github.com/Arvintian/chat-agent/pkg/logger"
 	"github.com/Arvintian/chat-agent/pkg/mcp"
 	"github.com/Arvintian/chat-agent/pkg/web"
@@ -247,6 +248,11 @@ Examples:
 
 		wsHandler := NewWebSocketHandler(cfg)
 
+		// Start the cron scheduler so chats with scheduled tasks run while
+		// the server is up.
+		cronScheduler := cronsched.NewScheduler(cfg)
+		cronScheduler.Start()
+
 		authMiddleware := BasicAuthMiddleware(credentials)
 
 		router := mux.NewRouter()
@@ -327,6 +333,9 @@ Examples:
 		<-sigChan
 
 		log.Printf("Shutting down server...")
+
+		// Stop the cron scheduler (stops pending jobs and closes cron sessions)
+		cronScheduler.Stop()
 
 		// Cleanup all sessions on server shutdown
 		wsHandler.sessionManager.CloseAllSessions()
