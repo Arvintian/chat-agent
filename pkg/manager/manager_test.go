@@ -488,6 +488,26 @@ func TestCompressNow_BelowAutoThreshold(t *testing.T) {
 
 // TestCompressNow_Errors verifies the error paths: no chat model, too little
 // history, and a failed summary call (empty reply with error).
+func TestRemoveLastRounds(t *testing.T) {
+	m := NewManager(10, ContextModeCompress)
+	for i := 0; i < 5; i++ {
+		m.AddMessage(context.Background(), schema.UserMessage(fmt.Sprintf("m%d", i)))
+		m.IncRound(context.Background())
+	}
+	if removed := m.RemoveLastRounds(2); removed != 2 {
+		t.Errorf("RemoveLastRounds(2) = %d, want 2", removed)
+	}
+	if removed := m.RemoveLastRounds(10); removed != 4 {
+		t.Errorf("RemoveLastRounds(10) = %d, want 4 (clamped to available rounds)", removed)
+	}
+	if msgs := m.GetMessages(); len(msgs) != 0 {
+		t.Errorf("expected empty context, got %d messages", len(msgs))
+	}
+	if removed := m.RemoveLastRounds(1); removed != 0 {
+		t.Errorf("RemoveLastRounds on empty context = %d, want 0", removed)
+	}
+}
+
 func TestCompressNow_Errors(t *testing.T) {
 	ctx := context.Background()
 

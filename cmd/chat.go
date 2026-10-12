@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -268,6 +269,28 @@ var RootCmd = &cobra.Command{
 					continue
 				}
 
+				// delete last rounds, eg: `/del` (one round) or `/del 3`
+				if input == "/del" || strings.HasPrefix(input, "/del ") {
+					n := 1
+					if arg := strings.TrimSpace(strings.TrimPrefix(input, "/del")); arg != "" {
+						var parseErr error
+						n, parseErr = strconv.Atoi(arg)
+						if parseErr != nil || n < 1 {
+							fmt.Println("Usage: /del [n] (n is a positive integer)")
+							sb.Reset()
+							continue
+						}
+					}
+					removed := session.Manager.RemoveLastRounds(n)
+					if removed == 0 {
+						fmt.Println("No message rounds to delete")
+					} else {
+						fmt.Printf("Deleted %d round(s)\n", removed)
+					}
+					sb.Reset()
+					continue
+				}
+
 				switch input {
 				case "/help", "/h":
 					printHelp()
@@ -331,6 +354,7 @@ func printHelp() {
 	fmt.Println("  /clear   or /c   - Clear conversation context")
 	fmt.Println("  /compact or /cc  - Compress conversation history into a summary")
 	fmt.Println("  /redo    or /r   - Redo last round")
+	fmt.Println("  /del [n]         - Delete last n round(s) (default 1)")
 	fmt.Println("  /keep    or /k   - Execute session keep hook")
 	fmt.Println("  /tools   or /l   - List the loaded tools")
 	fmt.Println("  /chat            - List available chats")

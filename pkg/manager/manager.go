@@ -990,6 +990,25 @@ func (m *Manager) RemoveLastRound() {
 	}
 }
 
+// RemoveLastRounds removes up to n rounds from the tail and returns the
+// number actually removed (fewer when the context holds fewer rounds).
+// It is used by the CLI /del command.
+func (m *Manager) RemoveLastRounds(n int) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	removed := 0
+	for n > 0 && len(m.messages) > 0 {
+		m.messages = m.messages[:len(m.messages)-1]
+		removed++
+		n--
+	}
+	if m.round >= len(m.messages) {
+		m.round = len(m.messages) - 1
+	}
+	return removed
+}
+
 // GetLastUserMessage returns the content of the last user message in the conversation.
 // Returns empty string if no user message is found.
 func (m *Manager) GetLastUserMessage() string {
