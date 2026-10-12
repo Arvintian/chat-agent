@@ -292,6 +292,13 @@ var RootCmd = &cobra.Command{
 					} else {
 						fmt.Println("Session keep hook executed successfully")
 					}
+				case "/compact", "/cc":
+					rounds, err := session.Manager.CompressNow(cmd.Context())
+					if err != nil {
+						fmt.Printf("Compression failed: %v\n", err)
+					} else {
+						fmt.Printf("Compressed %d rounds into a summary\n", rounds)
+					}
 				case "/history", "/i":
 					os.Stdout.WriteString(session.Manager.GetSummary())
 					fmt.Println()
@@ -322,6 +329,7 @@ func printHelp() {
 	fmt.Println("  /help    or /h   - Show this help message")
 	fmt.Println("  /history or /i   - Get conversation history")
 	fmt.Println("  /clear   or /c   - Clear conversation context")
+	fmt.Println("  /compact or /cc  - Compress conversation history into a summary")
 	fmt.Println("  /redo    or /r   - Redo last round")
 	fmt.Println("  /keep    or /k   - Execute session keep hook")
 	fmt.Println("  /tools   or /l   - List the loaded tools")

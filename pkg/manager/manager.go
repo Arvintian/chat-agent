@@ -700,12 +700,75 @@ func (m *Manager) compressIfNeeded(ctx context.Context) {
 		return
 	}
 	m.compressing = true
-	// Normalize before snapshotting: the summary model call leads with
-	// flattenRounds(oldRounds) and the persistence below leads with
-	// flattenRounds(m.messages). Both must be byte-identical to the
-	// tool-call-ordered history the runner feeds the model so the summary call
-	// hits the prompt cache and the overwrite stays canonical. Matters on the
-	// first turn after a restart, before any GetMessages has sorted in memory.
+	m.mu.Unlock()
+
+	m.performCompression(ctx, numToCompress)
+}
+
+// CompressNow forces an immediate manual compression of the oldest rounds,
+// independent of the active overflow condition (round-count threshold in
+// compress mode, token threshold in window mode). It always targets at least
+// one round — the automatic path batches (minCompressRounds) to avoid paying
+// a blocking summary call per message, but a user-requested compression is
+// explicitly worth that.
+//
+// Like the automatic path it is synchronous (the caller waits for the
+// blocking summary model call), guarded by m.compressing, and the result is
+// persisted via the compression-complete callback (full overwrite).
+//
+// It returns the number of rounds folded into the summary, or an error when
+// compression is not possible (no chat model, a compression already in
+// progress, too little history, the summary call failed, or the conversation
+// changed while the summary was in flight).
+func (m *Manager) CompressNow(ctx context.Context) (int, error) {
+	m.mu.Lock()
+	if m.chatmodel == nil {
+		m.mu.Unlock()
+		return 0, fmt.Errorf("no chat model is configured for compression")
+	}
+	if m.compressing {
+		m.mu.Unlock()
+		return 0, fmt.Errorf("a compression is already in progress")
+	}
+	if m.loading {
+		m.mu.Unlock()
+		return 0, fmt.Errorf("the context is being restored, compression is not available")
+	}
+	// Never compress the newest round; the oldest half is the manual target.
+	numToCompress := len(m.messages) / 2
+	if numToCompress > len(m.messages)-1 {
+		numToCompress = len(m.messages) - 1
+	}
+	if numToCompress < 1 {
+		m.mu.Unlock()
+		return 0, fmt.Errorf("not enough message rounds to compress")
+	}
+	m.compressing = true
+	m.mu.Unlock()
+
+	ok, applied := m.performCompression(ctx, numToCompress)
+	switch {
+	case !ok:
+		return 0, fmt.Errorf("compression failed")
+	case !applied:
+		return 0, fmt.Errorf("the conversation changed while compressing, nothing was done")
+	}
+	return numToCompress, nil
+}
+
+// performCompression runs the blocking compression of the oldest
+// numToCompress rounds. It must be called with m.compressing already set to
+// true; it clears it on return. It returns ok (the summary model call
+// succeeded) and applied (the summary was atomically swapped into the head).
+//
+// Normalize before snapshotting: the summary model call leads with
+// flattenRounds(oldRounds) and the persistence below leads with
+// flattenRounds(m.messages). Both must be byte-identical to the
+// tool-call-ordered history the runner feeds the model so the summary call
+// hits the prompt cache and the overwrite stays canonical. Matters on the
+// first turn after a restart, before any GetMessages has sorted in memory.
+func (m *Manager) performCompression(ctx context.Context, numToCompress int) (ok, applied bool) {
+	m.mu.Lock()
 	m.normalizeRoundsLocked()
 	oldRounds := m.messages[:numToCompress]
 	// Snapshot the shared system prompt under the lock; doCompression runs
@@ -730,15 +793,15 @@ func (m *Manager) compressIfNeeded(ctx context.Context) {
 	m.compressing = false
 
 	if summary == "" {
-		// Compression failed; keep the full history and retry on the next
-		// trigger (window may temporarily exceed the limit).
-		return
+		// Compression failed; the full history is kept (the automatic path
+		// retries on the next trigger).
+		return false, false
 	}
 
 	// Guard against concurrent Clear(): if the head has changed while the model
 	// call was in flight, do not apply the stale result.
 	if len(m.messages) < numToCompress || len(m.messages[0]) == 0 || len(oldRounds[0]) == 0 || m.messages[0][0] != oldRounds[0][0] {
-		return
+		return true, false
 	}
 
 	// Atomic head rewrite: drop the compressed rounds and insert the summary
@@ -749,6 +812,11 @@ func (m *Manager) compressIfNeeded(ctx context.Context) {
 	}, m.messages[numToCompress:]...)
 	m.round = len(m.messages) - 1
 
+	// The pre-compression measurement no longer describes the (smaller) context;
+	// zero it so the stale high value cannot immediately re-trigger a
+	// compression before the next model call re-measures the real size.
+	m.lastPromptTokens = 0
+
 	// Persist modified messages after compression (full overwrite)
 	if m.compressionCompleteCallback != nil {
 		allMessages := flattenRounds(m.messages)
@@ -756,6 +824,7 @@ func (m *Manager) compressIfNeeded(ctx context.Context) {
 			logger.Warn("manager", fmt.Sprintf("Failed to persist messages after compression: %v", err))
 		}
 	}
+	return true, true
 }
 
 // doCompression performs the actual compression logic.
@@ -807,7 +876,9 @@ func (m *Manager) doCompression(ctx context.Context, flatMessages []*schema.Mess
 
 	stream, err := m.chatmodel.Generate(ctx, summaryMsgs)
 	if err != nil {
-		logger.GetDefaultLogger().Errorf("Context Manager %v", err)
+		if lg := logger.GetDefaultLogger(); lg != nil {
+			lg.Errorf("Context Manager %v", err)
+		}
 		return ""
 	}
 

@@ -16,12 +16,16 @@ import (
 // Generate was called and returns a fixed summary.
 type fakeSummaryModel struct {
 	model.ToolCallingChatModel
-	generated bool
-	reply     string
+	generated   bool
+	reply       string
+	generateErr error
 }
 
 func (f *fakeSummaryModel) Generate(_ context.Context, _ []*schema.Message, _ ...model.Option) (*schema.Message, error) {
 	f.generated = true
+	if f.generateErr != nil {
+		return nil, f.generateErr
+	}
 	return &schema.Message{Role: schema.Assistant, Content: f.reply}, nil
 }
 
@@ -360,7 +364,6 @@ func TestWindowMode_OverThresholdCompressesSmallBatch(t *testing.T) {
 	}
 }
 
-
 // TestUsagePersistenceRoundTrip simulates the restart flow: usage updates are
 // persisted via the callback into a (file-backed) store, a fresh manager
 // restores the counters with SetTokenUsage, and later usage keeps accumulating
@@ -435,5 +438,81 @@ func TestWindowMode_RestoredUsageTriggersCompression(t *testing.T) {
 	m.IncRound(ctx)
 	if !fm.generated {
 		t.Fatal("expected compression of the long restored history after restart")
+	}
+}
+
+// TestCompressNow_BelowAutoThreshold verifies a manual compression runs even
+// when the automatic triggers (round count / token threshold) are not met and
+// the batch is below minCompressRounds.
+func TestCompressNow_BelowAutoThreshold(t *testing.T) {
+	m := NewManager(10, ContextModeCompress)
+	fm := &fakeSummaryModel{reply: "manual summary"}
+	m.SetChatModel(fm)
+
+	var captured []*schema.Message
+	m.SetCompressionCompleteCallback(func(msgs []*schema.Message) error {
+		captured = msgs
+		return nil
+	})
+
+	ctx := context.Background()
+	buildRounds(m, ctx, 2) // 2 completed rounds + empty current = 3
+
+	rounds, err := m.CompressNow(ctx)
+	if err != nil {
+		t.Fatalf("CompressNow failed: %v", err)
+	}
+	if rounds != 1 {
+		t.Fatalf("compressed %d rounds, want 1 (half of 3, capped at len-1)", rounds)
+	}
+	if !fm.generated {
+		t.Fatal("expected the summary model call to run")
+	}
+	msgs := m.GetMessages()
+	if msgs[0].Role != schema.Assistant || !strings.HasPrefix(msgs[0].Content, "[Previous Conversation Summary]") {
+		t.Fatalf("first message is not the summary: %+v", msgs[0])
+	}
+	if !strings.Contains(msgs[0].Content, "manual summary") {
+		t.Fatalf("summary content missing: %q", msgs[0].Content)
+	}
+	// The uncompressed tail is kept after the summary (the empty current
+	// round contributes no messages).
+	if len(msgs) != 2 || msgs[1].Content != "u1" {
+		t.Fatalf("unexpected remaining rounds: %+v", msgs)
+	}
+	// The compressed history must have been persisted (full overwrite).
+	if captured == nil || len(captured) != 2 || !strings.Contains(captured[0].Content, "manual summary") {
+		t.Fatalf("persistence not invoked correctly: %+v", captured)
+	}
+}
+
+// TestCompressNow_Errors verifies the error paths: no chat model, too little
+// history, and a failed summary call (empty reply with error).
+func TestCompressNow_Errors(t *testing.T) {
+	ctx := context.Background()
+
+	// No chat model.
+	m := NewManager(10, ContextModeCompress)
+	buildRounds(m, ctx, 3)
+	if _, err := m.CompressNow(ctx); err == nil {
+		t.Fatal("expected an error without a chat model")
+	}
+
+	// Too little history (single empty round).
+	m2 := NewManager(10, ContextModeCompress)
+	m2.SetChatModel(&fakeSummaryModel{reply: "s"})
+	if _, err := m2.CompressNow(ctx); err == nil {
+		t.Fatal("expected an error with nothing to compress")
+	}
+
+	// Failed summary call: the full history is kept.
+	m3 := NewManager(10, ContextModeCompress)
+	m3.SetChatModel(&fakeSummaryModel{generateErr: errors.New("model unavailable")})
+	buildRounds(m3, ctx, 4)
+	if _, err := m3.CompressNow(ctx); err == nil {
+		t.Fatal("expected an error when the summary call fails")
+	}
+	if n := len(m3.GetMessages()); n != 4 {
+		t.Fatalf("history changed after a failed compression: %d rounds", n)
 	}
 }
