@@ -1654,8 +1654,12 @@ function connectWebSocket() {
             const delay = Math.min(reconnectBaseDelay * Math.pow(2, reconnectAttempts), reconnectMaxDelay);
             const attemptNum = reconnectAttempts + 1;
             console.log(`Reconnecting in ${delay}ms (attempt ${attemptNum}/${maxReconnectAttempts})`);
-            // Show reconnecting status to user
-            setStatus(`Reconnecting... (${attemptNum}/${maxReconnectAttempts})`, false);
+            // Only show the reconnecting toast starting from the 3rd attempt:
+            // the first two quick retries (e.g. after laptop sleep/wake)
+            // succeed silently, so the user never sees the toast at all.
+            if (reconnectAttempts > 1) {
+                setStatus(`Reconnecting... (${attemptNum}/${maxReconnectAttempts})`, false);
+            }
             reconnectAttempts++;
             setTimeout(connectWebSocket, delay);
         } else {
