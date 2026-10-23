@@ -103,15 +103,16 @@ type Provider struct {
 // ModelParams holds the common parameters for a model configuration.
 // It is used both as the top-level Model and as entries inside Mixed.
 type ModelParams struct {
-	Provider        string         `yaml:"provider"`
-	Model           string         `yaml:"model"`
-	Thinking        bool           `yaml:"thinking"`
-	ReasoningEffort *string        `yaml:"reasoningEffort"`
-	MaxTokens       int            `yaml:"maxTokens,omitempty"`
-	Temperature     float64        `yaml:"temperature,omitempty"`
-	TopP            float64        `yaml:"topP,omitempty"`
-	TopK            int            `yaml:"topK,omitempty"`
-	ExtraBody       map[string]any `yaml:"extraBody"`
+	Provider         string         `yaml:"provider"`
+	Model            string         `yaml:"model"`
+	Thinking         bool           `yaml:"thinking"`
+	ReasoningEffort  *string        `yaml:"reasoningEffort"`
+	MaxTokens        int            `yaml:"maxTokens,omitempty"`
+	MaxContextTokens int            `yaml:"maxContextTokens,omitempty"` // model context window size in tokens (fallback for window mode)
+	Temperature      float64        `yaml:"temperature,omitempty"`
+	TopP             float64        `yaml:"topP,omitempty"`
+	TopK             int            `yaml:"topK,omitempty"`
+	ExtraBody        map[string]any `yaml:"extraBody"`
 }
 
 // Model represents AI model configuration
@@ -124,6 +125,23 @@ type Model struct {
 type MixedModel struct {
 	ModelParams `yaml:",inline"`
 	Weight      int `yaml:"weight,omitempty"` // weight for weighted random selection (default: 1)
+}
+
+// ContextSize returns the context window size in tokens declared by this
+// model configuration. It is used as a fallback for a chat's
+// maxContextTokens (window mode) when the chat does not set its own value.
+// For a mixed model the smallest configured window across the entries (and
+// the top-level params) is returned, so window-mode overflow is handled
+// conservatively for every candidate model. Returns 0 when no context size
+// is configured anywhere.
+func (m Model) ContextSize() int {
+	size := m.MaxContextTokens
+	for _, mixed := range m.Mixed {
+		if mixed.MaxContextTokens > 0 && (size <= 0 || mixed.MaxContextTokens < size) {
+			size = mixed.MaxContextTokens
+		}
+	}
+	return size
 }
 
 // MCPServer represents MCP server configuration

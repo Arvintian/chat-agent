@@ -73,6 +73,21 @@ func InitChatSession(ctx context.Context, cfg *config.Config, chatName string, s
 		return nil, fmt.Errorf("chat preset does not exist: %s", chatName)
 	}
 
+	// Resolve the context window size used by window mode: the chat-level
+	// maxContextTokens takes priority, falling back to the context size
+	// declared on the model configuration. Window mode cannot measure
+	// overflow against an unknown window, so fail fast when no value is
+	// available.
+	windowSize := preset.MaxContextTokens
+	if windowSize <= 0 {
+		if modelCfg, ok := cfg.Models[preset.Model]; ok {
+			windowSize = modelCfg.ContextSize()
+		}
+	}
+	if preset.ContextMode == manager.ContextModeWindow && windowSize <= 0 {
+		return nil, fmt.Errorf("chat %s uses contextMode %q but maxContextTokens is not configured on the chat or its model %s", chatName, manager.ContextModeWindow, preset.Model)
+	}
+
 	// Create session-level cleanup registry
 	cleanupRegistry := NewCleanupRegistry()
 
@@ -316,8 +331,9 @@ func InitChatSession(ctx context.Context, cfg *config.Config, chatName string, s
 	// Configure the token-based (window) overflow mode: the manager tracks
 	// the prompt tokens the model reports for each call and compresses when
 	// the context approaches the model's window (active only with
-	// contextMode "window").
-	manager.SetContextWindow(preset.MaxContextTokens, preset.ContextCompressRatio)
+	// contextMode "window"). windowSize is resolved (and validated for
+	// window mode) at the start of session init.
+	manager.SetContextWindow(windowSize, preset.ContextCompressRatio)
 
 	// Only setup persistence callbacks and load messages if persistence is enabled
 	if contextPersistenceEnabled {

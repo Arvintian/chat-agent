@@ -27,6 +27,10 @@ providers:
 #      provider: <provider-name>
 #      model: <model-id>
 #      thinking: true/false
+#      maxContextTokens: <context window size in tokens> (optional; used as
+#      the window-mode fallback when the chat preset does not set its own
+#      maxContextTokens. For mixed models, the smallest configured value
+#      across entries is used)
 # 2. Mixed (weighted) - list multiple sub-models to select between them
 #    on each generation call. Supports optional weight field for weighted
 #    random selection. When weights are equal (or omitted), uses round-robin.
@@ -79,7 +83,9 @@ models:
 #       the oldest rounds are summarized (like compress). Use this for models
 #       with large windows where a single verbose round (e.g. big tool output)
 #       can exhaust the context. Requires maxContextTokens to be set.
-#   - maxContextTokens: model context window size in tokens (window mode)
+#   - maxContextTokens: model context window size in tokens (window mode);
+#     if not set, the value declared on the referenced model configuration
+#     (models.<name>.maxContextTokens) is used
 #   - contextCompressRatio: fraction of the window that triggers compression
 #     (window mode, default: 0.8)
 #   - maxIterations: maximum iterations for tool calling (default: 20)

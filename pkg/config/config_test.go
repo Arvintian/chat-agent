@@ -24,6 +24,7 @@ func TestSnakeToCamel(t *testing.T) {
 		{"top_p", "topP"},
 		{"top_k", "topK"},
 		{"max_message_rounds", "maxMessageRounds"},
+		{"max_context_tokens", "maxContextTokens"},
 		{"context_mode", "contextMode"},
 		{"max_iterations", "maxIterations"},
 		{"max_retries", "maxRetries"},
