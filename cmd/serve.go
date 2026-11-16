@@ -215,7 +215,8 @@ Each client connection can select a chat and start independent conversation sess
 Examples:
   chat-agent serve --port 8080
   chat-agent serve --port 8080 --basic-auth "alice:pwd1,bob:pwd2"
-  chat-agent serve --port 8080 --basic-auth-file /etc/chat-agent/users`,
+  chat-agent serve --port 8080 --basic-auth-file /etc/chat-agent/users
+  chat-agent serve --port 8080 --network tcp6`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := logger.Init(); err != nil {
 			return err
@@ -227,6 +228,7 @@ Examples:
 
 		port, _ := cmd.Flags().GetInt("port")
 		host, _ := cmd.Flags().GetString("host")
+		network, _ := cmd.Flags().GetString("network")
 		welcome, _ := cmd.Flags().GetString("welcome")
 		basicAuth, _ := cmd.Flags().GetString("basic-auth")
 		basicAuthFile, _ := cmd.Flags().GetString("basic-auth-file")
@@ -313,9 +315,17 @@ Examples:
 		router.PathPrefix("/").Handler(web.StaticHandler())
 
 		addr := fmt.Sprintf("%s:%d", host, port)
-		log.Printf("Starting chat-agent web server on %s", addr)
+		if network != "tcp" && network != "tcp4" && network != "tcp6" {
+			return fmt.Errorf("invalid network %q: must be tcp, tcp4 or tcp6", network)
+		}
+		log.Printf("Starting chat-agent web server on %s (network: %s)", addr, network)
 		log.Printf("WebSocket endpoint: ws://%s/ws", addr)
 		log.Printf("HTTP endpoint: http://%s/", addr)
+
+		ln, err := net.Listen(network, addr)
+		if err != nil {
+			return fmt.Errorf("failed to listen on %s %s: %w", network, addr, err)
+		}
 
 		server := &http.Server{
 			Addr:    addr,
@@ -323,7 +333,7 @@ Examples:
 		}
 
 		go func() {
-			if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			if err := server.Serve(ln); err != nil && err != http.ErrServerClosed {
 				log.Printf("Server error: %v", err)
 			}
 		}()
@@ -1128,6 +1138,7 @@ func init() {
 	// Add serve command
 	serveCmd.Flags().StringP("host", "", "0.0.0.0", "Host to listen on")
 	serveCmd.Flags().IntP("port", "", 8080, "Port to listen on")
+	serveCmd.Flags().StringP("network", "", "tcp", "Network to listen on: tcp, tcp4 or tcp6")
 	serveCmd.Flags().StringP("basic-auth", "", "", "Basic auth credentials as comma-separated user:pass pairs (e.g., \"alice:pwd1,bob:pwd2\")")
 	serveCmd.Flags().StringP("basic-auth-file", "", "", "Path to a file containing user:password pairs (one per line, # for comments)")
 
