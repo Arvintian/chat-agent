@@ -159,6 +159,7 @@ models:
 #       env:
 #         http_proxy: http://127.0.0.1:7890
 #         https_proxy: http://127.0.0.1:7890
+# Chat list in the serve web UI (/chats) follows the order defined here.
 chats:
   default:
     model: deepseek-chat

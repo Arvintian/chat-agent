@@ -279,8 +279,24 @@ Examples:
 					defaultChat = name
 				}
 			}
-			// Sort by chat name
-			sort.Slice(chats, func(i, j int) bool {
+			// Order chats by their appearance in the config file (captured
+			// during YAML parsing into cfg.ChatOrder). Names missing from the
+			// captured order fall back to lexicographic order.
+			orderPos := make(map[string]int, len(cfg.ChatOrder))
+			for i, name := range cfg.ChatOrder {
+				orderPos[name] = i
+			}
+			sort.SliceStable(chats, func(i, j int) bool {
+				pi, oki := orderPos[chats[i].Name]
+				pj, okj := orderPos[chats[j].Name]
+				switch {
+				case oki && okj:
+					return pi < pj
+				case oki:
+					return true
+				case okj:
+					return false
+				}
 				return chats[i].Name < chats[j].Name
 			})
 

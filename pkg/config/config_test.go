@@ -581,3 +581,44 @@ func TestResolveSystemPrompt(t *testing.T) {
 		t.Errorf("ResolveSystemPrompt(@file:) = %q, want %q", got, content)
 	}
 }
+
+func TestChatOrderPreserved(t *testing.T) {
+	content := `
+chats:
+  zeta:
+    model: m1
+  alpha:
+    model: m1
+  mid:
+    model: m1
+models:
+  m1:
+    model: x
+`
+	var cfg Config
+	if err := yaml.Unmarshal([]byte(content), &cfg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []string{"zeta", "alpha", "mid"}
+	if len(cfg.ChatOrder) != len(want) {
+		t.Fatalf("ChatOrder = %v, want %v", cfg.ChatOrder, want)
+	}
+	for i, name := range want {
+		if cfg.ChatOrder[i] != name {
+			t.Errorf("ChatOrder[%d] = %q, want %q", i, cfg.ChatOrder[i], name)
+		}
+	}
+	// Map content itself must still be fully parsed.
+	if len(cfg.Chats) != 3 {
+		t.Errorf("Chats has %d entries, want 3", len(cfg.Chats))
+	}
+
+	// No chats section: ChatOrder stays nil.
+	var cfg2 Config
+	if err := yaml.Unmarshal([]byte("models: {}\n"), &cfg2); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg2.ChatOrder != nil {
+		t.Errorf("ChatOrder = %v, want nil", cfg2.ChatOrder)
+	}
+}

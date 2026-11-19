@@ -20,14 +20,54 @@ type Config struct {
 	MCPServers    map[string]MCPServer `yaml:"mcpServers,omitempty"`
 	Tools         map[string]Tool      `yaml:"tools,omitempty"`
 	SystemPrompts map[string]string    `yaml:"systemPrompts,omitempty"`
+	// ChatOrder records the chat names in the order they appear in the config
+	// file. YAML mapping nodes preserve document order in their node tree, but
+	// that order is lost once decoded into the Chats map, so it is captured
+	// here during unmarshaling. Populated only when loaded from YAML.
+	ChatOrder []string `yaml:"-"`
 }
 
 // UnmarshalYAML implements custom YAML unmarshaling for backward compatibility.
 // It normalizes snake_case keys to camelCase so both styles are accepted.
 func (c *Config) UnmarshalYAML(value *yaml.Node) error {
 	normalizeNodeKeys(value)
+	c.ChatOrder = recordChatOrder(value)
 	type plain Config
 	return value.Decode((*plain)(c))
+}
+
+// recordChatOrder extracts the chat names from the top-level "chats" mapping
+// in the order they appear in the YAML document. yaml.v3 keeps mapping pairs
+// in document order within a yaml.Node, which makes it the only point where
+// the author's ordering is still observable. Returns nil when the node is not
+// a mapping or contains no "chats" mapping.
+func recordChatOrder(node *yaml.Node) []string {
+	if node == nil {
+		return nil
+	}
+	mapping := node
+	if node.Kind == yaml.DocumentNode && len(node.Content) > 0 {
+		mapping = node.Content[0]
+	}
+	if mapping.Kind != yaml.MappingNode {
+		return nil
+	}
+	var order []string
+	for i := 0; i < len(mapping.Content); i += 2 {
+		key := mapping.Content[i]
+		val := mapping.Content[i+1]
+		if key.Kind != yaml.ScalarNode || key.Value != "chats" || val.Kind != yaml.MappingNode {
+			continue
+		}
+		order = make([]string, 0, len(val.Content)/2)
+		for j := 0; j < len(val.Content); j += 2 {
+			if keyNode := val.Content[j]; keyNode.Kind == yaml.ScalarNode {
+				order = append(order, keyNode.Value)
+			}
+		}
+		break
+	}
+	return order
 }
 
 type Chat struct {
