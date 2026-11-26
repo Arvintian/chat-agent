@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -14,20 +15,63 @@ import (
 
 // toolFiltered checks whether a tool should be filtered based on include/exclude lists.
 // Returns true if the tool should be kept, false if it should be filtered out.
+//
+// List entries support exact names and regular expressions. A regular
+// expression is recognized when the entry is prefixed with "re:" or wrapped
+// in slashes, e.g. "re:^search_.*" or "/^search_.*/". All other entries are
+// matched as exact tool names.
 func toolFiltered(toolName string, include, exclude []string) bool {
 	// If include list is non-empty, only keep tools in the include list
 	if len(include) > 0 {
-		if !slices.Contains(include, toolName) {
+		if !anyPatternMatches(include, toolName) {
 			return false
 		}
 	}
 	// If exclude list is non-empty, remove tools in the exclude list
 	if len(exclude) > 0 {
-		if slices.Contains(exclude, toolName) {
+		if anyPatternMatches(exclude, toolName) {
 			return false
 		}
 	}
 	return true
+}
+
+// anyPatternMatches reports whether name matches any entry in patterns.
+// Entries prefixed with "re:" or wrapped in "/" are treated as regular
+// expressions; all other entries are compared as exact names.
+func anyPatternMatches(patterns []string, name string) bool {
+	for _, p := range patterns {
+		if p == name {
+			return true
+		}
+		re, ok := parsePattern(p)
+		if ok && re.MatchString(name) {
+			return true
+		}
+	}
+	return false
+}
+
+// parsePattern returns the compiled regular expression for a pattern entry,
+// or (nil, false) if the entry is not a regular expression. Patterns are
+// recognized as regular expressions when prefixed with "re:" or wrapped in
+// slashes, e.g. "re:^search_.*" or "/^search_.*/".
+func parsePattern(pattern string) (*regexp.Regexp, bool) {
+	var body string
+	switch {
+	case strings.HasPrefix(pattern, "re:"):
+		body = strings.TrimPrefix(pattern, "re:")
+	case strings.HasPrefix(pattern, "/") && strings.HasSuffix(pattern, "/") && len(pattern) > 2:
+		body = strings.TrimPrefix(strings.TrimSuffix(pattern, "/"), "/")
+	default:
+		return nil, false
+	}
+	re, err := regexp.Compile(body)
+	if err != nil {
+		// Invalid regular expressions fall back to exact-name comparison.
+		return nil, false
+	}
+	return re, true
 }
 
 // discoverTools discovers tools from MCP servers

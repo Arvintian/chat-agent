@@ -251,6 +251,9 @@ chats:
 #   - autoApprovalTools: list of specific tool names to auto-approve
 #   - include: list of tool names to include (if set, only these tools are enabled)
 #   - exclude: list of tool names to exclude (if set, these tools are removed)
+#     include/exclude entries may be exact tool names or regular expressions.
+#     A regular expression is recognized with an "re:" prefix or "/" wrapping,
+#     e.g. "re:^search_.*" or "/^search_.*/".
 #   - noConcurrent: boolean, if true all tools from this server are serialized (mutex per server)
 #   - noConcurrentTools: list of tool names that should NOT be called concurrently
 #     (use this for tools that don't support parallel calls, each tool gets its own mutex)
